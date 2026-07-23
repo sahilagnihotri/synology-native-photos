@@ -43,9 +43,23 @@ version_ge() {
 }
 
 # Repo root regardless of where the script is invoked from.
+# Prefers git; falls back to walking up from this library's own location.
+# Must be robust under both bash and zsh (BASH_SOURCE may be unset in zsh).
 repo_root() {
-  git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null \
-    || cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
+  local here root
+  # This file's directory: use BASH_SOURCE under bash, else the caller's PWD.
+  if [ -n "${BASH_SOURCE:-}" ]; then
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  else
+    here="$PWD"
+  fi
+  root="$(git -C "$here" rev-parse --show-toplevel 2>/dev/null)"
+  if [ -n "$root" ]; then
+    printf '%s\n' "$root"
+  else
+    # Fallback: this lib lives at <root>/scripts/lib/common.sh
+    ( cd "$here/../.." && pwd )
+  fi
 }
 
 # Load cargo env into the current shell if present (rustup installs here).

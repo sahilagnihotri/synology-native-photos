@@ -114,18 +114,19 @@ check_uniffi() {
     check_fail "cargo missing; cannot use project-driven uniffi-bindgen"
     return
   fi
-  local root bin_manifest
+  local root
   root="$(repo_root)"
-  bin_manifest="$root/core/uniffi-bindgen/Cargo.toml"
-  if [ -f "$bin_manifest" ]; then
-    if cargo run --quiet --manifest-path "$bin_manifest" -- --help >/dev/null 2>&1; then
-      check_pass "project uniffi-bindgen runs (cargo run --manifest-path core/uniffi-bindgen/Cargo.toml)"
+  # The bindgen bin lives inside the photoscore crate as a [[bin]] target,
+  # invoked as `cargo run -p photoscore --bin uniffi-bindgen`.
+  if [ -f "$root/core/photoscore/src/bin/uniffi-bindgen.rs" ]; then
+    if ( cd "$root/core" && cargo run --quiet -p photoscore --bin uniffi-bindgen -- --help >/dev/null 2>&1 ); then
+      check_pass "project uniffi-bindgen runs (cargo run -p photoscore --bin uniffi-bindgen)"
     else
-      check_fail "project uniffi-bindgen present but failed to run"
+      check_fail "photoscore uniffi-bindgen bin present but failed to run"
     fi
   else
     # Core not scaffolded yet: this is expected before the first plan task.
-    check_pass "no core/ bindgen yet (created by the plan's scaffold task; nothing to install globally)"
+    check_pass "no photoscore bindgen yet (created by the plan's scaffold task; nothing to install globally)"
   fi
 }
 
