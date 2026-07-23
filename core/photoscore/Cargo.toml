@@ -4,6 +4,10 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 
+[lib]
+crate-type = ["staticlib", "cdylib", "lib"]
+name = "photoscore"
+
 [dependencies]
 models = { path = "../models" }
 synology-api = { path = "../synology-api" }
@@ -11,3 +15,9 @@ persistence = { path = "../persistence" }
 sync-engine = { path = "../sync-engine" }
 thiserror.workspace = true
 tracing.workspace = true
+uniffi = { version = "0.28", features = ["tokio", "cli"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
