@@ -3,10 +3,13 @@
 mod albums;
 mod assets;
 mod schema;
+mod sync_state;
 
 use models::CoreError;
 use rusqlite::Connection;
 use std::path::Path;
+
+pub use sync_state::SyncStateRow;
 
 /// Facade over a single SQLite connection holding the local mirror of NAS state.
 pub struct Store {
