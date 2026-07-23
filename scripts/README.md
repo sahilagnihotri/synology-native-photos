@@ -15,9 +15,11 @@ pwsh scripts/setup/windows.ps1 -Verify    # doctor mode
 ```
 
 What macOS setup covers (idempotent, safe to re-run):
-- Rust toolchain via rustup + `aarch64-apple-darwin` target.
+- Homebrew is the preferred installer on macOS. Setup verifies brew is present and uses it; if brew is missing it falls back to direct installers.
+- Rust via `brew install rustup` (the toolchain manager, not `brew install rust`, which conflicts with rustup on PATH and cannot add cross-targets), then `rustup` adds the `aarch64-apple-darwin` target. Falls back to the official rustup-init installer when brew is absent.
 - Project-driven UniFFI bindgen prerequisites (no fragile global install; bindgen runs via `cargo run` inside the core crate once scaffolded).
 - Verifies Xcode 26+ and Swift 6.3+ (does not install Xcode; that comes from the App Store).
+- Optional dev tools via brew (`xcpretty` for readable test output; `test.sh` uses it if present).
 - `--verify` doctor mode prints a green/red report and exits non-zero on any failure.
 
 ## Test

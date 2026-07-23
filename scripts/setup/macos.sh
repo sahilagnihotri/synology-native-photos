@@ -57,6 +57,11 @@ check_xcode() {
 }
 
 # --- 2. Rust toolchain -----------------------------------------------------
+# Prefer Homebrew on macOS: install rustup via brew, then let rustup manage the
+# toolchain and targets. We deliberately install `rustup` (the manager), NOT
+# `brew install rust`, because a brew-managed rust conflicts with rustup on PATH
+# and cannot add cross-compilation targets. If brew is absent, fall back to the
+# official rustup-init installer.
 ensure_rust() {
   step "Rust toolchain"
   load_cargo_env
@@ -65,7 +70,16 @@ ensure_rust() {
   elif [ "$VERIFY_ONLY" -eq 1 ]; then
     check_fail "Rust not installed. Run scripts/setup/macos.sh (without --verify) to install."
     return
+  elif have brew; then
+    info "Installing rustup via Homebrew..."
+    brew list rustup >/dev/null 2>&1 || brew install rustup
+    # brew's rustup is keg-only; initialize the default toolchain.
+    rustup default stable 2>/dev/null || rustup-init -y --default-toolchain stable --no-modify-path
+    load_cargo_env
+    have rustc && check_pass "rustc $(rustc --version | awk '{print $2}') installed (via brew rustup)" \
+      || check_fail "rustup installed but rustc not on PATH; ensure ~/.cargo/bin is in PATH"
   else
+    warn "Homebrew not found; falling back to the official rustup installer."
     info "Installing Rust via rustup (stable)..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile default
@@ -115,6 +129,38 @@ check_uniffi() {
   fi
 }
 
+# --- 0. Homebrew -----------------------------------------------------------
+# Preferred macOS package manager. We do not auto-install brew (its installer
+# is interactive and changes system paths); we verify it and guide if missing.
+check_brew() {
+  step "Homebrew"
+  if have brew; then
+    check_pass "brew $(brew --version | head -1 | awk '{print $2}')"
+  else
+    warn "Homebrew not found. Install from https://brew.sh, or the script will fall back to direct installers."
+    # Not a hard failure: the Rust step falls back to rustup-init without brew.
+  fi
+}
+
+# --- 4. Optional dev tools (via brew) --------------------------------------
+# xcpretty makes `xcodebuild test` output readable; test.sh uses it if present.
+ensure_dev_tools() {
+  step "Dev tools (optional)"
+  if ! have brew; then
+    check_pass "skipped (no brew); optional tools not required"
+    return
+  fi
+  if have xcpretty; then
+    check_pass "xcpretty present"
+  elif [ "$VERIFY_ONLY" -eq 1 ]; then
+    warn "xcpretty not installed (optional; nicer test output). Run setup without --verify to add it."
+  else
+    info "Installing xcpretty via brew..."
+    brew list xcpretty >/dev/null 2>&1 || brew install xcpretty
+    have xcpretty && check_pass "xcpretty installed" || warn "xcpretty install skipped"
+  fi
+}
+
 # --- run -------------------------------------------------------------------
 if [ "$VERIFY_ONLY" -eq 1 ]; then
   info "Doctor mode: verifying environment (no installs)."
@@ -123,10 +169,14 @@ else
 fi
 echo
 
+check_brew
+echo
 check_xcode
 echo
 ensure_rust
 echo
 check_uniffi
+echo
+ensure_dev_tools
 
 verify_summary
