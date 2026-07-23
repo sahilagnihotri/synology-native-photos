@@ -1,0 +1,62 @@
+name: SynologyPhotos
+options:
+  bundleIdPrefix: com.sahil.synologyphotos
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: YES
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    OTHER_LDFLAGS: ["-lc++"]
+targets:
+  SynologyPhotos:
+    type: application
+    platform: macOS
+    sources:
+      - path: SynologyPhotos
+      - path: ../bindings/PhotosCore.swift
+        group: Generated
+    dependencies:
+      - framework: ../PhotosCore.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sahil.synologyphotos
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        ENABLE_HARDENED_RUNTIME: YES
+  SynologyPhotosTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: SynologyPhotosTests
+    dependencies:
+      - target: SynologyPhotos
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+  SynologyPhotosUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: SynologyPhotosUITests
+    dependencies:
+      - target: SynologyPhotos
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  SynologyPhotos:
+    build:
+      targets:
+        SynologyPhotos: all
+        SynologyPhotosTests: [test]
+        SynologyPhotosUITests: [test]
+    test:
+      targets:
+        - SynologyPhotosTests
+        - SynologyPhotosUITests
