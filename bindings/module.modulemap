@@ -1,0 +1,4 @@
+module PhotosCoreFFI {
+    header "PhotosCoreFFI.h"
+    export *
+}
