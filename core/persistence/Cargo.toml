@@ -1,0 +1,11 @@
+[package]
+name = "persistence"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+models = { path = "../models" }
+thiserror.workspace = true
+rusqlite.workspace = true
+tracing.workspace = true

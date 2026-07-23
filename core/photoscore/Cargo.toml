@@ -1,0 +1,13 @@
+[package]
+name = "photoscore"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+models = { path = "../models" }
+synology-api = { path = "../synology-api" }
+persistence = { path = "../persistence" }
+sync-engine = { path = "../sync-engine" }
+thiserror.workspace = true
+tracing.workspace = true
