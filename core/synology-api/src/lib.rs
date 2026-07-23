@@ -7,4 +7,5 @@ pub mod browse;
 pub mod envelope;
 pub mod info;
 pub mod namespace;
+pub mod thumbnail;
 pub mod transport;
