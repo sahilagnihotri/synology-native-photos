@@ -1,5 +1,6 @@
 //! SQLite persistence via rusqlite: migrations and windowed queries.
 
+mod albums;
 mod assets;
 mod schema;
 
