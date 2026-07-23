@@ -146,6 +146,93 @@ async fn list_albums_parses_albums() {
 }
 
 #[tokio::test]
+async fn one_malformed_item_is_skipped_others_still_decode() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":201,"filename":"good1.jpg","type":"photo",
+             "additional":{"thumbnail":{"cache_key":"CK201"}}},
+            {"identifier":"not-an-id","filename":"bad-missing-id.jpg",
+             "additional":{"thumbnail":{"cache_key":"CKBAD"}}},
+            {"id":202,"filename":"bad-missing-cache-key.jpg","type":"photo"},
+            {"id":203,"filename":"good2.jpg","type":"video",
+             "additional":{"thumbnail":{"cache_key":"CK203"}}}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1).await.expect("list ok despite bad items");
+    // Only the two well-formed items with both id and cache_key survive;
+    // the item with no `id` field at all and the item missing cache_key
+    // are both skipped without failing the whole call.
+    assert_eq!(assets.len(), 2);
+    assert_eq!(assets[0].id, 201);
+    assert_eq!(assets[0].cache_key, "CK201");
+    assert_eq!(assets[1].id, 203);
+    assert_eq!(assets[1].cache_key, "CK203");
+}
+
+#[tokio::test]
+async fn item_missing_optional_filename_still_produces_usable_asset() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":301,"type":"photo",
+             "additional":{"thumbnail":{"cache_key":"CK301"}}}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1)
+        .await
+        .expect("list ok even though filename and time are absent");
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0].id, 301);
+    assert_eq!(assets[0].cache_key, "CK301");
+    // filename defaults to the id rather than the item being dropped.
+    assert_eq!(assets[0].filename, "301");
+    // time is optional and simply absent, not a decode failure.
+    assert_eq!(assets[0].taken_at, None);
+}
+
+#[tokio::test]
+async fn one_malformed_album_is_skipped_others_still_decode() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":10,"name":"Good Album","item_count":3},
+            {"identifier":"not-an-id","name":"Bad Album"},
+            {"id":11,"item_count":7}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let albums = list_albums(&t, "SID", Space::Personal, 0, 100, 1).await.expect("albums ok despite bad entry");
+    // The album with no `id` is skipped; both albums with an id survive,
+    // including the one missing the optional `name`.
+    assert_eq!(albums.len(), 2);
+    assert_eq!(albums[0].id, 10);
+    assert_eq!(albums[0].name, "Good Album");
+    assert_eq!(albums[1].id, 11);
+    assert_eq!(albums[1].name, "11");
+}
+
+#[tokio::test]
 async fn list_albums_sends_offset_and_limit() {
     let mut server = mockito::Server::new_async().await;
     let _m = server
