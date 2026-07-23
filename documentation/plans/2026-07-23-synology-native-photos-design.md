@@ -25,8 +25,11 @@ The user is migrating off iCloud and will increasingly rely on the NAS. This app
 - Search & filter: by date, filename, metadata. People/faces search is included *if* the API exposes it; if it does not, it is surfaced as a documented known limitation (not silently dropped).
 - Favorites / ratings: metadata-only writes, re-read after write.
 - Non-destructive editing: crop/adjust, original immutable, edited copy uploaded as a new asset.
+- Account sign out / switch: one account at a time, but painless account switching (clean session teardown, SID cleared from Keychain, per-account local cache archived/cleared, return to login) with no reinstall. Not a full multi-account manager.
+- Personal / Shared space toggle: within the signed-in account, switch the active view between Personal Space (`SYNO.Foto.*`) and Shared Space (`SYNO.FotoTeam.*`). First-class in the core: the API client and sync engine take a `space` parameter and each local asset row records its space; the grid re-queries by space. Built in from the start (touches DB schema and API layer).
 
 ### Explicitly deferred (future, separate work)
+- Multi-account manager (storing several logins and switching without re-auth) and multi-NAS support — a future extension of the sign-out/switch foundation.
 - QuickConnect / DDNS remote access (LAN + Tailscale first).
 - Windows / Linux / iOS UI (the Rust core is built to allow it).
 - Any iCloud / Mac Photos library integration.
