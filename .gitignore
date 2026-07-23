@@ -1,1 +1,26 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# UniFFI / build artifacts (bindings/ is committed on purpose, not ignored)
+/PhotosCore.xcframework
+/build
+
+# Xcode
+app/DerivedData/
+app/**/xcuserdata/
+app/**/*.xcuserstate
+*.xcuserstate
+**/xcuserdata/
+DerivedData/
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# SDD scratch (subagent-driven-development ledger and briefs)
 .superpowers/
