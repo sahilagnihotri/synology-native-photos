@@ -119,6 +119,44 @@ impl Store {
         Ok(n as u64)
     }
 
+    /// Deletes every local row in `space` whose `server_id` is not in
+    /// `keep_ids`. Used by delta reconciliation to mirror server-side
+    /// deletions: after paging the *entire* current server listing for a
+    /// space, any local row absent from that listing is stale and is removed
+    /// so the local mirror matches server reality. This only ever removes
+    /// local rows; it never talks to the NAS and never deletes anything
+    /// server-side.
+    pub fn delete_assets_not_in(&self, space: Space, keep_ids: &[i64]) -> Result<u64, CoreError> {
+        self.conn.execute_batch("BEGIN").map_err(map_sql)?;
+        let placeholders: Vec<String> = (0..keep_ids.len()).map(|i| format!("?{}", i + 2)).collect();
+        let sql = format!(
+            "DELETE FROM assets WHERE space = ?1 AND server_id NOT IN ({})",
+            placeholders.join(",")
+        );
+        let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(keep_ids.len() + 1);
+        let space_param = space_to_int(space);
+        params_vec.push(&space_param);
+        for id in keep_ids {
+            params_vec.push(id);
+        }
+        let deleted = if keep_ids.is_empty() {
+            // No placeholders to bind: everything in the space is stale.
+            self.conn
+                .execute("DELETE FROM assets WHERE space = ?1", params![space_to_int(space)])
+        } else {
+            self.conn.execute(&sql, params_vec.as_slice())
+        };
+        let deleted = match deleted {
+            Ok(n) => n,
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                return Err(map_sql(e));
+            }
+        };
+        self.conn.execute_batch("COMMIT").map_err(map_sql)?;
+        Ok(deleted as u64)
+    }
+
     /// Returns a window of assets for `space`, newest-first by `taken_at` with
     /// `server_id` as a tiebreak (NULLs last). The ORDER BY matches
     /// `idx_assets_space_taken` exactly, so this stays an index-only scan as the
@@ -313,6 +351,35 @@ mod tests {
         let shared = store.fetch_assets(Space::Shared, 0, 100).unwrap();
         assert_eq!(shared.len(), 2);
         assert!(shared.iter().all(|a| a.space == Space::Shared));
+    }
+
+    #[test]
+    fn delete_assets_not_in_removes_only_stale_rows_in_space() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 2, Some(200), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 3, Some(300), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Shared, 9, Some(999), Some(1))).unwrap();
+
+        let deleted = store.delete_assets_not_in(Space::Personal, &[1, 3]).unwrap();
+        assert_eq!(deleted, 1);
+
+        let ids: Vec<i64> = store.fetch_assets(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
+        assert_eq!(ids, vec![3, 1]);
+        // Shared space untouched by a Personal-space sweep.
+        assert_eq!(store.asset_count(Space::Shared).unwrap(), 1);
+    }
+
+    #[test]
+    fn delete_assets_not_in_with_empty_keep_list_clears_the_space() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Shared, 2, Some(200), Some(1))).unwrap();
+
+        let deleted = store.delete_assets_not_in(Space::Personal, &[]).unwrap();
+        assert_eq!(deleted, 1);
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
+        assert_eq!(store.asset_count(Space::Shared).unwrap(), 1);
     }
 
     #[test]
