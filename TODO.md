@@ -1,48 +1,38 @@
 # TODO — synology-native-photos
 
-Ordered top to bottom. Work through in sequence; parallelize sub-steps with sub-agents where independent.
+Ordered top to bottom. Execution is via subagent-driven development against
+`documentation/plans/2026-07-24-phase0-phase1-implementation.md`. Live progress in
+`.superpowers/sdd/progress.md`.
 
-## Now: Design phase
+## Security (do before real use)
 
-- [ ] Digest research (Synology API, iCloud/sync semantics, Mac stack) into a decision-grade summary
-- [ ] Decide shared-core language: Rust+UniFFI vs pure-Swift SwiftPM core
-- [ ] Adversarial review of the architecture (skeptic sub-agents pressure-test the risky calls)
-- [ ] Write design doc to `documentation/plans/YYYY-MM-DD-synology-native-photos-design.md`
-- [ ] User reviews and approves the design
-- [ ] Write implementation plan (phased) via writing-plans skill
+- [ ] Switch the app from the main DSM account to a dedicated least-privilege `photosclient` user (Photos-only, read-only for Phase 0/1). Using main account during dev only. Setup steps in `documentation/phase0-probe-results.md`.
 
-## Phase 1: Read-only browse MVP (safest first)
+## Now: Building the Rust core (no NAS needed)
 
-- [ ] Synology API client: auth (`SYNO.API.Auth`), Keychain-stored session, LAN + Tailscale connect
-- [ ] Local SQLite index (GRDB): full paginated crawl of items into DB
-- [ ] Two-tier thumbnail cache (memory + on-disk, keyed by `cache_key`)
-- [ ] `NSCollectionView` grid over the local index (smooth scroll at 20k-100k)
-- [ ] Detail view via QuickLook + download original
-- [ ] Tests: core unit tests, API integration tests (mocked + real DSM), grid UI test
+- [ ] Task 6: UniFFI boundary crate (`photoscore`) + `core_version()` + bindgen bin
+- [ ] Task 7: Makefile `make bindings` + generate Swift bindings + xcframework
+- [ ] Task 8: SwiftUI app + link framework + prove FFI end-to-end (milestone: Swift calls Rust)
+- [ ] Tasks 14-23: `synology-api` crate (transport+TLS, tolerant decode, 2FA login, capability probe, browse, thumbnail, download)
+- [ ] Tasks 24-27: `persistence` crate (schema, windowed asset queries, albums, sync-state)
+- [ ] Tasks 28-31: `sync-engine` crate (resumable crawl, clock-skew-safe delta, full suite green)
 
-## Phase 2: Manage (delete, albums, search)
+## Empirical NAS probes (need login; main account for now)
 
-- [ ] Soft delete + confirm (recycle-bin backed, recoverable)
-- [ ] Albums: list, view, create, add/remove
-- [ ] Search (by date, filename, metadata; people/faces if API allows)
-- [ ] Background delta sync (`NSBackgroundActivityScheduler`)
-- [ ] Tests: destructive-action UI tests, sync reconciliation tests
+- [ ] Task 10: real 2FA login flow, SID + SynoToken shape
+- [ ] Task 11: Browse.Item + Thumbnail + Download response shapes
+- [ ] Task 13: delete-semantics probe on a throwaway asset (verdict table)
 
-## Phase 3: Edit (non-destructive)
+(Task 9 API.Info version ranges and Task 12 cert already captured; see Fixed.md.)
 
-- [ ] Duplicate-before-edit / sidecar model; original always immutable
-- [ ] Crop/adjust; render edited copy; upload as new asset
-- [ ] Revert-to-original
-- [ ] Tests: verify original never mutated (invariant test)
+## Facade + Swift UI (after core)
 
-## Phase 4: Cross-platform + remote
+- [ ] Tasks 32-38: wire Rust core to UniFFI `PhotosCore` (login, crawl, fetch, thumbnail, download)
+- [ ] Tasks 39-53: Swift app (Keychain, auth state machine, login+OTP, LAN/Tailscale, thumbnail cache, windowed grid, QuickLook detail, Personal/Shared toggle, sign-out)
+- [ ] Tasks 54-58: XCUITests, real-NAS LAN + Tailscale runs, security audit of read-only surface
 
-- [ ] Extract shared core cleanly; start Windows UI project
-- [ ] QuickConnect / DDNS remote access support
-- [ ] LAN/remote auto-switching (prefer LAN, fall back to remote)
+## Later phases (own plans)
 
-## Deferred / future (separate projects)
-
-- [ ] iCloud / Mac Photos library integration (out of current scope)
-- [ ] Video handling depth (thumbnails, transcoding, playback) if not covered in Phase 1
-- [ ] Distribution: Developer ID + notarization vs Mac App Store sandbox
+- [ ] Phase 2: safe-delete (trash-move) + albums + search + favorites + real permanent-delete (gated on Task 13 verdict)
+- [ ] Phase 3: non-destructive editing (upload-as-new)
+- [ ] Phase 4: cross-platform core extraction; QuickConnect/DDNS remote access
