@@ -1,5 +1,6 @@
 //! SQLite persistence via rusqlite: migrations and windowed queries.
 
+mod assets;
 mod schema;
 
 use models::CoreError;
