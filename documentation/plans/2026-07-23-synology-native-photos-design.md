@@ -1,7 +1,7 @@
 # Synology Native Photos — Design
 
 > Date: 2026-07-23
-> Status: DRAFT (awaiting user review)
+> Status: DECISIONS LOCKED (Rust core + UniFFI + Swift UI; v1 = browse + delete + albums + search + favorites + non-destructive edit). Awaiting final user review of this doc.
 > Research basis: `documentation/research/2026-07-23-feasibility-research.md`
 
 A native macOS app, Apple Photos-like, that acts as a client to a Synology 925+ NAS over its Web API. It lets the user browse, delete, organize, search, favorite, and non-destructively edit their Synology photo library. Goal: help the user migrate off iCloud while keeping an independent double backup. Mac-first; a reusable core makes a future Windows/Linux/iOS port a UI project, not a rewrite.
@@ -20,9 +20,9 @@ The user is migrating off iCloud and will increasingly rely on the NAS. This app
 
 ### In scope for v1 (delivered across phases)
 - Browse: smooth grid scrolling of a 20k-100k library, detail view, download originals.
-- Delete: safe (trash-folder move) from day one; verified permanent delete as soon as Phase 0 proves it safe.
+- Delete: safe (trash-folder move) from the first write-capable phase (Phase 2a); verified permanent delete as soon as Phase 0 proves it recoverable.
 - Albums: list, view, move photos between albums (reuses the safe move operation).
-- Search & filter: by date, filename, metadata; people/faces if the API exposes them.
+- Search & filter: by date, filename, metadata. People/faces search is included *if* the API exposes it; if it does not, it is surfaced as a documented known limitation (not silently dropped).
 - Favorites / ratings: metadata-only writes, re-read after write.
 - Non-destructive editing: crop/adjust, original immutable, edited copy uploaded as a new asset.
 
@@ -53,7 +53,7 @@ The user is migrating off iCloud and will increasingly rely on the NAS. This app
 │  │                 SYNO.API.Info capability probe)
 │  ├─ sync-engine   (resumable crawl + delta by  │
 │  │                 id/version, fail-closed writes)
-│  ├─ persistence   (SQLite: rusqlite/sqlx)      │
+│  ├─ persistence   (SQLite via rusqlite)        │
 │  └─ models         (assets, albums, sync state) │
 └───────────────┬───────────────────────────────┘
                 │ HTTP(S) over LAN / Tailscale
@@ -111,9 +111,10 @@ On-disk cache keyed on **`(asset_id, size_variant, cache_key)` together**, not `
 
 ## 4. Phasing
 
-- **Phase 0 (day one, gating):** Empirically determine the API's delete semantics on a throwaway test library (create → API delete → check DSM recycle bin → check file over SMB). Result gates whether/when real permanent-delete is enabled. Prioritized early so real-delete is unlocked as soon as it's proven safe.
-- **Phase 1:** Connect/auth (+2FA, Keychain, capability probe) → resumable progress-tracked crawl into SQLite → windowed `NSCollectionView` grid → detail/QuickLook (HEIC/RAW/video verified). The trustworthy read foundation.
-- **Phase 2:** Safe-delete (trash-folder move) + real permanent-delete (once Phase 0 clears it) + albums (view/organize via move) + search/filter + favorites/ratings + background delta sync.
+- **Phase 0 (day one, gating):** Empirically determine the API's delete semantics on a throwaway test library (create → API delete → check DSM recycle bin → check file over SMB). **Explicit gate: real permanent-delete is enabled only if the file is proven recoverable from the DSM recycle bin after an API delete.** If it is not recoverable (hard delete), permanent-delete stays disabled and "empty trash" only ever leaves assets in the app-controlled trash folder. Prioritized early so real-delete unlocks as soon as it's proven safe.
+- **Phase 1:** Connect/auth (+2FA, Keychain, capability probe) → resumable progress-tracked crawl into SQLite → windowed `NSCollectionView` grid → detail/QuickLook (HEIC/RAW/video verified, **Live Photos re-pairing decision made here**). The trustworthy read foundation.
+- **Phase 2a (first write-capable phase):** Safe-delete (trash-folder move, always recoverable) + albums (view/organize via move) + background delta sync. All writes here are non-destructive moves.
+- **Phase 2b:** Real permanent-delete (enabled only once the Phase 0 gate clears) + favorites/ratings (metadata-only writes, re-read after write) + search/filter.
 - **Phase 3:** Non-destructive editing (recipe local, upload edited copy as new asset, revert-to-original).
 - **Phase 4:** Extract/harden the Rust core for a second platform; QuickConnect/DDNS remote access; LAN/remote auto-switching.
 
@@ -134,5 +135,5 @@ Additional testing suggested for this app class: **security review** of auth/sec
 2. **DSM version drift** — contained by tolerant decoding + capability probe + fail-closed + diagnostic mode; accepted as an ongoing maintenance cost.
 3. **`cache_key` semantics** — verified by the edit-a-photo-on-NAS test; cache keyed on the composite tuple regardless.
 4. **UniFFI async + windowed queries across the FFI boundary** — core API surface designed for windowed access from day one; validated with a perf spike early in Phase 1.
-5. **Live Photos** — stored on the NAS as two separate files (HEIC still + HEVC MOV); the "live" linkage is not reconstructed. Decide whether to re-pair them in the UI or treat as separate assets.
+5. **Live Photos** — stored on the NAS as two separate files (HEIC still + HEVC MOV); the "live" linkage is not reconstructed. **Decision assigned to Phase 1** (detail/QuickLook): re-pair them in the UI or treat as separate assets.
 6. **Second-backup safety gate** — first destructive action requires a one-time acknowledgment that an independent second backup (Hyper Backup / external / offsite) exists, so the app never becomes the thing that loses the last copy.
