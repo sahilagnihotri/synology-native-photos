@@ -9,6 +9,41 @@ Read-only invariant: nothing in Phase 0/1 adds delete or edit code to the core. 
 only deletion in Phase 0 is the manual, human-run probe below on a throwaway asset,
 performed to characterize semantics. Its verdict informs future phases only.
 
+## Verified facts (captured 2026-07-23, real NAS over Tailscale)
+
+Connection: reachable over Tailscale at 100.87.107.5, ~5ms latency. DSM ports 5000
+(http) and 5001 (https) both open.
+
+API path prefix (IMPORTANT correction): all Photos/Auth APIs are served at
+`/webapi/entry.cgi`, NOT `/photo/webapi/...` as some community docs assume. The
+`SYNO.API.Info` query at `/webapi/query.cgi` reports `path: "entry.cgi"` for every
+API. The core must build request URLs as `https://<host>:5001/webapi/entry.cgi`.
+
+Capability probe (no login required), verified version ranges on this DSM:
+
+| API | path | minVersion | maxVersion |
+|-----|------|-----------|-----------|
+| SYNO.API.Auth | entry.cgi | 1 | 7 |
+| SYNO.Foto.Browse.Item | entry.cgi | 1 | 7 |
+| SYNO.Foto.Thumbnail | entry.cgi | 1 | 2 |
+| SYNO.FotoTeam.Browse.Item | entry.cgi | 1 | 7 |
+
+`SYNO.Foto.Thumbnail` maxVersion is 2 (lower than the browse APIs at 7); pin thumbnail
+requests to a version within 1..2. Version-pin every request to a value inside the
+range the capability probe returns at runtime; do not hardcode blindly.
+
+TLS / cert: the DSM presents a valid Let's Encrypt cert (issuer C=US O=Let's Encrypt
+CN=YE2) with subject CN=`agnihotri.synology.me`, valid 2026-07-07 to 2026-10-05. It is
+NOT self-signed. Consequence: connecting by the DDNS name `agnihotri.synology.me`
+validates TLS cleanly with no pinning needed. Connecting by the raw Tailscale IP
+100.87.107.5 causes a hostname mismatch (cert CN is the DNS name). Cert-trust design:
+prefer the DNS name where the public cert validates; when using the Tailscale IP,
+handle the hostname-mismatch deliberately (pin the leaf cert or connect by a name that
+matches), and never globally disable TLS validation.
+
+Library state: confirmed populated and live (the Synology Photos mobile app backs up to
+this NAS and works), so Browse.Item will return real assets once authenticated.
+
 ## Dedicated DSM Photos-only user
 
 Purpose: the app authenticates as a dedicated, least-privilege DSM account that can
