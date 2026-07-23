@@ -6,7 +6,7 @@
 //! when the request itself fails (bad id, bad cache_key, expired session,
 //! ...). Telling the two apart is done purely by `Content-Type` (see
 //! `envelope::map_binary_or_error`, which owns that logic so
-//! `download::fetch_original` can reuse it rather than duplicating this
+//! `download::download_original` can reuse it rather than duplicating this
 //! dual-mode handling).
 //!
 //! Like every other API in this crate, the request is dispatched through
