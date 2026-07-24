@@ -20,9 +20,9 @@ async fn real_nas_login_probe_list_logout() {
     let user = env("SYNO_USER");
     let pass = env("SYNO_PASS");
     let otp = std::env::var("SYNO_OTP").ok();
-    let connection = Connection { host, verify_tls: true, pinned_cert_der: None };
+    let connection = Connection { host, verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
     let transport = Transport::new(&connection).expect("transport builds against real NAS");
-    let session = login(&transport, &user, &pass, otp.as_deref()).await
+    let session = login(&transport, &user, &pass, otp.as_deref(), None).await
         .expect("real login should succeed with valid creds + OTP");
     assert!(!session.sid.is_empty(), "sid must be non-empty");
     println!("logged in as {}, syno_token present: {}", session.username, session.syno_token.is_some());

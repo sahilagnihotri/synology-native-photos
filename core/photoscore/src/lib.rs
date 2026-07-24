@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use models::{
-    Album, ApiCapability, Asset, Connection, CoreError, CrawlProgress, Session, SessionState, Space,
+    Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, Session, SessionState, Space,
     ThumbnailData, ThumbnailSize,
 };
 use persistence::Store;
@@ -118,24 +118,34 @@ impl PhotosCore {
 
     /// Log in against `connection` with the given credentials.
     ///
-    /// `otp_code` is forwarded to `synology_api::login` untouched: `None`
-    /// omits the param entirely, so an account with 2FA enabled answers
-    /// with `CoreError::OtpRequired` (see `synology_api::auth`), which the
-    /// Swift UI is expected to catch, prompt for a code, and retry with
-    /// `otp_code = Some(code)`.
+    /// `otp_code` and `device_token` are forwarded to `synology_api::login`
+    /// untouched:
+    /// - `otp_code = None` omits the param entirely, so an account with 2FA
+    ///   enabled answers with `CoreError::OtpRequired` (see
+    ///   `synology_api::auth`), which the Swift UI is expected to catch,
+    ///   prompt for a code, and retry with `otp_code = Some(code)`.
+    /// - `device_token` should be the value previously returned on
+    ///   `Session.device_did` from an earlier login on this host+account
+    ///   (the caller/UI is responsible for persisting it, e.g. Keychain).
+    ///   Passing it lets a trusted device skip OTP; DSM rejecting a stale
+    ///   token falls back to the same `CoreError::OtpRequired` as no token
+    ///   at all (fail-closed, see `synology_api::auth` doc comment).
     ///
     /// On success, replaces any previously held `Live` state with a fresh
     /// transport/session pair (capability probe deferred to first use, so
-    /// login itself stays a single round trip).
+    /// login itself stays a single round trip). The returned `Session`
+    /// carries any device token DSM minted/confirmed in `device_did`; the
+    /// caller is expected to persist it for a future `device_token` login.
     pub async fn login(
         &self,
         connection: Connection,
         username: String,
         password: String,
         otp_code: Option<String>,
+        device_token: Option<String>,
     ) -> Result<Session, CoreError> {
         let transport = Transport::new(&connection)?;
-        let session = synology_api::login(&transport, &username, &password, otp_code.as_deref()).await?;
+        let session = synology_api::login(&transport, &username, &password, otp_code.as_deref(), device_token.as_deref()).await?;
         let mut guard = self.live.lock().expect("live mutex poisoned");
         *guard = Some(Live {
             transport,
@@ -144,6 +154,21 @@ impl PhotosCore {
             capabilities: Vec::new(),
         });
         Ok(session)
+    }
+
+    /// Fetches the TLS certificate presented by `host` for trust-on-first-use
+    /// approval, without ever trusting it for a real request (see
+    /// `synology_api::fetch_server_cert_der` for exactly what is and is not
+    /// relaxed during this one-shot probe).
+    ///
+    /// This is a standalone, session-free call: it can be made before
+    /// `login` (indeed, that is the intended flow) to let the UI show the
+    /// user the server's fingerprint + subject and get their approval before
+    /// ever sending credentials anywhere. Approving means storing the
+    /// returned `CertInfo.der` (Keychain or app config) and passing it as
+    /// `Connection.pinned_cert_der` on the `Connection` used for `login`.
+    pub async fn fetch_certificate(&self, host: String) -> Result<CertInfo, CoreError> {
+        synology_api::fetch_server_cert_der(&host).await
     }
 
     /// Rebuild `Live` state from a previously stored `Session` (e.g. loaded
@@ -631,16 +656,16 @@ mod core_tests {
     async fn login_stores_live_session() {
         let mut server = mockito::Server::new_async().await;
         let _m = server
-            .mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::Any)
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"sid":"SID-CORE","synotoken":"TK"}}"#)
             .create_async()
             .await;
         let core = core_at("login");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
         let session = core
-            .login(conn, "photouser".into(), "pw".into(), Some("123456".into()))
+            .login(conn, "photouser".into(), "pw".into(), Some("123456".into()), None)
             .await
             .expect("login ok");
         assert_eq!(session.sid, "SID-CORE");
@@ -656,16 +681,16 @@ mod core_tests {
     async fn login_without_otp_when_required_surfaces_otp_required() {
         let mut server = mockito::Server::new_async().await;
         let _m = server
-            .mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::Any)
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":false,"error":{"code":403}}"#)
             .create_async()
             .await;
         let core = core_at("login-otp");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
         let err = core
-            .login(conn, "photouser".into(), "pw".into(), None)
+            .login(conn, "photouser".into(), "pw".into(), None, None)
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::OtpRequired), "got {err:?}");
@@ -686,7 +711,7 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("restore-valid");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
         let session = Session {
             sid: "SID-RESTORE".into(),
             syno_token: None,
@@ -709,7 +734,7 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("restore-expired");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
         let session = Session {
             sid: "SID-STALE".into(),
             syno_token: None,
@@ -732,8 +757,8 @@ mod core_tests {
     async fn probe_capabilities_after_login_caches_and_returns() {
         let mut server = mockito::Server::new_async().await;
         let _login = server
-            .mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"sid":"SID-PROBE"}}"#)
             .create_async()
@@ -753,8 +778,8 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("probe-caps");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "photouser".into(), "pw".into(), None).await.expect("login ok");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "photouser".into(), "pw".into(), None, None).await.expect("login ok");
 
         let caps = core.probe_capabilities().await.expect("probe ok");
         assert!(caps.iter().any(|c| c.name == "SYNO.Foto.Browse.Item"));
@@ -781,8 +806,8 @@ mod core_tests {
     #[tokio::test]
     async fn crawl_space_persists_and_reports_complete() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -798,8 +823,8 @@ mod core_tests {
         std::fs::create_dir_all(dir.join("db")).unwrap();
         std::fs::create_dir_all(dir.join("cache")).unwrap();
         let core = PhotosCore::new(dir.join("db").to_string_lossy().into(), dir.join("cache").to_string_lossy().into()).unwrap();
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         struct Collector(std::sync::Mutex<Vec<CrawlProgress>>);
@@ -836,8 +861,8 @@ mod core_tests {
     #[tokio::test]
     async fn crawl_space_completes_without_deadlock() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -850,8 +875,8 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"list":[{"id":1,"filename":"a.jpg","type":"photo","additional":{"thumbnail":{"cache_key":"CK1"}}}]}}"#)
             .create_async().await;
         let core = core_at("crawl-liveness");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         struct NoopObserver;
@@ -882,8 +907,8 @@ mod core_tests {
     #[tokio::test]
     async fn crawl_space_recovers_store_after_panic() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -896,8 +921,8 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"list":[{"id":1,"filename":"a.jpg","type":"photo","additional":{"thumbnail":{"cache_key":"CK1"}}}]}}"#)
             .create_async().await;
         let core = core_at("crawl-panic-recovery");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         struct PanickingObserver;
@@ -946,8 +971,8 @@ mod core_tests {
     #[tokio::test]
     async fn reconcile_delta_runs_after_crawl() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -960,8 +985,8 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"list":[{"id":1,"filename":"a.jpg","type":"photo","additional":{"thumbnail":{"cache_key":"CK1"}}}]}}"#)
             .create_async().await;
         let core = core_at("reconcile");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         struct NoopObserver;
@@ -1114,8 +1139,8 @@ mod core_tests {
     async fn sign_out_clears_live_after_login() {
         let mut server = mockito::Server::new_async().await;
         let _login = server
-            .mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"sid":"SID-OUT"}}"#)
             .create_async()
@@ -1128,8 +1153,8 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("signout-live");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "photouser".into(), "pw".into(), None).await.expect("login ok");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "photouser".into(), "pw".into(), None, None).await.expect("login ok");
         assert!(core.live.lock().unwrap().is_some());
 
         core.sign_out().await.expect("sign_out ok");
@@ -1142,8 +1167,8 @@ mod core_tests {
     #[tokio::test]
     async fn thumbnail_cache_miss_fetches_and_writes_cache_file() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -1161,8 +1186,8 @@ mod core_tests {
             .expect(1)
             .create_async().await;
         let core = core_at("thumb-miss");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         let data = core.thumbnail(Space::Personal, 101, "CK1".into(), models::ThumbnailSize::Sm).await.expect("thumb ok");
@@ -1180,8 +1205,8 @@ mod core_tests {
     #[tokio::test]
     async fn thumbnail_cache_hit_skips_network() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -1199,8 +1224,8 @@ mod core_tests {
             .expect(1)
             .create_async().await;
         let core = core_at("thumb-hit");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         let first = core.thumbnail(Space::Personal, 202, "CK2".into(), models::ThumbnailSize::M).await.expect("first ok");
@@ -1218,8 +1243,8 @@ mod core_tests {
     #[tokio::test]
     async fn thumbnail_different_cache_key_invalidates_and_refetches() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -1247,8 +1272,8 @@ mod core_tests {
             .expect(1)
             .create_async().await;
         let core = core_at("thumb-invalidate");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         let old = core.thumbnail(Space::Personal, 303, "CK-OLD".into(), models::ThumbnailSize::Xl).await.expect("old ok");
@@ -1270,8 +1295,8 @@ mod core_tests {
     #[tokio::test]
     async fn thumbnail_cache_key_with_path_traversal_stays_inside_cache_dir() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -1290,8 +1315,8 @@ mod core_tests {
             .expect(1)
             .create_async().await;
         let core = core_at("thumb-traversal");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         let data = core
@@ -1331,8 +1356,8 @@ mod core_tests {
     #[tokio::test]
     async fn download_original_returns_path_to_downloaded_bytes() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -1348,8 +1373,8 @@ mod core_tests {
             .with_body(b"ORIGINAL-BYTES".to_vec())
             .create_async().await;
         let core = core_at("download-ok");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         let path = core.download_original(Space::Personal, 101, "CK1".into()).await.expect("download ok");
@@ -1363,8 +1388,8 @@ mod core_tests {
     #[tokio::test]
     async fn download_original_json_error_maps_to_core_error() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
             .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
@@ -1380,8 +1405,8 @@ mod core_tests {
             .with_body(r#"{"success":false,"error":{"code":400}}"#)
             .create_async().await;
         let core = core_at("download-err");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
-        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
         core.probe_capabilities().await.unwrap();
 
         let err = core.download_original(Space::Personal, 101, "CK1".into()).await.unwrap_err();
@@ -1394,5 +1419,89 @@ mod core_tests {
         let core = core_at("download-no-login");
         let err = core.download_original(Space::Personal, 1, "CK".into()).await.unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    /// The FFI surface the Swift UI will call for trust-on-first-use: given a
+    /// bare host, `fetch_certificate` returns a `CertInfo` with the DER, a
+    /// 64-hex-char SHA-256 fingerprint, and a subject string, with no session
+    /// required at all (this can be called before any login).
+    #[tokio::test]
+    async fn fetch_certificate_returns_cert_info_for_a_real_tls_server() {
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).expect("self-signed cert generates");
+        let cert_der = cert.der().to_vec();
+        let key_der = signing_key.serialize_der();
+        let server_config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![rustls_pki_types::CertificateDer::from(cert_der.clone())],
+                rustls_pki_types::PrivateKeyDer::try_from(key_der).expect("key parses"),
+            )
+            .expect("server config builds");
+        let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(server_config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener binds");
+        let addr = listener.local_addr().expect("listener has an addr");
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else { return };
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let _ = acceptor.accept(stream).await;
+                });
+            }
+        });
+
+        let core = core_at("fetch-cert");
+        let info = core
+            .fetch_certificate(format!("{}:{}", addr.ip(), addr.port()))
+            .await
+            .expect("fetch_certificate should succeed against a real TLS server");
+        assert_eq!(info.der, cert_der);
+        assert_eq!(info.sha256_hex.len(), 64);
+        assert!(!info.subject.is_empty());
+    }
+
+    /// End-to-end (through `PhotosCore::login`, not just `synology_api::auth`
+    /// directly): a login with otp captures the device token onto the
+    /// returned `Session`, and passing that token back into a later `login`
+    /// call succeeds without supplying otp again.
+    #[tokio::test]
+    async fn login_round_trips_device_token_through_the_core_facade() {
+        let mut server = mockito::Server::new_async().await;
+        let _first = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("otp_code=999999".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"SID-1","did":"CORE-DEVICE-TOKEN"}}"#)
+            .create_async()
+            .await;
+        let core = core_at("device-token-roundtrip");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        let session = core
+            .login(conn.clone(), "photouser".into(), "pw".into(), Some("999999".into()), None)
+            .await
+            .expect("first login with otp ok");
+        assert_eq!(session.device_did.as_deref(), Some("CORE-DEVICE-TOKEN"));
+
+        // Trap: the second login must not need to send otp_code again.
+        let _trap = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("otp_code".into()))
+            .expect(0)
+            .create_async()
+            .await;
+        let _second = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("did=CORE-DEVICE-TOKEN".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"SID-2"}}"#)
+            .create_async()
+            .await;
+        let session2 = core
+            .login(conn, "photouser".into(), "pw".into(), None, session.device_did.clone())
+            .await
+            .expect("second login with stored device token should succeed without otp");
+        assert_eq!(session2.sid, "SID-2");
+        _trap.assert_async().await;
     }
 }

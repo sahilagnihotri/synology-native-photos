@@ -17,7 +17,7 @@ pub use download::download_original;
 pub use envelope::{decode_envelope, map_error_code, SynoError, SynoResponse};
 pub use info::{pin_version, probe_capabilities};
 pub use thumbnail::fetch_thumbnail;
-pub use transport::{build_client, Transport};
+pub use transport::{build_client, fetch_server_cert_der, Transport};
 
 #[cfg(test)]
 mod facade_tests {
@@ -32,6 +32,7 @@ mod facade_tests {
         let _ = crate::fetch_thumbnail as usize;
         let _ = crate::download_original as usize;
         let _ = crate::build_client as usize;
+        let _ = crate::fetch_server_cert_der as usize;
         let _ = crate::decode_envelope::<serde_json::Value> as usize;
         let _ = crate::map_error_code as usize;
     }
