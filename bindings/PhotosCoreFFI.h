@@ -251,6 +251,41 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureStr
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_FFI_CRAWL_OBSERVER_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_FFI_CRAWL_OBSERVER_METHOD0
+typedef void (*UniffiCallbackInterfaceFfiCrawlObserverMethod0)(uint64_t, RustBuffer, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_FFI_CRAWL_OBSERVER
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_FFI_CRAWL_OBSERVER
+typedef struct UniffiVTableCallbackInterfaceFfiCrawlObserver {
+    UniffiCallbackInterfaceFfiCrawlObserverMethod0 _Nonnull onProgress;
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+} UniffiVTableCallbackInterfaceFfiCrawlObserver;
+
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_CLONE_PHOTOSCORE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_CLONE_PHOTOSCORE
+void*_Nonnull uniffi_photoscore_fn_clone_photoscore(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_FREE_PHOTOSCORE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_FREE_PHOTOSCORE
+void uniffi_photoscore_fn_free_photoscore(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_CONSTRUCTOR_PHOTOSCORE_NEW
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_CONSTRUCTOR_PHOTOSCORE_NEW
+void*_Nonnull uniffi_photoscore_fn_constructor_photoscore_new(RustBuffer db_dir, RustBuffer cache_dir, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_INIT_CALLBACK_VTABLE_FFICRAWLOBSERVER
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_INIT_CALLBACK_VTABLE_FFICRAWLOBSERVER
+void uniffi_photoscore_fn_init_callback_vtable_fficrawlobserver(const UniffiVTableCallbackInterfaceFfiCrawlObserver* _Nonnull vtable
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_FUNC_CORE_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_FUNC_CORE_VERSION
 RustBuffer uniffi_photoscore_fn_func_core_version(RustCallStatus *_Nonnull out_status
@@ -540,6 +575,18 @@ void ffi_photoscore_rust_future_complete_void(uint64_t handle, RustCallStatus *_
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_FUNC_CORE_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_FUNC_CORE_VERSION
 uint16_t uniffi_photoscore_checksum_func_core_version(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_CONSTRUCTOR_PHOTOSCORE_NEW
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_CONSTRUCTOR_PHOTOSCORE_NEW
+uint16_t uniffi_photoscore_checksum_constructor_photoscore_new(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_FFICRAWLOBSERVER_ON_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_FFICRAWLOBSERVER_ON_PROGRESS
+uint16_t uniffi_photoscore_checksum_method_fficrawlobserver_on_progress(void
     
 );
 #endif
