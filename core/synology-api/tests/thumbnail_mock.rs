@@ -4,7 +4,7 @@ use synology_api::thumbnail::{fetch_thumbnail, size_param};
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
-    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None })
+    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false })
         .expect("transport builds")
 }
 

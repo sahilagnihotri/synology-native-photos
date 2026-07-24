@@ -21,6 +21,17 @@ pub struct Connection {
     pub host: String,
     pub verify_tls: bool,
     pub pinned_cert_der: Option<Vec<u8>>,
+    /// Last-resort dev escape hatch: when true AND no pinned cert is set,
+    /// `build_client` disables all certificate validation
+    /// (`danger_accept_invalid_certs`). THIS IS INSECURE: it accepts any
+    /// certificate from any server, including a MITM. It exists only for
+    /// local development against a NAS whose cert cannot yet be pinned.
+    /// Must default to false and must only ever be flipped on by an
+    /// explicit, clearly labeled opt-in toggle in the UI, never silently.
+    /// The default path (no pin, this false) and the pinned path (a DER in
+    /// `pinned_cert_der`) both keep full certificate validation regardless
+    /// of this flag.
+    pub allow_untrusted_tls: bool,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -75,6 +86,18 @@ pub struct ApiCapability {
 pub struct ThumbnailData {
     pub cached_path: String,
     pub bytes: Vec<u8>,
+}
+
+/// The server's leaf TLS certificate, captured for trust-on-first-use
+/// approval. `der` is the raw certificate bytes (suitable for storing as
+/// `Connection.pinned_cert_der` once the user approves it); `sha256_hex` is
+/// the fingerprint to show the user; `subject` is a human-readable subject
+/// name (e.g. the certificate's CN) for display alongside the fingerprint.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct CertInfo {
+    pub der: Vec<u8>,
+    pub sha256_hex: String,
+    pub subject: String,
 }
 
 #[derive(uniffi::Error, Debug, thiserror::Error)]
@@ -140,9 +163,11 @@ mod tests {
             host: "https://192.168.1.10:5001".to_string(),
             verify_tls: true,
             pinned_cert_der: None,
+            allow_untrusted_tls: false,
         };
         assert!(c.verify_tls);
         assert!(c.pinned_cert_der.is_none());
+        assert!(!c.allow_untrusted_tls, "allow_untrusted_tls must default-construct false in every call site");
     }
 
     #[test]

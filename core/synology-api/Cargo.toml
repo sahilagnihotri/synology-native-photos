@@ -12,7 +12,14 @@ serde_json.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+rustls-pki-types.workspace = true
+webpki-roots.workspace = true
+sha2.workspace = true
+x509-parser.workspace = true
 
 [dev-dependencies]
 mockito = "1"
+rcgen = "0.14.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "test-util"] }
