@@ -474,6 +474,21 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func login(connection: Connection, username: String, password: String, otpCode: String?) async throws  -> Session
     
     /**
+     * Probe `SYNO.API.Info` over the live session and cache the discovered
+     * capability set into `Live.capabilities` for later version pinning
+     * (Tasks 36/37 read it via `pin_version`).
+     *
+     * Fails closed with `CoreError::Auth` if no session is held rather than
+     * panicking: a caller that never logged in gets an error to handle, not
+     * a crash.
+     *
+     * A fresh `Transport` is rebuilt from the stored `Connection` inside the
+     * lock, then the lock is dropped before the `.await` so the std `Mutex`
+     * guard is never held across an await point.
+     */
+    func probeCapabilities() async throws  -> [ApiCapability]
+    
+    /**
      * Rebuild `Live` state from a previously stored `Session` (e.g. loaded
      * from the Keychain) without re-running the login handshake.
      *
@@ -598,6 +613,36 @@ open func login(connection: Connection, username: String, password: String, otpC
             completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
             freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeSession_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Probe `SYNO.API.Info` over the live session and cache the discovered
+     * capability set into `Live.capabilities` for later version pinning
+     * (Tasks 36/37 read it via `pin_version`).
+     *
+     * Fails closed with `CoreError::Auth` if no session is held rather than
+     * panicking: a caller that never logged in gets an error to handle, not
+     * a crash.
+     *
+     * A fresh `Transport` is rebuilt from the stored `Connection` inside the
+     * lock, then the lock is dropped before the `.await` so the std `Mutex`
+     * guard is never held across an await point.
+     */
+open func probeCapabilities()async throws  -> [ApiCapability]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_probe_capabilities(
+                    self.uniffiClonePointer()
+                    
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeApiCapability.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -854,6 +899,31 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         }
     }
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeApiCapability: FfiConverterRustBuffer {
+    typealias SwiftType = [ApiCapability]
+
+    public static func write(_ value: [ApiCapability], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeApiCapability.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ApiCapability] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ApiCapability]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeApiCapability.read(from: &buf))
+        }
+        return seq
+    }
+}
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_MAYBE_READY: Int8 = 1
 
@@ -930,6 +1000,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_login() != 50951) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_probe_capabilities() != 23336) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 22452) {

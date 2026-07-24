@@ -286,6 +286,11 @@ void*_Nonnull uniffi_photoscore_fn_constructor_photoscore_new(RustBuffer db_dir,
 uint64_t uniffi_photoscore_fn_method_photoscore_login(void*_Nonnull ptr, RustBuffer connection, RustBuffer username, RustBuffer password, RustBuffer otp_code
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
+uint64_t uniffi_photoscore_fn_method_photoscore_probe_capabilities(void*_Nonnull ptr
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_SESSION
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_SESSION
 uint64_t uniffi_photoscore_fn_method_photoscore_restore_session(void*_Nonnull ptr, RustBuffer connection, RustBuffer session
@@ -596,6 +601,12 @@ uint16_t uniffi_photoscore_checksum_func_core_version(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOGIN
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOGIN
 uint16_t uniffi_photoscore_checksum_method_photoscore_login(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
+uint16_t uniffi_photoscore_checksum_method_photoscore_probe_capabilities(void
     
 );
 #endif

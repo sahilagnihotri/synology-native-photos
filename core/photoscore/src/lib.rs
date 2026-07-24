@@ -132,6 +132,32 @@ impl PhotosCore {
         }
         Ok(())
     }
+
+    /// Probe `SYNO.API.Info` over the live session and cache the discovered
+    /// capability set into `Live.capabilities` for later version pinning
+    /// (Tasks 36/37 read it via `pin_version`).
+    ///
+    /// Fails closed with `CoreError::Auth` if no session is held rather than
+    /// panicking: a caller that never logged in gets an error to handle, not
+    /// a crash.
+    ///
+    /// A fresh `Transport` is rebuilt from the stored `Connection` inside the
+    /// lock, then the lock is dropped before the `.await` so the std `Mutex`
+    /// guard is never held across an await point.
+    pub async fn probe_capabilities(&self) -> Result<Vec<ApiCapability>, CoreError> {
+        let transport = {
+            let guard = self.live.lock().expect("live mutex poisoned");
+            match guard.as_ref() {
+                Some(live) => Transport::new(&live.connection)?,
+                None => return Err(CoreError::Auth { message: "not logged in".into() }),
+            }
+        };
+        let caps = synology_api::probe_capabilities(&transport).await?;
+        if let Some(live) = self.live.lock().expect("live mutex poisoned").as_mut() {
+            live.capabilities = caps.clone();
+        }
+        Ok(caps)
+    }
 }
 
 #[cfg(test)]
@@ -264,6 +290,56 @@ mod core_tests {
     async fn sign_out_is_idempotent_without_session() {
         let core = core_at("signout-empty");
         core.sign_out().await.expect("sign_out without a session is a no-op");
+        assert!(core.live.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn probe_capabilities_after_login_caches_and_returns() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"SID-PROBE"}}"#)
+            .create_async()
+            .await;
+        let _info = server
+            .mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(
+                r#"{"success":true,"data":{
+                    "SYNO.API.Auth":{"minVersion":1,"maxVersion":7,"path":"entry.cgi"},
+                    "SYNO.Foto.Browse.Item":{"minVersion":1,"maxVersion":7,"path":"entry.cgi"},
+                    "SYNO.Foto.Thumbnail":{"minVersion":1,"maxVersion":2,"path":"entry.cgi"},
+                    "SYNO.FotoTeam.Browse.Item":{"minVersion":1,"maxVersion":7,"path":"entry.cgi"}
+                }}"#,
+            )
+            .create_async()
+            .await;
+        let core = core_at("probe-caps");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        core.login(conn, "photouser".into(), "pw".into(), None).await.expect("login ok");
+
+        let caps = core.probe_capabilities().await.expect("probe ok");
+        assert!(caps.iter().any(|c| c.name == "SYNO.Foto.Browse.Item"));
+        assert!(caps.iter().any(|c| c.name == "SYNO.Foto.Thumbnail" && c.max_version == 2));
+        assert_eq!(caps.len(), 4);
+
+        // The probe must cache the discovered set into Live.capabilities so
+        // later version-pinning calls (Tasks 36/37) can read it without a
+        // second round trip.
+        let guard = core.live.lock().unwrap();
+        let cached = &guard.as_ref().unwrap().capabilities;
+        assert_eq!(cached.len(), 4);
+        assert!(cached.iter().any(|c| c.name == "SYNO.API.Auth"));
+    }
+
+    #[tokio::test]
+    async fn probe_capabilities_without_login_returns_auth_error() {
+        let core = core_at("probe-caps-no-login");
+        let err = core.probe_capabilities().await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
         assert!(core.live.lock().unwrap().is_none());
     }
 
