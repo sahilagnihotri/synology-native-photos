@@ -16,6 +16,28 @@ struct RootRouterTests {
     @Test func restoringRoutesToLogin() { #expect(RootRouter.route(for: .restoring) == .login) }
 }
 
+/// Exercises the decision behind what the library area shows once the crawl
+/// barrier is (or is not) complete: the importing spinner while incomplete,
+/// the empty placeholder for a completed-but-empty space, and the grid once
+/// there is at least one item. This is what stops a completed empty library
+/// from either looking stuck on "Importing..." or rendering as a blank void
+/// indistinguishable from one.
+struct LibraryContentRouteTests {
+    @Test func incompleteAlwaysShowsImportingRegardlessOfCount() {
+        #expect(LibraryContentRoute.route(isComplete: false, itemCount: 0) == .importing)
+        #expect(LibraryContentRoute.route(isComplete: false, itemCount: 500) == .importing)
+    }
+
+    @Test func completeWithZeroItemsShowsEmptyState() {
+        #expect(LibraryContentRoute.route(isComplete: true, itemCount: 0) == .empty)
+    }
+
+    @Test func completeWithItemsShowsGrid() {
+        #expect(LibraryContentRoute.route(isComplete: true, itemCount: 1) == .grid)
+        #expect(LibraryContentRoute.route(isComplete: true, itemCount: 40_000) == .grid)
+    }
+}
+
 /// Exercises the launch decision end to end against `AuthStateMachine` +
 /// `FakePhotosCore`, without any SwiftUI view involved: stored session ->
 /// library, no stored session -> login. This is the actual behavior the app

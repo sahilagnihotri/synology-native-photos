@@ -74,6 +74,29 @@ struct RootView: View {
     }
 }
 
+/// The three things the completed-or-not library area can show at any one
+/// time. Purely a function of the crawl barrier plus the current item
+/// count, kept as a standalone type (mirroring `RootRouter` above) so the
+/// decision is testable without a live `AppEnvironment` or any AppKit view.
+enum LibraryContentRoute: Equatable {
+    case importing
+    case empty
+    case grid
+}
+
+extension LibraryContentRoute {
+    /// `isComplete` must come only from `CrawlProgress.complete` (the
+    /// barrier `CrawlProgressModel` mirrors); this never treats a nonzero
+    /// count as evidence of completeness on its own, since a mid-crawl
+    /// count also grows. Once complete, an empty library and a nonempty one
+    /// are distinguished purely by `itemCount`, so the importing spinner
+    /// never lingers after the barrier flips.
+    static func route(isComplete: Bool, itemCount: Int) -> LibraryContentRoute {
+        guard isComplete else { return .importing }
+        return itemCount > 0 ? .grid : .empty
+    }
+}
+
 /// Library scene: space toggle + importing progress + grid + detail.
 ///
 /// Grid item selection opens `DetailQuickLookView` in a sheet: `selected`
@@ -96,6 +119,19 @@ struct LibraryView: View {
         VStack(spacing: 8) {
             HStack {
                 SpaceToggleView(selection: env.spaceSelection, dataSource: env.dataSource) {
+                    // `setSpace` (already run by the toggle before this
+                    // closure fires) only re-queries the local index for the
+                    // newly selected space; it never crawls. A space visited
+                    // for the first time therefore has an empty local index
+                    // until something crawls it, which would otherwise look
+                    // identical to a genuinely empty space. Running the
+                    // crawl here (a no-op per `Crawler::crawl_space` if the
+                    // space's barrier is already set) is what makes
+                    // switching to a not-yet-crawled space actually populate
+                    // it instead of showing a false empty state.
+                    await env.crawl.startCrawl(space: env.spaceSelection.current)
+                    await env.dataSource.refreshCount()
+                    await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
                     await controller.applySnapshot()
                 }
                 Spacer()
@@ -117,10 +153,16 @@ struct LibraryView: View {
                 .accessibilityIdentifier("session.signout")
             }
             .padding(.horizontal, 12)
-            if env.crawl.isComplete {
-                PhotoGridView(controller: controller)
-            } else {
+            switch LibraryContentRoute.route(
+                isComplete: env.crawl.isComplete,
+                itemCount: env.dataSource.totalCount
+            ) {
+            case .importing:
                 ProgressView(env.crawl.statusText).accessibilityIdentifier("crawl.progressview")
+            case .empty:
+                EmptyLibraryView(space: env.spaceSelection.current)
+            case .grid:
+                PhotoGridView(controller: controller)
             }
         }
         .task {
