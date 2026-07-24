@@ -11,12 +11,17 @@
 //!      - Default (no pin, `allow_untrusted_tls == false`): system roots,
 //!        standard hostname verification. `danger_accept_invalid_certs` is
 //!        never reachable on this path.
-//!      - Pinned (`pinned_cert_der` is `Some`): the pinned DER is trusted via
-//!        `add_root_certificate`. Hostname verification stays ON unless the
-//!        connection host is a bare IP literal, in which case ONLY hostname
-//!        matching is relaxed (`danger_accept_invalid_hostnames(true)`). The
-//!        certificate itself is still fully authenticated against the pin.
-//!        `danger_accept_invalid_certs` is never called on this path either.
+//!      - Pinned (`pinned_cert_der` is `Some`): built-in root certificates
+//!        are disabled (`tls_built_in_root_certs(false)`) and the pinned DER
+//!        is added as the sole trust anchor via `add_root_certificate`. Only
+//!        the pin itself (or a certificate it issued, if it is a CA) can
+//!        complete the handshake; no public CA is trusted on this path.
+//!        Hostname verification stays ON unless the connection host is a
+//!        bare IP literal, in which case ONLY hostname matching is relaxed
+//!        (`danger_accept_invalid_hostnames(true)`). The certificate itself
+//!        is still fully authenticated against the pin, never against a
+//!        public root. `danger_accept_invalid_certs` is never called on
+//!        this path either.
 //!      - Dev toggle (`allow_untrusted_tls == true` AND no usable pin): the
 //!        one and only path that calls `danger_accept_invalid_certs(true)`.
 //!        This is insecure by design (see `Connection::allow_untrusted_tls`)
@@ -138,11 +143,13 @@ fn bare_host(base_url: &str) -> &str {
 /// the top of this module:
 /// - No pin, `allow_untrusted_tls == false` (the default): system roots,
 ///   standard verification, fully strict.
-/// - Pin present: the pinned DER is the sole trust anchor via
-///   `add_root_certificate`; hostname verification is relaxed ONLY when the
-///   connection host is a bare IP literal (never for a DNS name), and even
-///   then only the name check is skipped. The certificate itself is still
-///   authenticated against the pin.
+/// - Pin present: built-in root certificates are disabled and the pinned DER
+///   is added as the sole trust anchor via `add_root_certificate`, so ONLY
+///   the pin (no public CA) can complete the handshake. Hostname
+///   verification is relaxed ONLY when the connection host is a bare IP
+///   literal (never for a DNS name), and even then only the name check is
+///   skipped. The certificate itself is still authenticated against the
+///   pin, never against a public root.
 /// - No pin, `allow_untrusted_tls == true`: the one dev-only path that calls
 ///   `danger_accept_invalid_certs(true)`. See the loud warning on
 ///   `Connection::allow_untrusted_tls`.
@@ -162,7 +169,17 @@ pub fn build_client(connection: &Connection) -> Result<reqwest::Client, CoreErro
         })?;
         let base_url = normalize_host(&connection.host);
         let relax_hostname = host_is_ip_literal(bare_host(&base_url));
-        builder = builder.add_root_certificate(cert).danger_accept_invalid_hostnames(relax_hostname);
+        // Built-in roots must be disabled here, otherwise the pin is only
+        // additive: the handshake would succeed against EITHER the pinned
+        // DER OR any certificate chaining to a public CA, which is not
+        // pinning at all. Disabling them makes the pinned DER the sole
+        // trust anchor, so only it (or a certificate it issued, if it is a
+        // CA) can complete the handshake, even with hostname checking
+        // relaxed for the IP literal case below.
+        builder = builder
+            .tls_built_in_root_certs(false)
+            .add_root_certificate(cert)
+            .danger_accept_invalid_hostnames(relax_hostname);
     } else if connection.allow_untrusted_tls {
         // DEV-ONLY, INSECURE: accepts any certificate from any server. Only
         // reachable when there is no pin at all; see the doc comment on
