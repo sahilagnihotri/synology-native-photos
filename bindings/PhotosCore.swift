@@ -438,6 +438,22 @@ fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
+    typealias FfiType = Int64
+    typealias SwiftType = Int64
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int64 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int64, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterString: FfiConverter {
     typealias SwiftType = String
     typealias FfiType = RustBuffer
@@ -537,6 +553,19 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func crawlSpace(space: Space, observer: FfiCrawlObserver) async throws  -> CrawlProgress
     
     /**
+     * Downloads the original full-resolution bytes for `asset_id` to a
+     * temp file and returns its absolute path. Read-only: never writes
+     * anything back to the NAS.
+     *
+     * Same lock discipline as `thumbnail`: `live` is locked only long enough
+     * to clone the transport/sid/version triple, then dropped before the
+     * network `.await`.
+     *
+     * Fails closed with `CoreError::Auth` if no session is held.
+     */
+    func downloadOriginal(space: Space, assetId: Int64, cacheKey: String) async throws  -> String
+    
+    /**
      * Local read of every album in `space`, ordered by name. No network
      * access; same lock discipline as `fetch_assets`/`asset_count`.
      */
@@ -611,6 +640,29 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * sign out of always succeeds.
      */
     func signOut() async throws 
+    
+    /**
+     * Fetches a thumbnail for `asset_id` at `size`, served from a
+     * composite-key on-disk cache whenever possible.
+     *
+     * The cache path is keyed on `(space, asset_id, size, cache_key)` -
+     * `{cache_dir}/thumbs/{space}/{asset_id}/{size}_{cache_key}.jpg`.
+     * `cache_key` is a version token from the NAS (`SYNO.Foto.Browse.Item`'s
+     * `additional.thumbnail.cache_key`): whenever the server-side asset
+     * changes, the NAS mints a new cache_key, so a stale cache_key can never
+     * collide with a fresh file on disk - the path itself changes, which is
+     * what makes this an invalidating cache rather than one that needs
+     * separate eviction logic.
+     *
+     * On a cache hit, this returns entirely from disk with no network
+     * access. On a miss, `live` is locked only long enough to clone the
+     * transport/sid/version triple it needs; the guard is dropped before the
+     * `fetch_thumbnail` `.await`, matching the discipline used by
+     * `page_source_for`/`crawl_space` elsewhere in this file.
+     *
+     * Fails closed with `CoreError::Auth` if no session is held.
+     */
+    func thumbnail(space: Space, assetId: Int64, cacheKey: String, size: ThumbnailSize) async throws  -> ThumbnailData
     
 }
 /**
@@ -755,6 +807,34 @@ open func crawlSpace(space: Space, observer: FfiCrawlObserver)async throws  -> C
             completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
             freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeCrawlProgress_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Downloads the original full-resolution bytes for `asset_id` to a
+     * temp file and returns its absolute path. Read-only: never writes
+     * anything back to the NAS.
+     *
+     * Same lock discipline as `thumbnail`: `live` is locked only long enough
+     * to clone the transport/sid/version triple, then dropped before the
+     * network `.await`.
+     *
+     * Fails closed with `CoreError::Auth` if no session is held.
+     */
+open func downloadOriginal(space: Space, assetId: Int64, cacheKey: String)async throws  -> String  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_download_original(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeSpace_lower(space),FfiConverterInt64.lower(assetId),FfiConverterString.lower(cacheKey)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterString.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -920,6 +1000,44 @@ open func signOut()async throws   {
             completeFunc: ffi_photoscore_rust_future_complete_void,
             freeFunc: ffi_photoscore_rust_future_free_void,
             liftFunc: { $0 },
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Fetches a thumbnail for `asset_id` at `size`, served from a
+     * composite-key on-disk cache whenever possible.
+     *
+     * The cache path is keyed on `(space, asset_id, size, cache_key)` -
+     * `{cache_dir}/thumbs/{space}/{asset_id}/{size}_{cache_key}.jpg`.
+     * `cache_key` is a version token from the NAS (`SYNO.Foto.Browse.Item`'s
+     * `additional.thumbnail.cache_key`): whenever the server-side asset
+     * changes, the NAS mints a new cache_key, so a stale cache_key can never
+     * collide with a fresh file on disk - the path itself changes, which is
+     * what makes this an invalidating cache rather than one that needs
+     * separate eviction logic.
+     *
+     * On a cache hit, this returns entirely from disk with no network
+     * access. On a miss, `live` is locked only long enough to clone the
+     * transport/sid/version triple it needs; the guard is dropped before the
+     * `fetch_thumbnail` `.await`, matching the discipline used by
+     * `page_source_for`/`crawl_space` elsewhere in this file.
+     *
+     * Fails closed with `CoreError::Auth` if no session is held.
+     */
+open func thumbnail(space: Space, assetId: Int64, cacheKey: String, size: ThumbnailSize)async throws  -> ThumbnailData  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_thumbnail(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeSpace_lower(space),FfiConverterInt64.lower(assetId),FfiConverterString.lower(cacheKey),FfiConverterTypeThumbnailSize_lower(size)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeThumbnailData_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -1280,6 +1398,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_crawl_space() != 58321) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_photoscore_checksum_method_photoscore_download_original() != 57885) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_albums() != 8838) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1299,6 +1420,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_sign_out() != 54821) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_thumbnail() != 51956) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_constructor_photoscore_new() != 54313) {

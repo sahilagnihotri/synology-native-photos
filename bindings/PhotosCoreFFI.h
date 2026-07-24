@@ -296,6 +296,11 @@ RustBuffer uniffi_photoscore_fn_method_photoscore_crawl_progress(void*_Nonnull p
 uint64_t uniffi_photoscore_fn_method_photoscore_crawl_space(void*_Nonnull ptr, RustBuffer space, uint64_t observer
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
+uint64_t uniffi_photoscore_fn_method_photoscore_download_original(void*_Nonnull ptr, RustBuffer space, int64_t asset_id, RustBuffer cache_key
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_ALBUMS
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_ALBUMS
 RustBuffer uniffi_photoscore_fn_method_photoscore_fetch_albums(void*_Nonnull ptr, RustBuffer space, RustCallStatus *_Nonnull out_status
@@ -329,6 +334,11 @@ uint64_t uniffi_photoscore_fn_method_photoscore_restore_session(void*_Nonnull pt
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_SIGN_OUT
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_SIGN_OUT
 uint64_t uniffi_photoscore_fn_method_photoscore_sign_out(void*_Nonnull ptr
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_THUMBNAIL
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_THUMBNAIL
+uint64_t uniffi_photoscore_fn_method_photoscore_thumbnail(void*_Nonnull ptr, RustBuffer space, int64_t asset_id, RustBuffer cache_key, RustBuffer size
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_INIT_CALLBACK_VTABLE_FFICRAWLOBSERVER
@@ -646,6 +656,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_crawl_space(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
+uint16_t uniffi_photoscore_checksum_method_photoscore_download_original(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_ALBUMS
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_ALBUMS
 uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_albums(void
@@ -685,6 +701,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_restore_session(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_SIGN_OUT
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_SIGN_OUT
 uint16_t uniffi_photoscore_checksum_method_photoscore_sign_out(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_THUMBNAIL
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_THUMBNAIL
+uint16_t uniffi_photoscore_checksum_method_photoscore_thumbnail(void
     
 );
 #endif

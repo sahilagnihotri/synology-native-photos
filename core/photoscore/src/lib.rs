@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use models::{
     Album, ApiCapability, Asset, Connection, CoreError, CrawlProgress, Session, SessionState, Space,
+    ThumbnailData, ThumbnailSize,
 };
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
@@ -298,6 +299,97 @@ impl PhotosCore {
         let guard = self.store.lock().expect("store mutex poisoned");
         let store = guard.as_ref().ok_or_else(store_busy_err)?;
         store.fetch_albums(space)
+    }
+
+    /// Fetches a thumbnail for `asset_id` at `size`, served from a
+    /// composite-key on-disk cache whenever possible.
+    ///
+    /// The cache path is keyed on `(space, asset_id, size, cache_key)` -
+    /// `{cache_dir}/thumbs/{space}/{asset_id}/{size}_{cache_key}.jpg`.
+    /// `cache_key` is a version token from the NAS (`SYNO.Foto.Browse.Item`'s
+    /// `additional.thumbnail.cache_key`): whenever the server-side asset
+    /// changes, the NAS mints a new cache_key, so a stale cache_key can never
+    /// collide with a fresh file on disk - the path itself changes, which is
+    /// what makes this an invalidating cache rather than one that needs
+    /// separate eviction logic.
+    ///
+    /// On a cache hit, this returns entirely from disk with no network
+    /// access. On a miss, `live` is locked only long enough to clone the
+    /// transport/sid/version triple it needs; the guard is dropped before the
+    /// `fetch_thumbnail` `.await`, matching the discipline used by
+    /// `page_source_for`/`crawl_space` elsewhere in this file.
+    ///
+    /// Fails closed with `CoreError::Auth` if no session is held.
+    pub async fn thumbnail(
+        &self,
+        space: Space,
+        asset_id: i64,
+        cache_key: String,
+        size: ThumbnailSize,
+    ) -> Result<ThumbnailData, CoreError> {
+        let size_tag = match size {
+            ThumbnailSize::Sm => "sm",
+            ThumbnailSize::M => "m",
+            ThumbnailSize::Xl => "xl",
+        };
+        let space_tag = match space {
+            Space::Personal => "personal",
+            Space::Shared => "shared",
+        };
+        let dir = std::path::Path::new(&self.cache_dir).join("thumbs").join(space_tag).join(asset_id.to_string());
+        let path = dir.join(format!("{size_tag}_{cache_key}.jpg"));
+        if path.exists() {
+            let bytes = std::fs::read(&path).map_err(|e| CoreError::Storage { message: e.to_string() })?;
+            return Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes });
+        }
+
+        let (transport, sid, version) = {
+            let guard = self.live.lock().expect("live mutex poisoned");
+            let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
+            let api = match space {
+                Space::Personal => "SYNO.Foto.Thumbnail",
+                Space::Shared => "SYNO.FotoTeam.Thumbnail",
+            };
+            let version = synology_api::pin_version(&live.capabilities, api, 2).unwrap_or(2);
+            (Transport::new(&live.connection)?, live.session.sid.clone(), version)
+        };
+
+        let bytes = synology_api::fetch_thumbnail(&transport, &sid, space, asset_id, &cache_key, size, version).await?;
+        std::fs::create_dir_all(&dir).map_err(|e| CoreError::Storage { message: e.to_string() })?;
+        std::fs::write(&path, &bytes).map_err(|e| CoreError::Storage { message: e.to_string() })?;
+        Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes })
+    }
+
+    /// Downloads the original full-resolution bytes for `asset_id` to a
+    /// temp file and returns its absolute path. Read-only: never writes
+    /// anything back to the NAS.
+    ///
+    /// Same lock discipline as `thumbnail`: `live` is locked only long enough
+    /// to clone the transport/sid/version triple, then dropped before the
+    /// network `.await`.
+    ///
+    /// Fails closed with `CoreError::Auth` if no session is held.
+    pub async fn download_original(
+        &self,
+        space: Space,
+        asset_id: i64,
+        cache_key: String,
+    ) -> Result<String, CoreError> {
+        let (transport, sid, version) = {
+            let guard = self.live.lock().expect("live mutex poisoned");
+            let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
+            let api = match space {
+                Space::Personal => "SYNO.Foto.Download",
+                Space::Shared => "SYNO.FotoTeam.Download",
+            };
+            let version = synology_api::pin_version(&live.capabilities, api, 2).unwrap_or(2);
+            (Transport::new(&live.connection)?, live.session.sid.clone(), version)
+        };
+
+        let bytes = synology_api::download_original(&transport, &sid, space, asset_id, &cache_key, version).await?;
+        let tmp = std::env::temp_dir().join(format!("syno-orig-{asset_id}-{cache_key}"));
+        std::fs::write(&tmp, &bytes).map_err(|e| CoreError::Storage { message: e.to_string() })?;
+        Ok(tmp.to_string_lossy().into())
     }
 }
 
@@ -959,5 +1051,207 @@ mod core_tests {
 
         core.sign_out().await.expect("sign_out ok");
         assert!(core.live.lock().unwrap().is_none(), "sign_out must clear Live");
+    }
+
+    /// Task 37 TDD: a thumbnail cache miss fetches the bytes over the network,
+    /// writes them to the composite-key cache path, and returns both the path
+    /// and the bytes.
+    #[tokio::test]
+    async fn thumbnail_cache_miss_fetches_and_writes_cache_file() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _info = server.mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"SYNO.Foto.Thumbnail":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
+            .create_async().await;
+        let _thumb = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
+                mockito::Matcher::UrlEncoded("id".into(), "101".into()),
+                mockito::Matcher::UrlEncoded("cache_key".into(), "CK1".into()),
+            ]))
+            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_body(vec![0xFF, 0xD8, 0xFF])
+            .expect(1)
+            .create_async().await;
+        let core = core_at("thumb-miss");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        core.probe_capabilities().await.unwrap();
+
+        let data = core.thumbnail(Space::Personal, 101, "CK1".into(), models::ThumbnailSize::Sm).await.expect("thumb ok");
+        assert!(data.cached_path.contains("thumbs"));
+        assert!(data.cached_path.ends_with("sm_CK1.jpg"));
+        assert!(std::path::Path::new(&data.cached_path).exists());
+        assert_eq!(data.bytes, vec![0xFF, 0xD8, 0xFF]);
+        _thumb.assert_async().await;
+    }
+
+    /// Task 37 TDD: a second call with the SAME composite key (space, asset,
+    /// size, cache_key) must be served entirely from disk, without a second
+    /// network round trip. Proven by asserting the thumbnail mock received
+    /// exactly one call total across both `thumbnail()` invocations.
+    #[tokio::test]
+    async fn thumbnail_cache_hit_skips_network() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _info = server.mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"SYNO.Foto.Thumbnail":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
+            .create_async().await;
+        let _thumb = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
+                mockito::Matcher::UrlEncoded("id".into(), "202".into()),
+                mockito::Matcher::UrlEncoded("cache_key".into(), "CK2".into()),
+            ]))
+            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_body(vec![0xAA, 0xBB])
+            .expect(1)
+            .create_async().await;
+        let core = core_at("thumb-hit");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        core.probe_capabilities().await.unwrap();
+
+        let first = core.thumbnail(Space::Personal, 202, "CK2".into(), models::ThumbnailSize::M).await.expect("first ok");
+        let second = core.thumbnail(Space::Personal, 202, "CK2".into(), models::ThumbnailSize::M).await.expect("second ok");
+        assert_eq!(first.cached_path, second.cached_path);
+        assert_eq!(second.bytes, vec![0xAA, 0xBB]);
+        // The mock is `.expect(1)`: if the cache hit had reached the network
+        // again, `.assert_async()` below would fail.
+        _thumb.assert_async().await;
+    }
+
+    /// Task 37 TDD: a DIFFERENT cache_key for the same asset/size must miss
+    /// the cache and re-fetch, proving the composite key includes cache_key
+    /// rather than just (space, asset_id, size).
+    #[tokio::test]
+    async fn thumbnail_different_cache_key_invalidates_and_refetches() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _info = server.mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"SYNO.Foto.Thumbnail":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
+            .create_async().await;
+        let _thumb_ck1 = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
+                mockito::Matcher::UrlEncoded("id".into(), "303".into()),
+                mockito::Matcher::UrlEncoded("cache_key".into(), "CK-OLD".into()),
+            ]))
+            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_body(vec![0x01])
+            .expect(1)
+            .create_async().await;
+        let _thumb_ck2 = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
+                mockito::Matcher::UrlEncoded("id".into(), "303".into()),
+                mockito::Matcher::UrlEncoded("cache_key".into(), "CK-NEW".into()),
+            ]))
+            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_body(vec![0x02])
+            .expect(1)
+            .create_async().await;
+        let core = core_at("thumb-invalidate");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        core.probe_capabilities().await.unwrap();
+
+        let old = core.thumbnail(Space::Personal, 303, "CK-OLD".into(), models::ThumbnailSize::Xl).await.expect("old ok");
+        let new = core.thumbnail(Space::Personal, 303, "CK-NEW".into(), models::ThumbnailSize::Xl).await.expect("new ok");
+        assert_ne!(old.cached_path, new.cached_path, "a changed cache_key must produce a distinct cache path");
+        assert_eq!(old.bytes, vec![0x01]);
+        assert_eq!(new.bytes, vec![0x02]);
+        _thumb_ck1.assert_async().await;
+        _thumb_ck2.assert_async().await;
+    }
+
+    /// Task 37 TDD: fail-closed when no session is held; no network hit.
+    #[tokio::test]
+    async fn thumbnail_without_login_returns_auth_error() {
+        let core = core_at("thumb-no-login");
+        let err = core.thumbnail(Space::Personal, 1, "CK".into(), models::ThumbnailSize::Sm).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    /// Task 37 TDD: download_original fetches full-resolution bytes and
+    /// writes them to a path it returns; read-only, no NAS write.
+    #[tokio::test]
+    async fn download_original_returns_path_to_downloaded_bytes() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _info = server.mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"SYNO.Foto.Download":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
+            .create_async().await;
+        let _dl = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Download".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "download".into()),
+            ]))
+            .with_status(200).with_header("content-type", "application/octet-stream")
+            .with_body(b"ORIGINAL-BYTES".to_vec())
+            .create_async().await;
+        let core = core_at("download-ok");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        core.probe_capabilities().await.unwrap();
+
+        let path = core.download_original(Space::Personal, 101, "CK1".into()).await.expect("download ok");
+        assert!(std::path::Path::new(&path).exists());
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(bytes, b"ORIGINAL-BYTES".to_vec());
+    }
+
+    /// Task 37 TDD: a JSON error envelope from the download endpoint maps to
+    /// a CoreError via `map_binary_or_error`, not a panic or silent success.
+    #[tokio::test]
+    async fn download_original_json_error_maps_to_core_error() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _info = server.mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"SYNO.Foto.Download":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
+            .create_async().await;
+        let _dl = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Download".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "download".into()),
+            ]))
+            .with_status(200).with_header("content-type", "application/json")
+            .with_body(r#"{"success":false,"error":{"code":400}}"#)
+            .create_async().await;
+        let core = core_at("download-err");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        core.probe_capabilities().await.unwrap();
+
+        let err = core.download_original(Space::Personal, 101, "CK1".into()).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    /// Task 37 TDD: fail-closed when no session is held; no network hit.
+    #[tokio::test]
+    async fn download_original_without_login_returns_auth_error() {
+        let core = core_at("download-no-login");
+        let err = core.download_original(Space::Personal, 1, "CK".into()).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 }
