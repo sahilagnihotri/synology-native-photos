@@ -1156,6 +1156,223 @@ public func FfiConverterTypeCrawlProgress_lower(_ value: CrawlProgress) -> RustB
 }
 
 
+/**
+ * One row from `SYNO.Foto.Browse.Person`: a face cluster DSM has detected.
+ * `name` is the empty string for a person DSM has not been given a name
+ * for yet (the app shows this as a disabled "Add Name" placeholder rather
+ * than naming people itself, which is a later, gated mutation). `cover`
+ * is the unit_id DSM reports for the cluster's representative thumbnail;
+ * it goes through the same thumbnail fetch path as `Asset.unit_id`, but
+ * has no `cache_key` of its own (Person does not return one), so callers
+ * pass an empty cache_key when fetching it. `show` mirrors DSM's own
+ * "hide this person" toggle; a hidden person is still modeled here (never
+ * silently dropped) so the caller can decide whether to filter it.
+ */
+public struct Person {
+    public var id: Int64
+    public var name: String
+    public var itemCount: UInt32
+    public var coverUnitId: Int64?
+    public var show: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: Int64, name: String, itemCount: UInt32, coverUnitId: Int64?, show: Bool) {
+        self.id = id
+        self.name = name
+        self.itemCount = itemCount
+        self.coverUnitId = coverUnitId
+        self.show = show
+    }
+}
+
+#if compiler(>=6)
+extension Person: Sendable {}
+#endif
+
+
+extension Person: Equatable, Hashable {
+    public static func ==(lhs: Person, rhs: Person) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.itemCount != rhs.itemCount {
+            return false
+        }
+        if lhs.coverUnitId != rhs.coverUnitId {
+            return false
+        }
+        if lhs.show != rhs.show {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(itemCount)
+        hasher.combine(coverUnitId)
+        hasher.combine(show)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePerson: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Person {
+        return
+            try Person(
+                id: FfiConverterInt64.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                itemCount: FfiConverterUInt32.read(from: &buf), 
+                coverUnitId: FfiConverterOptionInt64.read(from: &buf), 
+                show: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Person, into buf: inout [UInt8]) {
+        FfiConverterInt64.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterUInt32.write(value.itemCount, into: &buf)
+        FfiConverterOptionInt64.write(value.coverUnitId, into: &buf)
+        FfiConverterBool.write(value.show, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePerson_lift(_ buf: RustBuffer) throws -> Person {
+    return try FfiConverterTypePerson.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePerson_lower(_ value: Person) -> RustBuffer {
+    return FfiConverterTypePerson.lower(value)
+}
+
+
+/**
+ * One row from `SYNO.Foto.Browse.Geocoding`: a place cluster DSM has
+ * grouped photos into by location. `name` is the ready-to-display label
+ * DSM already composes (e.g. "Grunerlokka, Oslo"); `country`/
+ * `first_level`/`second_level` are kept for a caller that wants to build
+ * its own hierarchy or grouping instead of the flat `name`. Geocoding
+ * rows carry no cover thumbnail on this API (verified against the real
+ * NAS), so there is no `cover_unit_id` field here.
+ */
+public struct Place {
+    public var id: Int64
+    public var name: String
+    public var country: String
+    public var firstLevel: String
+    public var secondLevel: String
+    public var itemCount: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: Int64, name: String, country: String, firstLevel: String, secondLevel: String, itemCount: UInt32) {
+        self.id = id
+        self.name = name
+        self.country = country
+        self.firstLevel = firstLevel
+        self.secondLevel = secondLevel
+        self.itemCount = itemCount
+    }
+}
+
+#if compiler(>=6)
+extension Place: Sendable {}
+#endif
+
+
+extension Place: Equatable, Hashable {
+    public static func ==(lhs: Place, rhs: Place) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.country != rhs.country {
+            return false
+        }
+        if lhs.firstLevel != rhs.firstLevel {
+            return false
+        }
+        if lhs.secondLevel != rhs.secondLevel {
+            return false
+        }
+        if lhs.itemCount != rhs.itemCount {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(country)
+        hasher.combine(firstLevel)
+        hasher.combine(secondLevel)
+        hasher.combine(itemCount)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePlace: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Place {
+        return
+            try Place(
+                id: FfiConverterInt64.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                country: FfiConverterString.read(from: &buf), 
+                firstLevel: FfiConverterString.read(from: &buf), 
+                secondLevel: FfiConverterString.read(from: &buf), 
+                itemCount: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Place, into buf: inout [UInt8]) {
+        FfiConverterInt64.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.country, into: &buf)
+        FfiConverterString.write(value.firstLevel, into: &buf)
+        FfiConverterString.write(value.secondLevel, into: &buf)
+        FfiConverterUInt32.write(value.itemCount, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePlace_lift(_ buf: RustBuffer) throws -> Place {
+    return try FfiConverterTypePlace.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePlace_lower(_ value: Place) -> RustBuffer {
+    return FfiConverterTypePlace.lower(value)
+}
+
+
 public struct Session {
     public var sid: String
     public var synoToken: String?
@@ -1239,6 +1456,181 @@ public func FfiConverterTypeSession_lift(_ buf: RustBuffer) throws -> Session {
 #endif
 public func FfiConverterTypeSession_lower(_ value: Session) -> RustBuffer {
     return FfiConverterTypeSession.lower(value)
+}
+
+
+/**
+ * One row from `SYNO.Foto.Browse.Concept` ("Subjects" in the sidebar).
+ * VERIFIED against the real NAS: the list API itself works and returns
+ * real categories (Food, Nature, Animals, Transportation, ...), but no
+ * working `Browse.Item` filter param or dedicated item-list API was found
+ * for it (see the discovery-browse plan doc for every candidate tried).
+ * This model exists so the list can still be shown; `fetch_assets_for`
+ * intentionally has no `Subject` variant yet, so selecting a subject tile
+ * has nothing to route to until DSM's filter surface for Concept is
+ * found.
+ */
+public struct Subject {
+    public var id: Int64
+    public var name: String
+    public var itemCount: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: Int64, name: String, itemCount: UInt32) {
+        self.id = id
+        self.name = name
+        self.itemCount = itemCount
+    }
+}
+
+#if compiler(>=6)
+extension Subject: Sendable {}
+#endif
+
+
+extension Subject: Equatable, Hashable {
+    public static func ==(lhs: Subject, rhs: Subject) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.itemCount != rhs.itemCount {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(itemCount)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSubject: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Subject {
+        return
+            try Subject(
+                id: FfiConverterInt64.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                itemCount: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Subject, into buf: inout [UInt8]) {
+        FfiConverterInt64.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterUInt32.write(value.itemCount, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSubject_lift(_ buf: RustBuffer) throws -> Subject {
+    return try FfiConverterTypeSubject.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSubject_lower(_ value: Subject) -> RustBuffer {
+    return FfiConverterTypeSubject.lower(value)
+}
+
+
+/**
+ * One row from `SYNO.Foto.Browse.GeneralTag`. VERIFIED shape against the
+ * real NAS (the list itself was empty -- no tags exist yet on this
+ * account -- but the envelope decodes cleanly either way). The
+ * `general_tag_id` Browse.Item filter param was confirmed accepted (a
+ * made-up id returns a clean empty list rather than being silently
+ * ignored) though not yet exercised against a real non-empty tag.
+ */
+public struct Tag {
+    public var id: Int64
+    public var name: String
+    public var itemCount: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: Int64, name: String, itemCount: UInt32) {
+        self.id = id
+        self.name = name
+        self.itemCount = itemCount
+    }
+}
+
+#if compiler(>=6)
+extension Tag: Sendable {}
+#endif
+
+
+extension Tag: Equatable, Hashable {
+    public static func ==(lhs: Tag, rhs: Tag) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.itemCount != rhs.itemCount {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(itemCount)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTag: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Tag {
+        return
+            try Tag(
+                id: FfiConverterInt64.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                itemCount: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Tag, into buf: inout [UInt8]) {
+        FfiConverterInt64.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterUInt32.write(value.itemCount, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTag_lift(_ buf: RustBuffer) throws -> Tag {
+    return try FfiConverterTypeTag.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTag_lower(_ value: Tag) -> RustBuffer {
+    return FfiConverterTypeTag.lower(value)
 }
 
 
@@ -1445,6 +1837,106 @@ extension CoreError: Foundation.LocalizedError {
         String(reflecting: self)
     }
 }
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * A discovery-browse collection to fetch photos for: one of People,
+ * Places, Tags, or the user's Favorites. Personal space only (see
+ * `synology_api::browse::CollectionFilter`, which this maps onto
+ * one-for-one); there is deliberately no `Subject` variant because no
+ * working item filter was found for Concept/Subjects on the real NAS.
+ */
+
+public enum DiscoveryCollection {
+    
+    case person(id: Int64
+    )
+    case place(id: Int64
+    )
+    case tag(id: Int64
+    )
+    case favorites
+}
+
+
+#if compiler(>=6)
+extension DiscoveryCollection: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDiscoveryCollection: FfiConverterRustBuffer {
+    typealias SwiftType = DiscoveryCollection
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DiscoveryCollection {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .person(id: try FfiConverterInt64.read(from: &buf)
+        )
+        
+        case 2: return .place(id: try FfiConverterInt64.read(from: &buf)
+        )
+        
+        case 3: return .tag(id: try FfiConverterInt64.read(from: &buf)
+        )
+        
+        case 4: return .favorites
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DiscoveryCollection, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .person(id):
+            writeInt(&buf, Int32(1))
+            FfiConverterInt64.write(id, into: &buf)
+            
+        
+        case let .place(id):
+            writeInt(&buf, Int32(2))
+            FfiConverterInt64.write(id, into: &buf)
+            
+        
+        case let .tag(id):
+            writeInt(&buf, Int32(3))
+            FfiConverterInt64.write(id, into: &buf)
+            
+        
+        case .favorites:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDiscoveryCollection_lift(_ buf: RustBuffer) throws -> DiscoveryCollection {
+    return try FfiConverterTypeDiscoveryCollection.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDiscoveryCollection_lower(_ value: DiscoveryCollection) -> RustBuffer {
+    return FfiConverterTypeDiscoveryCollection.lower(value)
+}
+
+
+extension DiscoveryCollection: Equatable, Hashable {}
+
+
 
 
 

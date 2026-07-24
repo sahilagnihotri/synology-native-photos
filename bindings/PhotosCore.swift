@@ -587,6 +587,20 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func fetchAssets(space: Space, offset: UInt32, limit: UInt32) throws  -> [Asset]
     
     /**
+     * Fetches the photos belonging to one discovery-browse `collection`
+     * (a person, place, tag, or the user's favorites), windowed the same
+     * way `fetch_assets` windows the library grid. Unlike `fetch_assets`,
+     * this always hits the NAS directly (no local index for discovery
+     * collections yet), but keeps the same unit_id/token invariants every
+     * other browse call in this crate relies on.
+     *
+     * Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise. Personal space only, matching
+     * `synology_api::browse::CollectionFilter`'s own scope.
+     */
+    func fetchAssetsFor(collection: DiscoveryCollection, offset: UInt32, limit: UInt32) async throws  -> [Asset]
+    
+    /**
      * Fetches the TLS certificate presented by `host` for trust-on-first-use
      * approval, without ever trusting it for a real request (see
      * `synology_api::fetch_server_cert_der` for exactly what is and is not
@@ -600,6 +614,36 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * `Connection.pinned_cert_der` on the `Connection` used for `login`.
      */
     func fetchCertificate(host: String) async throws  -> CertInfo
+    
+    /**
+     * Lists People (`SYNO.Foto.Browse.Person`), a live network call every
+     * time: unlike `fetch_assets`/`fetch_albums`, discovery-browse
+     * collections have no local index in this pass, so this always hits
+     * the NAS. Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
+     */
+    func fetchPeople(offset: UInt32, limit: UInt32) async throws  -> [Person]
+    
+    /**
+     * Lists Places (`SYNO.Foto.Browse.Geocoding`). Same live-call and auth
+     * discipline as `fetch_people`.
+     */
+    func fetchPlaces(offset: UInt32, limit: UInt32) async throws  -> [Place]
+    
+    /**
+     * Lists Subjects (`SYNO.Foto.Browse.Concept`). Same live-call and auth
+     * discipline as `fetch_people`. Listing works; there is deliberately no
+     * `fetch_assets_for` variant for a subject yet (see
+     * `DiscoveryCollection`'s doc comment), so a subject tile has nothing
+     * to route to on this NAS until a working item filter is found.
+     */
+    func fetchSubjects(offset: UInt32, limit: UInt32) async throws  -> [Subject]
+    
+    /**
+     * Lists Tags (`SYNO.Foto.Browse.GeneralTag`). Same live-call and auth
+     * discipline as `fetch_people`.
+     */
+    func fetchTags(offset: UInt32, limit: UInt32) async throws  -> [Tag]
     
     /**
      * Log in against `connection` with the given credentials.
@@ -919,6 +963,35 @@ open func fetchAssets(space: Space, offset: UInt32, limit: UInt32)throws  -> [As
 }
     
     /**
+     * Fetches the photos belonging to one discovery-browse `collection`
+     * (a person, place, tag, or the user's favorites), windowed the same
+     * way `fetch_assets` windows the library grid. Unlike `fetch_assets`,
+     * this always hits the NAS directly (no local index for discovery
+     * collections yet), but keeps the same unit_id/token invariants every
+     * other browse call in this crate relies on.
+     *
+     * Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise. Personal space only, matching
+     * `synology_api::browse::CollectionFilter`'s own scope.
+     */
+open func fetchAssetsFor(collection: DiscoveryCollection, offset: UInt32, limit: UInt32)async throws  -> [Asset]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_fetch_assets_for(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeDiscoveryCollection_lower(collection),FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeAsset.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
      * Fetches the TLS certificate presented by `host` for trust-on-first-use
      * approval, without ever trusting it for a real request (see
      * `synology_api::fetch_server_cert_der` for exactly what is and is not
@@ -944,6 +1017,96 @@ open func fetchCertificate(host: String)async throws  -> CertInfo  {
             completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
             freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeCertInfo_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Lists People (`SYNO.Foto.Browse.Person`), a live network call every
+     * time: unlike `fetch_assets`/`fetch_albums`, discovery-browse
+     * collections have no local index in this pass, so this always hits
+     * the NAS. Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
+     */
+open func fetchPeople(offset: UInt32, limit: UInt32)async throws  -> [Person]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_fetch_people(
+                    self.uniffiClonePointer(),
+                    FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypePerson.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Lists Places (`SYNO.Foto.Browse.Geocoding`). Same live-call and auth
+     * discipline as `fetch_people`.
+     */
+open func fetchPlaces(offset: UInt32, limit: UInt32)async throws  -> [Place]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_fetch_places(
+                    self.uniffiClonePointer(),
+                    FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypePlace.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Lists Subjects (`SYNO.Foto.Browse.Concept`). Same live-call and auth
+     * discipline as `fetch_people`. Listing works; there is deliberately no
+     * `fetch_assets_for` variant for a subject yet (see
+     * `DiscoveryCollection`'s doc comment), so a subject tile has nothing
+     * to route to on this NAS until a working item filter is found.
+     */
+open func fetchSubjects(offset: UInt32, limit: UInt32)async throws  -> [Subject]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_fetch_subjects(
+                    self.uniffiClonePointer(),
+                    FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeSubject.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Lists Tags (`SYNO.Foto.Browse.GeneralTag`). Same live-call and auth
+     * discipline as `fetch_people`.
+     */
+open func fetchTags(offset: UInt32, limit: UInt32)async throws  -> [Tag]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_fetch_tags(
+                    self.uniffiClonePointer(),
+                    FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeTag.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -1417,6 +1580,106 @@ fileprivate struct FfiConverterSequenceTypeAsset: FfiConverterRustBuffer {
         return seq
     }
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePerson: FfiConverterRustBuffer {
+    typealias SwiftType = [Person]
+
+    public static func write(_ value: [Person], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePerson.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Person] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Person]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePerson.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePlace: FfiConverterRustBuffer {
+    typealias SwiftType = [Place]
+
+    public static func write(_ value: [Place], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePlace.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Place] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Place]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePlace.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSubject: FfiConverterRustBuffer {
+    typealias SwiftType = [Subject]
+
+    public static func write(_ value: [Subject], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSubject.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Subject] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Subject]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSubject.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeTag: FfiConverterRustBuffer {
+    typealias SwiftType = [Tag]
+
+    public static func write(_ value: [Tag], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeTag.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Tag] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Tag]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeTag.read(from: &buf))
+        }
+        return seq
+    }
+}
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_MAYBE_READY: Int8 = 1
 
@@ -1510,7 +1773,22 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_fetch_assets() != 29559) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_assets_for() != 57361) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_certificate() != 19983) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_people() != 6988) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_places() != 23273) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_subjects() != 59577) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_tags() != 10636) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_login() != 52991) {

@@ -311,9 +311,34 @@ RustBuffer uniffi_photoscore_fn_method_photoscore_fetch_albums(void*_Nonnull ptr
 RustBuffer uniffi_photoscore_fn_method_photoscore_fetch_assets(void*_Nonnull ptr, RustBuffer space, uint32_t offset, uint32_t limit, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_ASSETS_FOR
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_ASSETS_FOR
+uint64_t uniffi_photoscore_fn_method_photoscore_fetch_assets_for(void*_Nonnull ptr, RustBuffer collection, uint32_t offset, uint32_t limit
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
 uint64_t uniffi_photoscore_fn_method_photoscore_fetch_certificate(void*_Nonnull ptr, RustBuffer host
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_PEOPLE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_PEOPLE
+uint64_t uniffi_photoscore_fn_method_photoscore_fetch_people(void*_Nonnull ptr, uint32_t offset, uint32_t limit
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_PLACES
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_PLACES
+uint64_t uniffi_photoscore_fn_method_photoscore_fetch_places(void*_Nonnull ptr, uint32_t offset, uint32_t limit
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_SUBJECTS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_SUBJECTS
+uint64_t uniffi_photoscore_fn_method_photoscore_fetch_subjects(void*_Nonnull ptr, uint32_t offset, uint32_t limit
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_TAGS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_TAGS
+uint64_t uniffi_photoscore_fn_method_photoscore_fetch_tags(void*_Nonnull ptr, uint32_t offset, uint32_t limit
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
@@ -679,9 +704,39 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_assets(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_ASSETS_FOR
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_ASSETS_FOR
+uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_assets_for(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
 uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_certificate(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_PEOPLE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_PEOPLE
+uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_people(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_PLACES
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_PLACES
+uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_places(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_SUBJECTS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_SUBJECTS
+uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_subjects(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_TAGS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_TAGS
+uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_tags(void
     
 );
 #endif
