@@ -150,3 +150,151 @@ enum KeychainSID {
         return stored
     }
 }
+
+/// Trust-on-first-use certificate pin storage, keyed per host.
+///
+/// A pin is server-identity material, not user-session material: it says
+/// "this is the certificate this host presented and the user approved",
+/// independent of which account is signed in or whether "remember me" is
+/// on. That is why it lives in its own Keychain service rather than inside
+/// `StoredSession`, and why `LoginFormModel`'s remember-me toggle never
+/// clears it (see the brief's explicit call-out that pinning survives a
+/// remember-me-off sign-out).
+enum KeychainCertPin {
+    private static let service = "com.synologynativephotos.certpin"
+
+    private static func baseQuery(host: String? = nil) -> [String: Any] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+        ]
+        if let host {
+            query[kSecAttrAccount as String] = host
+        }
+        return query
+    }
+
+    /// Saves the approved certificate DER for `host`, replacing any prior
+    /// pin for the same host. A later mismatched cert from the same host
+    /// is the core's problem to reject (see `synology_api::build_client`);
+    /// this store only ever holds the single most recently approved DER.
+    static func save(der: Data, host: String) throws {
+        let query = baseQuery(host: host)
+        SecItemDelete(query as CFDictionary)
+
+        var add = query
+        add[kSecValueData as String] = der
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        add[kSecAttrSynchronizable as String] = false
+
+        let status = SecItemAdd(add as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    /// Loads the pinned certificate DER for `host`, or `nil` if this host
+    /// has never had a cert approved (i.e. still needs the TOFU prompt).
+    static func load(host: String) throws -> Data? {
+        var query = baseQuery(host: host)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var out: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
+        if status == errSecItemNotFound {
+            return nil
+        }
+        guard status == errSecSuccess, let data = out as? Data else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+        return data
+    }
+
+    /// Removes the pin for `host`, if any. Forces the next connect to that
+    /// host back through the TOFU approval prompt (e.g. after a deliberate
+    /// "forget this server" action, or if the user suspects the pin was
+    /// approved against the wrong certificate).
+    static func clear(host: String) throws {
+        let status = SecItemDelete(baseQuery(host: host) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+}
+
+/// DSM device-trust token storage, keyed per (host, username), matching
+/// `KeychainSID`'s account-scoping.
+///
+/// Kept separate from `StoredSession` (rather than folding into it) because
+/// its lifetime is different: `StoredSession` is cleared whenever
+/// remember-me is off, but a device token stays useful (and, per the brief,
+/// is kept) across a plain sign-out. Only an explicit "forget this device"
+/// action clears it.
+enum KeychainDeviceToken {
+    private static let service = "com.synologynativephotos.devicetoken"
+
+    private static func account(host: String, username: String) -> String {
+        "\(host)|\(username)"
+    }
+
+    private static func baseQuery(account: String? = nil) -> [String: Any] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+        ]
+        if let account {
+            query[kSecAttrAccount as String] = account
+        }
+        return query
+    }
+
+    /// Saves `token` for (host, username), replacing any existing entry.
+    static func save(_ token: String, host: String, username: String) throws {
+        let acct = account(host: host, username: username)
+        let query = baseQuery(account: acct)
+        SecItemDelete(query as CFDictionary)
+
+        guard let data = token.data(using: .utf8) else {
+            throw KeychainError.encodeFailed
+        }
+        var add = query
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        add[kSecAttrSynchronizable as String] = false
+
+        let status = SecItemAdd(add as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    /// Loads the stored device token for (host, username), or `nil` if
+    /// this device has never been trusted for this account (or the token
+    /// was explicitly forgotten).
+    static func load(host: String, username: String) throws -> String? {
+        var query = baseQuery(account: account(host: host, username: username))
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var out: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
+        if status == errSecItemNotFound {
+            return nil
+        }
+        guard status == errSecSuccess, let data = out as? Data, let token = String(data: data, encoding: .utf8) else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+        return token
+    }
+
+    /// Removes the stored device token for (host, username). This is the
+    /// "forget this device" action: DSM will require a fresh OTP on the
+    /// next login from this Mac for this account. Absence is not an error.
+    static func clear(host: String, username: String) throws {
+        let status = SecItemDelete(baseQuery(account: account(host: host, username: username)) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+}
