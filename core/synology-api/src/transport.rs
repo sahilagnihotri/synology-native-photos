@@ -16,12 +16,17 @@
 //!        is added as the sole trust anchor via `add_root_certificate`. Only
 //!        the pin itself (or a certificate it issued, if it is a CA) can
 //!        complete the handshake; no public CA is trusted on this path.
-//!        Hostname verification stays ON unless the connection host is a
-//!        bare IP literal, in which case ONLY hostname matching is relaxed
-//!        (`danger_accept_invalid_hostnames(true)`). The certificate itself
-//!        is still fully authenticated against the pin, never against a
-//!        public root. `danger_accept_invalid_certs` is never called on
-//!        this path either.
+//!        Hostname verification is always relaxed on this path
+//!        (`danger_accept_invalid_hostnames(true)`), for any host, not only
+//!        a bare IP literal. This is safe because the pin is an exact-DER
+//!        match: once the certificate itself is authenticated against the
+//!        pin, checking that its subject/SAN also names the connection host
+//!        adds nothing, and the NAS's certificate never covers the private
+//!        addresses this app actually connects through (a LAN IP, a
+//!        Tailscale IP, or a Tailscale MagicDNS name such as
+//!        `foo.tailnet.ts.net`), none of which appear in a certificate
+//!        issued for the public DDNS name. `danger_accept_invalid_certs` is
+//!        never called on this path either.
 //!      - Dev toggle (`allow_untrusted_tls == true` AND no usable pin): the
 //!        one and only path that calls `danger_accept_invalid_certs(true)`.
 //!        This is insecure by design (see `Connection::allow_untrusted_tls`)
@@ -117,14 +122,24 @@ fn ensure_port(host_and_maybe_port: &str) -> String {
     }
 }
 
-/// True if `host` (the bare host part of a normalized base URL, e.g.
-/// `192.168.1.10` or `[::1]`) is an IP literal rather than a DNS name. Used
-/// by `build_client` to decide whether the pinned path needs to relax
-/// hostname verification: a cert minted for a DNS name will never validate
-/// against an IP literal even though the pin proves it is the right server.
-fn host_is_ip_literal(host: &str) -> bool {
-    let unbracketed = host.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(host);
-    unbracketed.parse::<IpAddr>().is_ok()
+/// Whether `build_client` should relax hostname verification for `connection`.
+///
+/// True whenever a pin is present, for any host, regardless of whether that
+/// host is an IP literal, a bare hostname, or a Tailscale MagicDNS name
+/// (`foo.tailnet.ts.net`). The reasoning: `pinned_cert_der` is an exact-DER
+/// match, the strongest possible identity check there is; the certificate is
+/// already fully authenticated against the pin before hostname matching would
+/// even run. Checking that the same certificate's subject/SAN also happens to
+/// name the connection host adds no additional security once that exact-DER
+/// match has succeeded, and the NAS's real-world certificate (issued for its
+/// public DDNS name) never covers any of the private addresses this app
+/// actually dials: a LAN IP, a Tailscale IP, or a Tailscale MagicDNS
+/// hostname. An earlier version of this function only relaxed the check for
+/// IP literals, which left every non-IP private hostname (in particular
+/// Tailscale MagicDNS names) unable to complete a pinned handshake at all,
+/// even after the user had explicitly approved the exact certificate.
+pub fn should_relax_hostname_check(connection: &Connection) -> bool {
+    connection.pinned_cert_der.is_some()
 }
 
 /// Extracts the bare host (no scheme, no port, brackets stripped for IPv6)
@@ -146,10 +161,10 @@ fn bare_host(base_url: &str) -> &str {
 /// - Pin present: built-in root certificates are disabled and the pinned DER
 ///   is added as the sole trust anchor via `add_root_certificate`, so ONLY
 ///   the pin (no public CA) can complete the handshake. Hostname
-///   verification is relaxed ONLY when the connection host is a bare IP
-///   literal (never for a DNS name), and even then only the name check is
-///   skipped. The certificate itself is still authenticated against the
-///   pin, never against a public root.
+///   verification is always relaxed on this path (see
+///   `should_relax_hostname_check`): only the name check is skipped, the
+///   certificate itself is still fully authenticated against the pin, never
+///   against a public root.
 /// - No pin, `allow_untrusted_tls == true`: the one dev-only path that calls
 ///   `danger_accept_invalid_certs(true)`. See the loud warning on
 ///   `Connection::allow_untrusted_tls`.
@@ -167,15 +182,14 @@ pub fn build_client(connection: &Connection) -> Result<reqwest::Client, CoreErro
         let cert = reqwest::Certificate::from_der(der).map_err(|e| CoreError::Network {
             message: format!("pinned certificate is not valid DER: {e}"),
         })?;
-        let base_url = normalize_host(&connection.host);
-        let relax_hostname = host_is_ip_literal(bare_host(&base_url));
+        let relax_hostname = should_relax_hostname_check(connection);
         // Built-in roots must be disabled here, otherwise the pin is only
         // additive: the handshake would succeed against EITHER the pinned
         // DER OR any certificate chaining to a public CA, which is not
         // pinning at all. Disabling them makes the pinned DER the sole
         // trust anchor, so only it (or a certificate it issued, if it is a
         // CA) can complete the handshake, even with hostname checking
-        // relaxed for the IP literal case below.
+        // relaxed below.
         builder = builder
             .tls_built_in_root_certs(false)
             .add_root_certificate(cert)
@@ -560,12 +574,22 @@ mod tests {
     }
 
     #[test]
-    fn host_is_ip_literal_detects_ipv4_and_ipv6_not_hostnames() {
-        assert!(host_is_ip_literal("192.168.1.10"));
-        assert!(host_is_ip_literal("[::1]"));
-        assert!(host_is_ip_literal("100.87.107.5"));
-        assert!(!host_is_ip_literal("agnihotri.synology.me"));
-        assert!(!host_is_ip_literal("nas.example.com"));
+    fn relaxes_hostname_check_for_any_host_when_pinned() {
+        // The bug this guards against: hostname relaxation must not be
+        // gated on the host being an IP literal. A Tailscale MagicDNS name
+        // is exactly as unable to match the NAS's public-DDNS-name
+        // certificate as a bare IP is, so it must relax the same way.
+        assert!(should_relax_hostname_check(&conn("192.168.1.10", Some(vec![1]))));
+        assert!(should_relax_hostname_check(&conn("100.87.107.5", Some(vec![1]))));
+        assert!(should_relax_hostname_check(&conn("fafnir.ladon-pirate.ts.net", Some(vec![1]))));
+        assert!(should_relax_hostname_check(&conn("agnihotri.synology.me", Some(vec![1]))));
+        assert!(should_relax_hostname_check(&conn("nas.example.com", Some(vec![1]))));
+    }
+
+    #[test]
+    fn does_not_relax_hostname_check_with_no_pin() {
+        assert!(!should_relax_hostname_check(&conn("fafnir.ladon-pirate.ts.net", None)));
+        assert!(!should_relax_hostname_check(&conn("192.168.1.10", None)));
     }
 
     #[tokio::test]

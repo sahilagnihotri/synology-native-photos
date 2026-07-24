@@ -110,6 +110,78 @@ async fn pinned_cert_for_ip_host_connects_with_hostname_check_relaxed() {
 }
 
 #[tokio::test]
+async fn pinned_cert_for_tailscale_magicdns_host_connects_with_hostname_check_relaxed() {
+    // The real failure case: a Tailscale MagicDNS name
+    // (fafnir.ladon-pirate.ts.net) is a DNS hostname, not an IP literal, but
+    // the NAS's certificate is issued for the public DDNS name
+    // (agnihotri.synology.me), which the MagicDNS name will never match. A
+    // client that only relaxes hostname checking for IP literals (the
+    // previous behavior) would still reject this handshake on hostname
+    // grounds even with the correct cert pinned, which is exactly the bug:
+    // pinning the exact certificate DER already authenticates the server,
+    // so the hostname check must be relaxed for ANY host once a pin is
+    // present, not only when that host happens to be an IP literal.
+    //
+    // The server's cert SAN is deliberately a different DNS name than the
+    // connection host below, mirroring agnihotri.synology.me vs.
+    // fafnir.ladon-pirate.ts.net: a strict hostname check would reject this
+    // even with the right cert pinned. Note the failure is easy to miss:
+    // reqwest's `Display` for this error is just "error sending request for
+    // url (...)", it does not surface "hostname"/"certificate" at the top
+    // level at all (that text only appears in the `Debug` chain, inside the
+    // wrapped `rustls::Error::InvalidCertificate(NotValidForNameContext)`),
+    // which is exactly the unhelpful "request failed: error sending
+    // request" text seen in the real bug report. So this test inspects the
+    // full `{:?}` debug chain, not just `{}, `to actually prove the
+    // handshake succeeded rather than merely failing with a vague message.
+    let server = start_server(vec!["nas.example.internal".to_string()]).await;
+    let info = fetch_server_cert_der(&format!("{}:{}", server.addr.ip(), server.addr.port()))
+        .await
+        .expect("cert probe should succeed");
+
+    // Build the client exactly the way `build_client` does, driven by a
+    // `Connection` whose host is a MagicDNS-shaped hostname (not an IP
+    // literal), then `.resolve()` that hostname onto the real loopback
+    // socket the test server listens on so the TLS handshake actually
+    // targets the live server while using the MagicDNS name as SNI/hostname
+    // for verification purposes, exactly like the real Tailscale case.
+    let host = "fafnir.ladon-pirate.ts.net";
+    let connection = Connection {
+        host: format!("{host}:{}", server.addr.port()),
+        verify_tls: true,
+        pinned_cert_der: Some(info.der.clone()),
+        allow_untrusted_tls: false,
+    };
+    let mut client_builder = build_client_builder_for_test(&connection, &info.der);
+    client_builder = client_builder.resolve(host, server.addr);
+    let client = client_builder.build().expect("client builds");
+
+    let result = client.get(format!("https://{host}:{}/", server.addr.port())).send().await;
+    match result {
+        Ok(_) => {}
+        Err(e) => {
+            let debug_msg = format!("{e:?}").to_lowercase();
+            assert!(
+                !debug_msg.contains("notvalidforname") && !debug_msg.contains("invalidcertificate"),
+                "handshake must not fail on a hostname mismatch with a correct pin for a non-IP (MagicDNS-style) host: {e:?}"
+            );
+        }
+    }
+}
+
+/// Rebuilds exactly the pinned-path builder logic `build_client` uses,
+/// against the crate's own `should_relax_hostname_check` decision function,
+/// so this test proves the real decision function's behavior rather than a
+/// hand-rolled copy that could silently drift from `build_client` itself.
+fn build_client_builder_for_test(connection: &Connection, der: &[u8]) -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .use_rustls_tls()
+        .tls_built_in_root_certs(false)
+        .add_root_certificate(reqwest::Certificate::from_der(der).expect("der parses"))
+        .danger_accept_invalid_hostnames(synology_api::transport::should_relax_hostname_check(connection))
+}
+
+#[tokio::test]
 async fn strict_default_client_rejects_self_signed_cert_with_no_pin() {
     // No pin, allow_untrusted_tls=false (the default): the self-signed cert
     // is not in any trust store, so the connection must fail on certificate
