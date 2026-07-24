@@ -57,6 +57,29 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         ENABLE_HARDENED_RUNTIME: YES
+        # Stable local dev signing. Plain ad-hoc signing (the Xcode default
+        # with no team selected, CODE_SIGN_IDENTITY "-") re-derives the code
+        # signature on every build with no team backing it, so macOS treats
+        # a rebuild as a different app and any "Always Allow" Keychain
+        # grant on the remaining secret items (SID/session, device token)
+        # does not reliably persist across rebuilds.
+        #
+        # CODE_SIGN_IDENTITY "Apple Development" signs with whichever
+        # personal/team development identity Xcode already has (Xcode ->
+        # Settings -> Accounts), which is what actually keeps the signature
+        # stable and team-backed across rebuilds. DEVELOPMENT_TEAM is left
+        # unset here on purpose: this machine has more than one Apple
+        # Development identity installed, and no team id can be verified as
+        # "the" one to hardcode. Automatic signing resolves it, but if more
+        # than one team is available Xcode may ask you to pick once in the
+        # Signing & Capabilities tab for the SynologyPhotos target after
+        # opening the generated project; after that one choice, rebuilds
+        # keep reusing it. To pin a specific team non-interactively instead,
+        # pass DEVELOPMENT_TEAM=<your team id> as an env var to `xcodegen
+        # generate` and to `xcodebuild`.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: "${DEVELOPMENT_TEAM}"
         # PhotosCoreFFI/modelsFFI are the raw UniFFI C scaffolding that
         # bindings/PhotosCore.swift and bindings/models.swift guard behind
         # `#if canImport(...)`. No public symbol of the PhotosCore Swift

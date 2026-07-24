@@ -90,6 +90,12 @@ struct SynologyPhotosApp: App {
     /// `.loggedOut` and renders the login screen.
     @MainActor
     private static func makeOutcomeAndRestore() -> LaunchOutcome {
+        // One-time cleanup: any pin left over from the old Keychain-backed
+        // store is copied to the file store and removed from the Keychain,
+        // so a launch after upgrading past this change never prompts for
+        // Keychain access to read a pin again.
+        KeychainCertPin.migrateAllFromLegacyKeychain()
+
         let outcome = makeLaunchOutcome()
         let stored = (try? KeychainSID.loadMostRecentAccount()) ?? nil
         if case .ready(let env) = outcome, let stored {
