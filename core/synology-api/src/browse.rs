@@ -54,6 +54,46 @@ use crate::transport::Transport;
 use models::{Album, Asset, CoreError, MediaKind, Space};
 use serde::Deserialize;
 
+/// A discovery-browse collection to filter `Browse.Item` by, plus the
+/// query param name each one uses on the real NAS (see the discovery-browse
+/// plan doc for the probe that confirmed every name below). All three are
+/// sent as a bare integer, NOT an array/bracket form and NOT quoted: DSM
+/// rejects `geocoding_id=[756]` (error 120, reason "type") but accepts
+/// `geocoding_id=756`, and the same bare-int shape was confirmed for
+/// `person_id`; `general_tag_id` was confirmed accepted in the same bare
+/// form (a made-up id returns a clean empty list rather than being
+/// silently ignored, which is how an accepted-but-empty filter is told
+/// apart from an unrecognized param that DSM just ignores).
+///
+/// `Favorites` has no id of its own: it sends `favorite=true`, which
+/// genuinely filters `Browse.Item` to the caller's favorited items
+/// (verified against the real NAS; there is no separate Favorite list API
+/// to call instead).
+///
+/// Deliberately has no `Subject`/`Concept` variant: no working filter
+/// param or dedicated item-list API was found for `SYNO.Foto.Browse.Concept`
+/// on the real NAS (every candidate name tried was either explicitly
+/// rejected or silently ignored; see the plan doc for the full list), so
+/// there is nothing yet for a `Subject` collection to route to.
+#[derive(Debug, Clone, Copy)]
+pub enum CollectionFilter {
+    Person(i64),
+    Place(i64),
+    Tag(i64),
+    Favorites,
+}
+
+impl CollectionFilter {
+    fn query_param(&self) -> (&'static str, String) {
+        match self {
+            CollectionFilter::Person(id) => ("person_id", id.to_string()),
+            CollectionFilter::Place(id) => ("geocoding_id", id.to_string()),
+            CollectionFilter::Tag(id) => ("general_tag_id", id.to_string()),
+            CollectionFilter::Favorites => ("favorite", "true".to_string()),
+        }
+    }
+}
+
 /// Map the item's `type` string to a `MediaKind`. Anything unrecognized
 /// (including future Synology media types we've never seen) falls back to
 /// `MediaKind::Unknown` rather than failing the decode — fail closed on the
@@ -250,7 +290,39 @@ pub async fn list_items(
     version: u32,
     syno_token: Option<&str>,
 ) -> Result<Vec<Asset>, CoreError> {
-    let query: Vec<(&str, String)> = vec![
+    list_items_inner(transport, sid, space, offset, limit, version, syno_token, None).await
+}
+
+/// Same as `list_items`, but additionally filters the returned rows to one
+/// discovery-browse collection via `filter` (see `CollectionFilter` for the
+/// confirmed query param each variant sends). Personal space only for now:
+/// every `CollectionFilter` variant was verified only against
+/// `SYNO.Foto.Browse.Item`, not the `FotoTeam` shared-space equivalent, so
+/// this always targets `Space::Personal` regardless of what a caller might
+/// otherwise pass; there is no shared-space discovery browse yet.
+pub async fn list_items_filtered(
+    transport: &Transport,
+    sid: &str,
+    filter: CollectionFilter,
+    offset: u32,
+    limit: u32,
+    version: u32,
+    syno_token: Option<&str>,
+) -> Result<Vec<Asset>, CoreError> {
+    list_items_inner(transport, sid, Space::Personal, offset, limit, version, syno_token, Some(filter)).await
+}
+
+async fn list_items_inner(
+    transport: &Transport,
+    sid: &str,
+    space: Space,
+    offset: u32,
+    limit: u32,
+    version: u32,
+    syno_token: Option<&str>,
+    filter: Option<CollectionFilter>,
+) -> Result<Vec<Asset>, CoreError> {
+    let mut query: Vec<(&str, String)> = vec![
         ("api", browse_item_api(space).to_string()),
         ("version", version.to_string()),
         ("method", "list".to_string()),
@@ -259,6 +331,9 @@ pub async fn list_items(
         ("additional", "[\"thumbnail\",\"resolution\"]".to_string()),
         ("_sid", sid.to_string()),
     ];
+    if let Some(filter) = filter {
+        query.push(filter.query_param());
+    }
     let body = get_body(transport, &query, syno_token).await?;
     let parsed: ItemList = decode_envelope(&body)?;
     let total = parsed.list.len();
