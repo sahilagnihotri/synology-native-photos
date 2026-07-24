@@ -310,4 +310,127 @@ struct PhotoGridControllerTests {
         #expect(controller.snapshotItemCount() == 90)
         #expect(controller.snapshotIsComplete == true)
     }
+
+    // MARK: - identifiersChanged (pure guard behind the flicker fix)
+
+    /// The exact no-scrolling flicker scenario: a prefetch tick recomputes
+    /// the same identifier list that is already applied. The guard must
+    /// report "no change" so `applySnapshot()` skips `diffable.apply(...)`
+    /// and the visible cells are never reconfigured.
+    @Test func identifiersChangedIsFalseForIdenticalLists() {
+        let ids = [AssetItemID(space: .personal, serverId: 1), AssetItemID(space: .personal, serverId: 2)]
+        #expect(PhotoGridController.identifiersChanged(current: ids, proposed: ids) == false)
+    }
+
+    @Test func identifiersChangedIsTrueWhenARowIsAdded() {
+        let current = [AssetItemID(space: .personal, serverId: 1)]
+        let proposed = [AssetItemID(space: .personal, serverId: 1), AssetItemID(space: .personal, serverId: 2)]
+        #expect(PhotoGridController.identifiersChanged(current: current, proposed: proposed) == true)
+    }
+
+    @Test func identifiersChangedIsTrueWhenAPlaceholderResolvesToARealId() {
+        // Mirrors a not-yet-loaded row (negative placeholder id) turning
+        // into the real asset id once its page loads: same position, same
+        // count, different identity, must still be treated as a change.
+        let current = [AssetItemID(space: .personal, serverId: -1)]
+        let proposed = [AssetItemID(space: .personal, serverId: 42)]
+        #expect(PhotoGridController.identifiersChanged(current: current, proposed: proposed) == true)
+    }
+
+    @Test func identifiersChangedIsTrueWhenOrderDiffers() {
+        let current = [AssetItemID(space: .personal, serverId: 1), AssetItemID(space: .personal, serverId: 2)]
+        let proposed = [AssetItemID(space: .personal, serverId: 2), AssetItemID(space: .personal, serverId: 1)]
+        #expect(PhotoGridController.identifiersChanged(current: current, proposed: proposed) == true)
+    }
+
+    @Test func identifiersChangedIsFalseForTwoEmptyLists() {
+        #expect(PhotoGridController.identifiersChanged(current: [], proposed: []) == false)
+    }
+
+    /// End-to-end proof for the idle case: calling `applySnapshot()` again
+    /// with nothing new loaded must not change the snapshot's item count or
+    /// otherwise disturb it. This does not observe AppKit's internal
+    /// reconfigure calls directly (that would need a real, on-screen
+    /// collection view), but it does prove the guard is reachable and
+    /// harmless through the real call path, matching how
+    /// `prefetchItemsAt` invokes it repeatedly while idle.
+    @Test func repeatedApplySnapshotWithNoNewDataIsIdempotent() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<50).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 50, total: 50, complete: true)
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: 50)
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        _ = controller.view
+
+        await ds.refreshCount()
+        await ds.loadWindow(offset: 0, limit: 50)
+        await controller.applySnapshot()
+        #expect(controller.snapshotItemCount() == 50)
+
+        // Repeated idle-tick calls, exactly like NSCollectionView firing
+        // prefetchItemsAt over and over with nothing new to show.
+        await controller.applySnapshot()
+        await controller.applySnapshot()
+        await controller.applySnapshot()
+        #expect(controller.snapshotItemCount() == 50)
+        #expect(controller.snapshotIsComplete == true)
+    }
+
+    // MARK: - PhotoCellView.needsReload (pure guard behind the cell flash fix)
+
+    @Test func needsReloadIsFalseWhenSameKeyAlreadyDisplayed() {
+        let key = ThumbKey(assetId: 1, size: .sm, cacheKey: "v1")
+        #expect(PhotoCellView.needsReload(currentKey: key, requestedKey: key, hasImage: true) == false)
+    }
+
+    @Test func needsReloadIsTrueWhenNoImageIsDisplayedYet() {
+        let key = ThumbKey(assetId: 1, size: .sm, cacheKey: "v1")
+        // Same key, but nothing painted yet (still loading, or a previous
+        // load failed): must still (re)attempt the load rather than no-op.
+        #expect(PhotoCellView.needsReload(currentKey: key, requestedKey: key, hasImage: false) == true)
+    }
+
+    @Test func needsReloadIsTrueForADifferentAsset() {
+        let current = ThumbKey(assetId: 1, size: .sm, cacheKey: "v1")
+        let requested = ThumbKey(assetId: 2, size: .sm, cacheKey: "v1")
+        #expect(PhotoCellView.needsReload(currentKey: current, requestedKey: requested, hasImage: true) == true)
+    }
+
+    @Test func needsReloadIsTrueWhenCacheKeyChangedForSameAsset() {
+        let current = ThumbKey(assetId: 1, size: .sm, cacheKey: "v1")
+        let requested = ThumbKey(assetId: 1, size: .sm, cacheKey: "v2")
+        #expect(PhotoCellView.needsReload(currentKey: current, requestedKey: requested, hasImage: true) == true)
+    }
+
+    @Test func needsReloadIsTrueWhenNothingDisplayedYet() {
+        let requested = ThumbKey(assetId: 1, size: .sm, cacheKey: "v1")
+        #expect(PhotoCellView.needsReload(currentKey: nil, requestedKey: requested, hasImage: false) == true)
+    }
+
+    /// Re-configuring a cell for the exact asset it is already showing
+    /// (the diffable-snapshot-reapply case) must not touch `thumbView` at
+    /// all: no flash. This is the same-asset half of the flicker fix,
+    /// proven through the real `configure` call path.
+    @Test func configureForSameAssetDoesNotClearAlreadyDisplayedImage() async throws {
+        let fake = FakePhotosCore()
+        let path = writePNG(width: 300, height: 300)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        fake.thumbnailResultByAssetId[5] = .success(ThumbnailData(cachedPath: path, bytes: Data()))
+        let cache = ThumbnailCache(client: PhotosCoreClient(core: fake))
+        let cell = PhotoCellView()
+        _ = cell.view
+
+        cell.configure(asset: asset(5), space: .personal, cache: cache)
+        try await Task.sleep(for: .milliseconds(50))
+        let firstImage = try #require(cell.displayedImage)
+
+        // Reconfigure for the exact same asset, as a redundant diffable
+        // snapshot re-apply would do. The image reference must be
+        // untouched (same instance), proving thumbView.image was never
+        // reset to nil in between.
+        cell.configure(asset: asset(5), space: .personal, cache: cache)
+        #expect(cell.displayedImage === firstImage)
+    }
 }

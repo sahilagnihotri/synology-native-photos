@@ -73,7 +73,29 @@ actor ThumbnailCache {
     }
 
     private func nsKey(_ key: ThumbKey) -> NSString {
+        Self.nsKey(key)
+    }
+
+    private static func nsKey(_ key: ThumbKey) -> NSString {
         "\(key.assetId)|\(key.size)|\(key.cacheKey)" as NSString
+    }
+
+    /// Synchronous, non-actor-isolated read of the in-memory tier only.
+    ///
+    /// `image(space:asset:size:)` is `async` because a miss may need to hop
+    /// off the actor for the network fetch and the decode, but a cell that
+    /// is simply being re-configured for an asset it might already be
+    /// showing cannot afford to await an actor hop just to find out the
+    /// answer is "yes, already have it": that await is exactly the gap
+    /// where `PhotoCellView` used to blank the image first. `NSCache` is
+    /// documented thread-safe for concurrent access, so reading it from
+    /// outside the actor's isolation is safe without going through the
+    /// actor's mailbox at all. This never touches the disk tier or the
+    /// network; a `nil` here only means "not in memory right now", not "does
+    /// not exist", and callers should fall back to the async `image(...)`
+    /// path on a miss.
+    nonisolated func peekMemory(_ key: ThumbKey) -> CGImage? {
+        memory.object(forKey: Self.nsKey(key))?.image
     }
 
     /// Decoded-bytes cost used as the `NSCache` cost for eviction bookkeeping.

@@ -126,6 +126,21 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// 100k-item collection is expensive and pointless here, the resident
     /// set only ever grows or the space changes wholesale, neither of which
     /// benefits from a cross-fade.
+    ///
+    /// Guarded against redundant re-apply: `NSCollectionViewPrefetching`
+    /// fires `prefetchItemsAt` repeatedly even while the grid is completely
+    /// idle (no scrolling), and every one of those ticks used to call this
+    /// method unconditionally. Re-applying an identical snapshot makes the
+    /// diffable data source re-run its item provider for the visible cells,
+    /// which reconfigures them for no reason, so the fix computes the
+    /// proposed identifier list first and skips `diffable.apply(...)`
+    /// entirely when it exactly matches what is already applied
+    /// (`Self.identifiersChanged`, a pure comparison kept separate from
+    /// AppKit so it is directly testable). `snapshotIsComplete` is still
+    /// updated on every call regardless of that guard: the crawl barrier
+    /// can flip between two calls that happen to propose the same row
+    /// identifiers, and callers must see that transition without needing a
+    /// row to change too.
     func applySnapshot() async {
         // `diffable` only exists once this controller's view has actually
         // loaded (`viewDidLoad()` builds it). `LibraryView`'s `.task` calls
@@ -158,8 +173,30 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
                 identifiers.append(AssetItemID(space: dataSource.space, serverId: -Int64(index) - 1))
             }
         }
+        // `itemIdentifiers(inSection:)` traps if the section is not present
+        // in the snapshot yet, which is exactly the state of a brand new
+        // `diffable` before the very first `apply(...)` call, so that case
+        // must short-circuit straight to applying rather than querying a
+        // section that does not exist.
+        let existingSnapshot = diffable.snapshot()
+        let currentIdentifiers = existingSnapshot.sectionIdentifiers.contains(Self.section)
+            ? existingSnapshot.itemIdentifiers(inSection: Self.section)
+            : []
+        guard Self.identifiersChanged(current: currentIdentifiers, proposed: identifiers) else {
+            return
+        }
         snapshot.appendItems(identifiers, toSection: Self.section)
         diffable.apply(snapshot, animatingDifferences: false)
+    }
+
+    /// Pure comparison extracted for testing: whether the row identity list
+    /// `applySnapshot()` just computed actually differs from what is
+    /// currently applied. Order matters (it is the grid's row order), so
+    /// this is a plain element-wise comparison, not a set comparison; two
+    /// snapshots with the same identifiers in a different order are, for
+    /// this grid, actually different content and must still apply.
+    static func identifiersChanged(current: [AssetItemID], proposed: [AssetItemID]) -> Bool {
+        current != proposed
     }
 
     /// Whether the most recently applied snapshot reflects a fully-crawled
@@ -177,14 +214,22 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
 
     /// `NSCollectionViewPrefetching`: as the collection view reports index
     /// paths it expects to need soon, load the page(s) covering the lowest
-    /// requested index. `WindowedDataSource` internally dedupes repeat
-    /// requests for a page already loaded or in flight, so an aggressive
-    /// prefetch here does not cause redundant network calls.
+    /// requested index.
+    ///
+    /// AppKit calls this repeatedly even while the grid is sitting
+    /// completely idle with no scrolling at all, not only when new index
+    /// paths are actually about to come into view. `applySnapshot()`'s own
+    /// no-op guard (see its doc comment) already makes a redundant call
+    /// cheap and non-visual, which is the primary fix; skipping the call
+    /// here when `loadWindow` returned no rows is the second half the brief
+    /// asks for, avoiding even the pointless `Task` hop and identifier
+    /// rebuild on the common idle tick where the page was already resident.
     func collectionView(_ collectionView: NSCollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
         guard let minIndex = indexPaths.map(\.item).min() else { return }
         let offset = (minIndex / dataSource.pageSize) * dataSource.pageSize
         Task {
-            await dataSource.loadWindow(offset: offset, limit: dataSource.pageSize)
+            let rows = await dataSource.loadWindow(offset: offset, limit: dataSource.pageSize)
+            guard !rows.isEmpty else { return }
             await applySnapshot()
         }
     }

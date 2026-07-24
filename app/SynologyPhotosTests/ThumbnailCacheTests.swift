@@ -119,6 +119,37 @@ struct ThumbnailCacheTests {
         #expect(fake.thumbnailCallCount == 2)
     }
 
+    /// `peekMemory` is the synchronous fast path `PhotoCellView` uses to
+    /// avoid the actor hop (and the blank-then-repaint flash that hop used
+    /// to force) on a cell reconfigure that turns out to already be cached.
+    /// Before anything has been fetched, the key is not in memory yet, so
+    /// this must return `nil` rather than triggering any fetch itself; it
+    /// only ever reads the memory tier.
+    @Test func peekMemoryMissesBeforeAnyFetch() {
+        let fake = FakePhotosCore()
+        let cache = ThumbnailCache(client: PhotosCoreClient(core: fake))
+        let key = ThumbKey(assetId: 7, size: .sm, cacheKey: "v1")
+        #expect(cache.peekMemory(key) == nil)
+        #expect(fake.thumbnailCallCount == 0)
+    }
+
+    @Test func peekMemoryHitsAfterImageIsFetchedAndCached() async {
+        let fake = FakePhotosCore()
+        let path = writePNG(width: 800, height: 600)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        fake.thumbnailResult = .success(ThumbnailData(cachedPath: path, bytes: Data()))
+        let cache = ThumbnailCache(client: PhotosCoreClient(core: fake))
+        _ = await cache.image(space: .personal, asset: asset(id: 7), size: .sm)
+
+        let key = ThumbKey(assetId: 7, size: .sm, cacheKey: "v1")
+        #expect(cache.peekMemory(key) != nil)
+        // A different size for the same asset is still a separate entry,
+        // and must still miss without touching the core.
+        let missKey = ThumbKey(assetId: 7, size: .m, cacheKey: "v1")
+        #expect(cache.peekMemory(missKey) == nil)
+        #expect(fake.thumbnailCallCount == 1)
+    }
+
     @Test func byteCostLimitIsConfigurable() async {
         let fake = FakePhotosCore()
         let path = writePNG(width: 800, height: 600)
