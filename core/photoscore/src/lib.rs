@@ -85,8 +85,11 @@ struct Live {
 /// thread (`spawn_blocking`), where the whole crawl - including its
 /// internal network awaits - runs synchronously via `Handle::block_on`; the
 /// owned `Store` is moved back into the mutex once the blocking task
-/// returns. The mutex guard itself is only ever held for the instant of the
-/// swap, never across any `.await`.
+/// returns, even if the crawl itself panicked partway through (the panic is
+/// caught on the blocking thread and turned into an ordinary error, see
+/// `run_with_store`), so a single bad crawl can never leave the core
+/// permanently unusable. The mutex guard itself is only ever held for the
+/// instant of the swap, never across any `.await`.
 #[derive(uniffi::Object)]
 pub struct PhotosCore {
     /// `Option` so `run_with_store` can `take()` the owned `Store` out for
@@ -327,11 +330,18 @@ impl PhotosCore {
     /// `work`'s future to completion synchronously - this is the documented,
     /// supported way to run async code from a blocking-pool thread, and it
     /// keeps the whole crawl (including its internal network awaits) on one
-    /// thread so `&Store` never needs to be `Send`. Once the blocking task
-    /// returns (success or error), the `Store` is always moved back into
-    /// `self.store` before the result is propagated, so a later call still
-    /// has a store to work with. The mutex is locked again only for that
-    /// final swap-back, again never across an `.await`.
+    /// thread so `&Store` never needs to be `Send`.
+    ///
+    /// Guarantee: after this function returns, `self.store` holds `Some` again,
+    /// no matter how `work` finished, success, a normal `Err`, or a panic inside
+    /// `work` itself. The blocking closure runs `work` behind `catch_unwind` and
+    /// always hands the `Store` back in its return tuple, even when `work`
+    /// panicked; a caught panic is converted into a `CoreError::Storage` here
+    /// rather than being allowed to drop the `Store` on the panicking thread.
+    /// So a panicking crawl surfaces as an ordinary error to the caller and
+    /// the core stays usable for every call afterward - it never permanently
+    /// bricks the store. The mutex is locked twice, once for the initial
+    /// take and once for the final swap-back, never across an `.await`.
     async fn run_with_store<F>(&self, work: F) -> Result<CrawlProgress, CoreError>
     where
         F: for<'a> FnOnce(
@@ -347,7 +357,26 @@ impl PhotosCore {
 
         let handle = tokio::runtime::Handle::current();
         let join = tokio::task::spawn_blocking(move || {
-            let result = handle.block_on(work(&store));
+            // `store` stays owned in this outer scope for the whole call, so
+            // it survives regardless of what happens inside `catch_unwind`.
+            // Only a *reference* to it is captured by the inner closure, so
+            // a panic there unwinds up to `catch_unwind` and stops - it never
+            // drops `store` itself, because `store` was never moved into the
+            // unwinding frame. We are only ever handing back a plain owned
+            // value afterward, never inspecting any broken invariant of
+            // shared state left behind by the panic, so asserting
+            // unwind-safety on the borrow is sound even though `Store`
+            // doesn't implement `UnwindSafe` itself (its `RefCell`-backed
+            // statement cache is what disqualifies it).
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle.block_on(work(&store))))
+                .unwrap_or_else(|panic| {
+                    let message = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "non-string panic payload".to_string());
+                    Err(CoreError::Storage { message: format!("crawl/reconcile task panicked: {message}") })
+                });
             (store, result)
         })
         .await;
@@ -358,13 +387,14 @@ impl PhotosCore {
                 *guard = Some(store);
                 result
             }
-            Err(e) => {
-                // The blocking task panicked before it could hand the
-                // `Store` back; `store` stays `None` (fail-closed - see
-                // `store_busy_err`) rather than silently leaving the core
-                // permanently unusable behind a misleading error.
-                Err(CoreError::Storage { message: format!("crawl/reconcile task panicked: {e}") })
-            }
+            // A panic inside `work` is already caught above and folded into
+            // `result` alongside the recovered `Store`, so this arm is only
+            // reached by a `JoinError` the blocking task itself never ran to
+            // completion for (e.g. the runtime shutting down under it). The
+            // `Store` was moved into that still-unresolved task and cannot be
+            // recovered here; `store` stays `None` in this one remaining
+            // case, which fails closed via `store_busy_err` on later calls.
+            Err(e) => Err(CoreError::Storage { message: format!("crawl/reconcile task failed to join: {e}") }),
         }
     }
 }
@@ -644,6 +674,77 @@ mod core_tests {
         .await
         .expect("crawl_space must not deadlock/hang");
         assert!(result.expect("crawl ok").complete);
+    }
+
+    /// Regression test for the Store-bricking bug: forces the crawl itself
+    /// to panic (via an observer whose `on_progress` panics, called from
+    /// inside `Crawler::crawl_space` on the blocking thread), asserts
+    /// `crawl_space` surfaces the panic as an ordinary `CoreError` rather
+    /// than hanging or aborting the test process, and then asserts a
+    /// subsequent call succeeds - proving `run_with_store` actually put the
+    /// `Store` back rather than leaving `self.store` permanently `None`.
+    #[tokio::test]
+    async fn crawl_space_recovers_store_after_panic() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _info = server.mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"SYNO.Foto.Browse.Item":{"path":"entry.cgi","minVersion":1,"maxVersion":1}}}"#)
+            .create_async().await;
+        let _list = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "list".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[{"id":1,"filename":"a.jpg","type":"photo","additional":{"thumbnail":{"cache_key":"CK1"}}}]}}"#)
+            .create_async().await;
+        let core = core_at("crawl-panic-recovery");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        core.probe_capabilities().await.unwrap();
+
+        struct PanickingObserver;
+        impl FfiCrawlObserver for PanickingObserver {
+            fn on_progress(&self, _p: CrawlProgress) {
+                panic!("simulated crawl panic");
+            }
+        }
+
+        // Suppress the default panic backtrace noise for this expected panic
+        // so the test output stays readable; restore it afterward.
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let panicked = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            core.crawl_space(Space::Personal, Box::new(PanickingObserver)),
+        )
+        .await
+        .expect("crawl_space must not hang when the crawl panics");
+        std::panic::set_hook(default_hook);
+
+        let err = panicked.expect_err("a panicking crawl must surface as an Err, not a hang");
+        assert!(matches!(err, CoreError::Storage { .. }), "got {err:?}");
+
+        // The real assertion: the Store must have been put back. If it
+        // weren't, every call below would fail with the "store busy" error
+        // forever instead of succeeding. (The single page was already
+        // upserted before the observer callback panicked, so the asset is
+        // present; what matters here is that the read succeeds at all.)
+        let count = core.asset_count(Space::Personal).expect("store must be usable again after the panic");
+        assert_eq!(count, 1);
+        let progress = core.crawl_progress(Space::Personal).expect("progress read must succeed after the panic");
+        assert!(progress.complete, "the crawl had already persisted the completing page before the panic");
+
+        // And a fresh crawl on the same core must work end to end, proving
+        // the recovered Store is not just readable but fully functional.
+        struct NoopObserver;
+        impl FfiCrawlObserver for NoopObserver {
+            fn on_progress(&self, _p: CrawlProgress) {}
+        }
+        let retried = core.crawl_space(Space::Personal, Box::new(NoopObserver)).await.expect("retry crawl ok");
+        assert!(retried.complete);
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
     }
 
     #[tokio::test]
