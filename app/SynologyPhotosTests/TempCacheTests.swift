@@ -35,7 +35,7 @@ struct TempCacheTests {
         #expect(FileManager.default.fileExists(atPath: p) == false)
     }
 
-    // MARK: - store(path:preferredFilename:) — extensioned copy for QuickLook
+    // MARK: - store(path:preferredFilename:), extensioned copy for QuickLook
 
     @Test func storeWithPreferredFilenameCopiesToExtensionedPath() async {
         let cache = TempFileCache(limit: 4)

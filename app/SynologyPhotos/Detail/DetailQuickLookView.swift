@@ -38,7 +38,7 @@ enum QuickLookFilename {
     /// single path component of a file inside the temp cache directory.
     ///
     /// Preference order:
-    /// 1. `asset.filename`'s own extension, when it has one -- this is the
+    /// 1. `asset.filename`'s own extension, when it has one, this is the
     ///    real filename as stored on the NAS, and by far the most reliable
     ///    signal for format-specific previewing (HEIC vs JPEG vs a specific
     ///    RAW variant vs MOV vs MP4 all matter to QuickLook's provider
@@ -90,15 +90,15 @@ enum QuickLookFilename {
 /// first.
 ///
 /// Two ways to add an entry:
-/// - `store(path:)` -- tracks an already-correctly-placed file as-is and
+/// - `store(path:)`, tracks an already-correctly-placed file as-is and
 ///   returns its own URL unchanged. This is the shape Task 52's
 ///   `SignOutController` and this file's own required TDD tests depend on:
 ///   the cache can simply take ownership of a path it did not create.
-/// - `store(path:preferredFilename:)` -- copies the file at `path` (the
+/// - `store(path:preferredFilename:)`, copies the file at `path` (the
 ///   core's extensionless download-temp file) into a new file inside this
 ///   cache's own directory, named by `preferredFilename`, and tracks *that
 ///   copy* for eviction. The source file at `path` is never touched or
-///   removed by this method or by later eviction of the copy -- only this
+///   removed by this method or by later eviction of the copy, only this
 ///   cache's own copies are ever deleted. This is what
 ///   `DetailQuickLookView` uses, since `QLPreviewView` needs a
 ///   correctly-extensioned filename and the core's own temp path has none.
@@ -178,7 +178,7 @@ actor TempFileCache {
 /// count-bounded temp cache, then previews it with QuickLook.
 ///
 /// Read-only: this view only ever downloads and previews. It never uploads,
-/// edits, or deletes anything on the NAS -- selecting a grid item and
+/// edits, or deletes anything on the NAS, selecting a grid item and
 /// opening detail cannot mutate NAS state.
 struct DetailQuickLookView: NSViewRepresentable {
     let asset: Asset
