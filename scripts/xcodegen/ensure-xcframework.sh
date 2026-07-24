@@ -16,12 +16,27 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 XCF="$ROOT/PhotosCore.xcframework"
+LIB="$XCF/macos-arm64/libphotoscore.a"
 
-if [ -d "$XCF" ] && [ -f "$ROOT/bindings/PhotosCore.swift" ] && [ -f "$ROOT/bindings/models.swift" ]; then
+# Rebuild when the xcframework or bindings are missing, OR when any Rust
+# source is newer than the built static lib. Checking existence alone is not
+# enough: a stale lib built from old sources will link and run OLD code, which
+# silently hides fixes. Freshness matters here.
+needs_build=0
+if [ ! -f "$LIB" ] || [ ! -f "$ROOT/bindings/PhotosCore.swift" ] || [ ! -f "$ROOT/bindings/models.swift" ]; then
+  needs_build=1
+else
+  # Any Rust source under core/ newer than the built lib means the lib is stale.
+  if [ -n "$(find "$ROOT/core" -name '*.rs' -newer "$LIB" -print -quit 2>/dev/null)" ]; then
+    needs_build=1
+  fi
+fi
+
+if [ "$needs_build" -eq 0 ]; then
   exit 0
 fi
 
-echo "PhotosCore.xcframework missing; building it via 'make xcframework'..."
+echo "PhotosCore.xcframework missing or stale; rebuilding via 'make xcframework'..."
 
 # shellcheck disable=SC1090
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env" || true
