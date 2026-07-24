@@ -15,7 +15,19 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     private let dataSource: WindowedDataSource
     private let cache: ThumbnailCache
     let collectionView = NSCollectionView()
-    private var diffable: NSCollectionViewDiffableDataSource<Int, AssetItemID>!
+    private var diffable: NSCollectionViewDiffableDataSource<Int, AssetItemID>?
+
+    /// Set when `applySnapshot()` is called before `viewDidLoad()` has set up
+    /// `diffable` (e.g. the SwiftUI `.task` in `LibraryView` calls it right
+    /// after the crawl finishes, while the grid is still gated out of the
+    /// view hierarchy behind `env.crawl.isComplete` and this controller's
+    /// view has therefore never loaded). `applySnapshot()` cannot build
+    /// anything useful without `diffable`, so it records that a snapshot is
+    /// owed and returns; `viewDidLoad()` clears the flag by applying one
+    /// itself once the data source exists, which picks up whatever the
+    /// underlying `dataSource`/`cache` state is by then rather than replaying
+    /// a stale snapshot captured at the deferred call site.
+    private var pendingSnapshotNeeded = false
 
     /// Invoked with the asset behind a newly selected cell, or `nil` on
     /// deselect. Left as an injectable closure (rather than a hard
@@ -67,6 +79,15 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
             }
             return cell
         }
+        // A caller may have asked for a snapshot before this view ever
+        // loaded (see `pendingSnapshotNeeded`). `diffable` now exists, so
+        // catch up immediately on whatever the data source currently holds
+        // rather than leaving the grid empty until the next prefetch or
+        // space-toggle triggers another `applySnapshot()` call.
+        if pendingSnapshotNeeded {
+            pendingSnapshotNeeded = false
+            Task { await applySnapshot() }
+        }
     }
 
     /// Rebuilds the snapshot from `dataSource.totalCount` rows, one item
@@ -106,6 +127,19 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// set only ever grows or the space changes wholesale, neither of which
     /// benefits from a cross-fade.
     func applySnapshot() async {
+        // `diffable` only exists once this controller's view has actually
+        // loaded (`viewDidLoad()` builds it). `LibraryView`'s `.task` calls
+        // `applySnapshot()` unconditionally right after the crawl finishes,
+        // but the grid itself is gated behind `env.crawl.isComplete` in
+        // `RootView`/`LibraryView`, so on first login this call can land
+        // before SwiftUI has ever put `PhotoGridView` (and therefore this
+        // controller's view) into the hierarchy. Rather than force-unwrap
+        // and crash, no-op safely and remember that a snapshot is owed;
+        // `viewDidLoad()` applies one as soon as `diffable` is ready.
+        guard let diffable else {
+            pendingSnapshotNeeded = true
+            return
+        }
         // Captured up front (not derived from the row count below) so the
         // "is this presentation of the grid the complete library" question
         // always has one answer, driven only by the crawl barrier. This is
@@ -138,7 +172,7 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     private(set) var snapshotIsComplete: Bool = false
 
     func snapshotItemCount() -> Int {
-        diffable.snapshot().numberOfItems
+        diffable?.snapshot().numberOfItems ?? 0
     }
 
     /// `NSCollectionViewPrefetching`: as the collection view reports index

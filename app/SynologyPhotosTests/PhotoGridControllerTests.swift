@@ -231,4 +231,78 @@ struct PhotoGridControllerTests {
         #expect(controller.snapshotIsComplete == true)
         #expect(controller.snapshotItemCount() == 1000)
     }
+
+    /// Reproduces the real-device crash: `RootView`'s `.task` calls
+    /// `applySnapshot()` unconditionally right after login/crawl, but the
+    /// grid is only added to the view hierarchy once `env.crawl.isComplete`
+    /// is true, so `PhotoGridController.view` (and therefore `viewDidLoad()`,
+    /// which builds `diffable`) may not have run yet at that point. Calling
+    /// `applySnapshot()` before touching `controller.view` at all simulates
+    /// exactly that ordering: `diffable` is still nil.
+    ///
+    /// Before the fix this force-unwrapped `diffable` and crashed. After the
+    /// fix it must no-op safely (no crash, count stays 0, nothing marked
+    /// complete) and remember that a snapshot is owed. Once the view finally
+    /// loads (simulated here by reading `controller.view`, which triggers
+    /// `viewDidLoad()`), the controller must catch up on its own and the
+    /// snapshot must reflect the data source without any further
+    /// `applySnapshot()` call from the test.
+    @Test func applySnapshotBeforeViewLoadsDefersThenCatchesUpOnceViewLoads() async throws {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<80).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 80, total: 80, complete: true)
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: 40)
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache)
+
+        // Populate the data source the way `LibraryView`'s `.task` does,
+        // still without ever touching `controller.view`.
+        await ds.refreshCount()
+        await ds.loadWindow(offset: 0, limit: 40)
+
+        // This is the crashing call site: `applySnapshot()` before the view
+        // (and therefore `diffable`) exists. Must not crash.
+        await controller.applySnapshot()
+        #expect(controller.snapshotItemCount() == 0)
+        #expect(controller.snapshotIsComplete == false)
+
+        // The view finally loads (SwiftUI adding `PhotoGridView` once
+        // `env.crawl.isComplete` flips). `viewDidLoad()` must apply the
+        // pending snapshot itself, with no further `applySnapshot()` call
+        // from here.
+        _ = controller.view
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(controller.snapshotItemCount() == 80)
+        #expect(controller.snapshotIsComplete == true)
+    }
+
+    /// After the deferred catch-up runs once, `applySnapshot()` must still
+    /// work normally for later calls (e.g. further prefetch pages loading,
+    /// or a space toggle), not get stuck treating every call as pending.
+    @Test func applySnapshotKeepsWorkingAfterDeferredCatchUp() async throws {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<40).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 40, total: 40, complete: true)
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: 40)
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache)
+
+        await ds.refreshCount()
+        await controller.applySnapshot() // deferred: no view yet
+        _ = controller.view // viewDidLoad() catches up
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(controller.snapshotItemCount() == 40)
+
+        // Simulate the space growing (e.g. more of the library gets
+        // crawled) and a later, ordinary applySnapshot() call.
+        fake.assets[.personal] = (0..<90).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 90, total: 90, complete: true)
+        await ds.refreshCount()
+        await controller.applySnapshot()
+        #expect(controller.snapshotItemCount() == 90)
+        #expect(controller.snapshotIsComplete == true)
+    }
 }
