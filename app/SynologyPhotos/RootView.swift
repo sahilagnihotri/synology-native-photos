@@ -28,6 +28,13 @@ struct RootRouter {
 @Observable
 final class AppEnvironment {
     let client: PhotosCoreClient
+    /// The raw core bridge, kept alongside the serializing `PhotosCoreClient`
+    /// actor above because `LoginView`'s certificate-approval flow
+    /// (`CertApprovalViewModel`) needs `fetchCertificate` before any
+    /// session exists, i.e. before there is anything else for the actor to
+    /// serialize against; sharing this reference is simpler than adding a
+    /// pass-through on `PhotosCoreClient` for a single pre-auth call.
+    let coreClient: PhotosCoreProtocol
     let auth: AuthStateMachine
     let dataSource: WindowedDataSource
     let thumbnailCache: ThumbnailCache
@@ -40,6 +47,7 @@ final class AppEnvironment {
     init(core: PhotosCoreProtocol, accountCacheDir: URL, host: String) {
         let c = PhotosCoreClient(core: core)
         self.client = c
+        self.coreClient = core
         self.auth = AuthStateMachine(client: core)
         self.dataSource = WindowedDataSource(client: c, space: .personal, pageSize: 200)
         self.thumbnailCache = ThumbnailCache(client: c)
@@ -60,7 +68,7 @@ struct RootView: View {
 
     var body: some View {
         switch RootRouter.route(for: env.auth.phase) {
-        case .login: LoginView(auth: env.auth)
+        case .login: LoginView(auth: env.auth, client: env.coreClient)
         case .library: LibraryView(env: env)
         }
     }

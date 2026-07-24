@@ -93,8 +93,17 @@ struct SynologyPhotosApp: App {
         let outcome = makeLaunchOutcome()
         let stored = (try? KeychainSID.loadMostRecentAccount()) ?? nil
         if case .ready(let env) = outcome, let stored {
+            // The pinned cert for this host (if one was approved on an
+            // earlier launch) is loaded here so a restored session goes
+            // through the same trusted-server check a fresh login would;
+            // restore never trusts a host it has no pin for beyond
+            // whatever the underlying `Connection.verifyTls` system-trust
+            // path already provides. Absence of a pin (LAN-only setups,
+            // or a host never TOFU-approved) is not an error, `restore`
+            // simply proceeds with `pinnedCertDer = nil`.
+            let pin = try? KeychainCertPin.load(host: stored.host)
             Task { @MainActor in
-                await env.auth.restore(host: stored.host, username: stored.username)
+                await env.auth.restore(host: stored.host, username: stored.username, pinnedCertDer: pin ?? nil)
             }
         }
         return outcome
