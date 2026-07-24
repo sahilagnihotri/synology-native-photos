@@ -5,7 +5,11 @@ import SwiftUI
 /// Dragging calls `onChange` live so the grid resizes as the slider moves,
 /// not only once dragging ends.
 struct ZoomSliderView: View {
-    @State var zoom: GridZoomModel
+    // `GridZoomModel` is a reference type (`@Observable` class) owned by
+    // the caller (`LibraryView`); `let` here just holds that same
+    // reference, it does not create or own a second instance the way
+    // `@State` would suggest.
+    let zoom: GridZoomModel
     let onChange: (CGFloat) -> Void
 
     var body: some View {
