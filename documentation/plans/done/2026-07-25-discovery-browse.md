@@ -1,8 +1,11 @@
 # Discovery browse: People, Places, Subjects, Tags, Favorites
 
+> **Status:** DONE
+
 Read-only sidebar destinations that reuse the existing pipeline (X-SYNO-TOKEN,
 unit_id thumbnails, windowed paging, flicker-safe grid, selection/keyboard/detail).
-Full spec: `.superpowers/sdd/feature-discovery-browse-brief.md`.
+Full spec: `.superpowers/sdd/feature-discovery-browse-brief.md`. Report:
+`.superpowers/sdd/feature-discovery-browse-report.md`.
 
 ## Step 0: real-NAS probe (read only) -- DONE, findings below
 

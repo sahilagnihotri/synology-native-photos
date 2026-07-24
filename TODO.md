@@ -14,12 +14,15 @@ Only pending work. Completed items live in `Fixed.md`. Live scratch progress in 
 ## Empirical NAS probes
 
 - [ ] Delete-semantics probe on a throwaway asset: verify Synology recycle-bin / trash API (soft-delete path vs permanent) before building delete. Note: `SYNO.Foto.Browse.RecycleBin` / `Trash` did NOT appear in the API.Info probe; delete likely goes through `SYNO.Foto.Browse.Item` delete method or `SYNO.Foto.BackgroundTask.File`. Probe to confirm the safe (recoverable) path.
+- [ ] Subjects (Concept) photo filter: no working `Browse.Item` filter param or dedicated item-list API was found for `SYNO.Foto.Browse.Concept` on this NAS (every candidate tried was rejected or silently ignored, see `documentation/plans/done/2026-07-25-discovery-browse.md`). Subject tiles currently list but do not drill into photos. Revisit if a future DSM update exposes one, or if a differently-shaped API (not a Browse.Item filter) turns up.
+- [ ] Timeline (`SYNO.Foto.Browse.Timeline`) date-grouped browse: not probed in the discovery-browse pass (deferred per that brief's own "optional, defer if it complicates" clause).
 
 ## Phase 2: manage (own plan)
 
 - [ ] Safe-delete (trash-move) + confirm; wire the stubbed Delete keyboard action to it. Gated on the delete-semantics probe.
 - [ ] Albums (browse, create, add/remove); replace the sidebar Albums placeholder.
-- [ ] Search + favorites.
+- [ ] Search.
+- [ ] Favoriting/naming mutations: read-only People/Places/Tags/Favorites browsing shipped (see `Fixed.md`); toggling a favorite, naming a person, and creating/editing tags are still not implemented (mutations, gated separately).
 - [ ] Plan: `documentation/plans/2026-07-25-phase2-manage-implementation.md`.
 
 ## Phase 3+

@@ -2,6 +2,32 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-07-25: discovery browse (People, Places, Subjects, Tags, Favorites)
+
+Read-only sidebar destinations reusing the existing pipeline end to end,
+verified against the real NAS. Brief: `.superpowers/sdd/feature-discovery-browse-brief.md`.
+Plan + probe transcript: `documentation/plans/done/2026-07-25-discovery-browse.md`.
+Report: `.superpowers/sdd/feature-discovery-browse-report.md`.
+
+- App: sidebar gains People/Places/Subjects/Tags/Favorites under a new Discovery
+  section; tile grids (cover + name/"Add Name" + item count) drill into the
+  existing `PhotoGridController`/`WindowedDataSource`, which now windows either
+  a space's local index or a live discovery-collection fetch (`85e84d2`
+  through `9422f1f`).
+- Core: `Person`/`Place`/`Subject`/`Tag` models, `discovery.rs` listers,
+  `Browse.Item` collection filter (`person_id`/`geocoding_id`/`general_tag_id`
+  bare int, `favorite=true`), photoscore facade
+  (`fetch_people/places/subjects/tags`, `fetch_assets_for`).
+- Confirmed against the real NAS: 4 people (all with covers), 22 places
+  (11 in Norway/Oslo), 0 tags (none created yet), 4 subjects (Food, Nature,
+  Animals, Transportation). `fetch_assets_for(Person(...))` returns real
+  photos.
+- Deferred, logged rather than guessed at: Subjects (Concept) has no working
+  photo filter on this NAS (every candidate param/API tried was rejected or
+  silently ignored); Timeline was not probed this pass.
+- cargo test --workspace: 200 passed, 0 failed. Xcode: BUILD SUCCEEDED;
+  unit tests 215 passed in 25 suites.
+
 ## Session 2026-07-24/25: real-NAS bring-up, fixes, hardening
 
 - Test pollution of real UserDefaults diagnosed: test suite wrote fixture host/username into `.standard` because `LoginPreferencesStore.save()` used `.standard`. Real prefs cleared; injection fix tracked in TODO. (in progress)
