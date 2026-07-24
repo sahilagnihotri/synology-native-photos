@@ -88,12 +88,17 @@ struct HostSelector {
     ///   certificate can be trusted. TLS verification stays on either way;
     ///   this never disables validation, it only supplies an additional
     ///   trust anchor for the one host that needs it.
-    static func connection(for host: PreferredHost, pinnedCertDer: Data?) -> Connection {
+    ///
+    /// `allowUntrustedTls` is the explicit, clearly-labeled insecure toggle
+    /// (default false everywhere it is threaded from); it is forwarded as
+    /// given on both paths, since the core only ever honors it when there
+    /// is no usable pin regardless of what this selector does.
+    static func connection(for host: PreferredHost, pinnedCertDer: Data?, allowUntrustedTls: Bool = false) -> Connection {
         switch host {
         case .lan(let h):
-            return Connection(host: h, verifyTls: true, pinnedCertDer: nil)
+            return Connection(host: h, verifyTls: true, pinnedCertDer: nil, allowUntrustedTls: allowUntrustedTls)
         case .tailscale(let h):
-            return Connection(host: h, verifyTls: true, pinnedCertDer: pinnedCertDer)
+            return Connection(host: h, verifyTls: true, pinnedCertDer: pinnedCertDer, allowUntrustedTls: allowUntrustedTls)
         }
     }
 }

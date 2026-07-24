@@ -7,8 +7,11 @@ actor PhotosCoreClient {
     private let core: PhotosCoreProtocol
     init(core: PhotosCoreProtocol) { self.core = core }
 
-    func login(connection: Connection, username: String, password: String, otpCode: String?) async throws -> Session {
-        try await core.login(connection: connection, username: username, password: password, otpCode: otpCode)
+    func login(connection: Connection, username: String, password: String, otpCode: String?, deviceToken: String?) async throws -> Session {
+        try await core.login(connection: connection, username: username, password: password, otpCode: otpCode, deviceToken: deviceToken)
+    }
+    func fetchCertificate(host: String) async throws -> CertInfo {
+        try await core.fetchCertificate(host: host)
     }
     func restoreSession(connection: Connection, session: Session) async throws -> SessionState {
         try await core.restoreSession(connection: connection, session: session)

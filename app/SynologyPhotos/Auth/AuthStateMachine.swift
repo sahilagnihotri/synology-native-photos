@@ -46,28 +46,48 @@ final class AuthStateMachine {
     }
 
     /// Attempts a login (or an OTP-code retry of one). On success the phase
-    /// becomes `.valid` and the session is persisted to the Keychain so a
-    /// later launch can `restore` it. On `CoreError.OtpRequired` the phase
-    /// becomes `.needsOtp(username:)` so the view can re-prompt for a code
-    /// and call this again with `otpCode` set. Any other failure becomes
-    /// `.invalid(message:)` with a message suitable for display.
+    /// becomes `.valid`. The device token DSM returns (if any) is always
+    /// persisted to the Keychain so a trusted device keeps skipping OTP
+    /// regardless of remember-me (device trust is server-identity/device
+    /// material, not session material). Whether the *session* itself is
+    /// persisted (so a later launch can `restore` it) is gated by
+    /// `rememberMe`: when true it is saved to `KeychainSID` as before; when
+    /// false any prior session for this (host, username) is cleared instead,
+    /// so a later launch lands back on the login screen rather than silently
+    /// resuming a session the user asked not to be remembered. On
+    /// `CoreError.OtpRequired` the phase becomes `.needsOtp(username:)` so
+    /// the view can re-prompt for a code and call this again with `otpCode`
+    /// set. Any other failure becomes `.invalid(message:)` with a message
+    /// suitable for display.
     func attemptLogin(
         host: String,
         username: String,
         password: String,
         otpCode: String?,
-        pinnedCertDer: Data?
+        pinnedCertDer: Data?,
+        allowUntrustedTls: Bool = false,
+        deviceToken: String? = nil,
+        rememberMe: Bool = true
     ) async {
         phase = .authenticating
-        let connection = Connection(host: host, verifyTls: true, pinnedCertDer: pinnedCertDer)
+        let connection = Connection(
+            host: host, verifyTls: true, pinnedCertDer: pinnedCertDer, allowUntrustedTls: allowUntrustedTls)
         do {
             let session = try await client.login(
                 connection: connection,
                 username: username,
                 password: password,
-                otpCode: otpCode
+                otpCode: otpCode,
+                deviceToken: deviceToken
             )
-            try? KeychainSID.save(session, host: host)
+            if let did = session.deviceDid {
+                try? KeychainDeviceToken.save(did, host: host, username: username)
+            }
+            if rememberMe {
+                try? KeychainSID.save(session, host: host)
+            } else {
+                try? KeychainSID.clear(host: host, username: username)
+            }
             phase = .valid(session)
         } catch let error as CoreError {
             switch error {
@@ -85,7 +105,10 @@ final class AuthStateMachine {
     /// re-prompting for credentials, e.g. on app launch. Absence of a stored
     /// session or a decode failure is treated as a plain sign-out (back to
     /// `.loggedOut`) rather than an error, since there is nothing to recover.
-    func restore(host: String, username: String) async {
+    /// This is only ever reached when remember-me was on for that account
+    /// (remember-me off never leaves anything in `KeychainSID` to load), so
+    /// no separate remember-me check is needed here.
+    func restore(host: String, username: String, pinnedCertDer: Data? = nil) async {
         guard let stored = (try? KeychainSID.load(host: host, username: username)) ?? nil else {
             phase = .loggedOut
             return
@@ -97,7 +120,8 @@ final class AuthStateMachine {
             username: stored.username,
             deviceDid: stored.deviceDid
         )
-        let connection = Connection(host: host, verifyTls: true, pinnedCertDer: nil)
+        let connection = Connection(
+            host: host, verifyTls: true, pinnedCertDer: pinnedCertDer, allowUntrustedTls: false)
         do {
             let state = try await client.restoreSession(connection: connection, session: session)
             switch state {
