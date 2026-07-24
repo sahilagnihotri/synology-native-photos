@@ -9,7 +9,7 @@ import PhotosCore
 /// compiling an unused import.
 final class PhotosCoreLinkSmokeUITests: XCTestCase {
     func testPhotosCoreTypesAreVisibleFromUITestTarget() {
-        let connection = Connection(host: "https://192.168.1.10:5001", verifyTls: true, pinnedCertDer: nil)
+        let connection = Connection(host: "https://192.168.1.10:5001", verifyTls: true, pinnedCertDer: nil, allowUntrustedTls: false)
         XCTAssertEqual(connection.host, "https://192.168.1.10:5001")
         XCTAssertTrue(connection.verifyTls)
     }

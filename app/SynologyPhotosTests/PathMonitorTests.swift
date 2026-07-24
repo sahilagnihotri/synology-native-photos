@@ -32,4 +32,15 @@ struct PathMonitorTests {
         #expect(conn.verifyTls == true)
         #expect(conn.pinnedCertDer == Data([9, 9]))
     }
+
+    @Test func lanConnectionDefaultsInsecureToggleOff() {
+        let conn = HostSelector.connection(for: .lan("https://192.168.1.10:5001"), pinnedCertDer: nil)
+        #expect(conn.allowUntrustedTls == false)
+    }
+
+    @Test func connectionForwardsInsecureToggleWhenSet() {
+        let conn = HostSelector.connection(
+            for: .tailscale("https://nas.ts.net:5001"), pinnedCertDer: nil, allowUntrustedTls: true)
+        #expect(conn.allowUntrustedTls == true)
+    }
 }

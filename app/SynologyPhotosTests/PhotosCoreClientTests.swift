@@ -7,8 +7,8 @@ struct PhotosCoreClientTests {
         let fake = FakePhotosCore()
         fake.loginResult = .success(Session(sid: "S", synoToken: "T", username: "photo", deviceDid: nil))
         let client = PhotosCoreClient(core: fake)
-        let conn = Connection(host: "https://h:5001", verifyTls: true, pinnedCertDer: nil)
-        let s = try await client.login(connection: conn, username: "photo", password: "pw", otpCode: "123456")
+        let conn = Connection(host: "https://h:5001", verifyTls: true, pinnedCertDer: nil, allowUntrustedTls: false)
+        let s = try await client.login(connection: conn, username: "photo", password: "pw", otpCode: "123456", deviceToken: nil)
         #expect(s.synoToken == "T")
         #expect(fake.lastOtpCode == .some(.some("123456")))
     }

@@ -21,6 +21,30 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         .success(ThumbnailData(cachedPath: "/tmp/fake.jpg", bytes: Data()))
     var downloadResult: Result<String, CoreError> = .success("/tmp/original.jpg")
 
+    /// Result for `fetchCertificate`. Defaults to a plausible TOFU-approval
+    /// payload so a test that never touches this still gets something
+    /// sensible if it happens to call the method.
+    var fetchCertificateResult: Result<CertInfo, CoreError> = .success(
+        CertInfo(der: Data([0xCE, 0x27]), sha256Hex: "aa:bb:cc:dd", subject: "CN=fake.nas.local"))
+
+    /// When set, `login` only succeeds (skipping the `OtpRequired` path)
+    /// when the caller's `deviceToken` exactly matches this value; any
+    /// other token (including `nil`) is treated as if none had been given
+    /// at all and falls back to `loginResult`. Mirrors the real DSM
+    /// behavior documented on `synology_api::auth::login`: a stale/expired
+    /// device token fails closed into the same `OtpRequired` an absent
+    /// token would produce, it never itself grants a session.
+    ///
+    /// Left `nil` (the default) means device-token gating is off entirely
+    /// and `login` always just returns `loginResult` regardless of what
+    /// token (if any) was passed, which is what every pre-existing login
+    /// test in this suite relies on.
+    var acceptedDeviceToken: String?
+
+    /// Session returned once `acceptedDeviceToken` matches. Defaults to
+    /// `loginResult`'s success value when unset.
+    var deviceTokenLoginResult: Result<Session, CoreError>?
+
     /// Artificial delay applied before every `thumbnail(...)` call resolves.
     /// Zero by default so existing tests that don't care about timing are
     /// unaffected. Set this to force a load to still be in flight while a
@@ -73,9 +97,12 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var reconcileDeltaCallCount = 0
     private(set) var thumbnailCallCount = 0
     private(set) var downloadOriginalCallCount = 0
+    private(set) var fetchCertificateCallCount = 0
 
     private(set) var lastOtpCode: String??
+    private(set) var lastDeviceToken: String??
     private(set) var lastLoginConnection: Connection?
+    private(set) var lastFetchCertificateHost: String?
     private(set) var lastCrawledSpace: Space?
     private(set) var lastReconciledSpace: Space?
     private(set) var lastThumbnailRequest: (space: Space, assetId: Int64, cacheKey: String, size: ThumbnailSize)?
@@ -89,12 +116,23 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         connection: Connection,
         username: String,
         password: String,
-        otpCode: String?
+        otpCode: String?,
+        deviceToken: String?
     ) async throws -> Session {
         loginCallCount += 1
         lastOtpCode = .some(otpCode)
+        lastDeviceToken = .some(deviceToken)
         lastLoginConnection = connection
+        if let acceptedDeviceToken, let deviceToken, deviceToken == acceptedDeviceToken {
+            return try (deviceTokenLoginResult ?? loginResult).get()
+        }
         return try loginResult.get()
+    }
+
+    func fetchCertificate(host: String) async throws -> CertInfo {
+        fetchCertificateCallCount += 1
+        lastFetchCertificateHost = host
+        return try fetchCertificateResult.get()
     }
 
     func restoreSession(connection: Connection, session: Session) async throws -> SessionState {

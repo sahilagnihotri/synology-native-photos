@@ -9,9 +9,9 @@ struct FakePhotosCoreTests {
     @Test func fakeLoginReturnsConfiguredSession() async throws {
         let fake = FakePhotosCore()
         fake.loginResult = .success(Session(sid: "SID123", synoToken: nil, username: "photo", deviceDid: nil))
-        let conn = Connection(host: "https://192.168.1.10:5001", verifyTls: true, pinnedCertDer: nil)
+        let conn = Connection(host: "https://192.168.1.10:5001", verifyTls: true, pinnedCertDer: nil, allowUntrustedTls: false)
 
-        let session = try await fake.login(connection: conn, username: "photo", password: "pw", otpCode: nil)
+        let session = try await fake.login(connection: conn, username: "photo", password: "pw", otpCode: nil, deviceToken: nil)
 
         #expect(session.sid == "SID123")
         #expect(fake.loginCallCount == 1)
@@ -20,24 +20,24 @@ struct FakePhotosCoreTests {
     @Test func fakeLoginThrowsOtpRequired() async {
         let fake = FakePhotosCore()
         fake.loginResult = .failure(CoreError.OtpRequired)
-        let conn = Connection(host: "https://x:5001", verifyTls: true, pinnedCertDer: nil)
+        let conn = Connection(host: "https://x:5001", verifyTls: true, pinnedCertDer: nil, allowUntrustedTls: false)
 
         await #expect(throws: CoreError.self) {
-            _ = try await fake.login(connection: conn, username: "u", password: "p", otpCode: nil)
+            _ = try await fake.login(connection: conn, username: "u", password: "p", otpCode: nil, deviceToken: nil)
         }
     }
 
     @Test func fakeLoginRetryWithOtpSucceeds() async throws {
         let fake = FakePhotosCore()
         fake.loginResult = .failure(CoreError.OtpRequired)
-        let conn = Connection(host: "https://x:5001", verifyTls: true, pinnedCertDer: nil)
+        let conn = Connection(host: "https://x:5001", verifyTls: true, pinnedCertDer: nil, allowUntrustedTls: false)
 
         await #expect(throws: CoreError.self) {
-            _ = try await fake.login(connection: conn, username: "u", password: "p", otpCode: nil)
+            _ = try await fake.login(connection: conn, username: "u", password: "p", otpCode: nil, deviceToken: nil)
         }
 
         fake.loginResult = .success(Session(sid: "SID999", synoToken: "tok", username: "u", deviceDid: "dev"))
-        let session = try await fake.login(connection: conn, username: "u", password: "p", otpCode: "123456")
+        let session = try await fake.login(connection: conn, username: "u", password: "p", otpCode: "123456", deviceToken: nil)
 
         #expect(session.sid == "SID999")
         #expect(fake.loginCallCount == 2)
@@ -49,7 +49,7 @@ struct FakePhotosCoreTests {
     @Test func fakeRestoreSessionReturnsConfiguredState() async throws {
         let fake = FakePhotosCore()
         fake.restoreResult = .success(.expired)
-        let conn = Connection(host: "https://192.168.1.10:5001", verifyTls: true, pinnedCertDer: nil)
+        let conn = Connection(host: "https://192.168.1.10:5001", verifyTls: true, pinnedCertDer: nil, allowUntrustedTls: false)
         let session = Session(sid: "SID123", synoToken: nil, username: "photo", deviceDid: nil)
 
         let state = try await fake.restoreSession(connection: conn, session: session)
