@@ -14,7 +14,7 @@
 //!      - Pinned (`pinned_cert_der` is `Some`): the pinned DER is trusted via
 //!        `add_root_certificate`. Hostname verification stays ON unless the
 //!        connection host is a bare IP literal, in which case ONLY hostname
-//!        matching is relaxed (`danger_accept_invalid_hostnames(true)`) — the
+//!        matching is relaxed (`danger_accept_invalid_hostnames(true)`). The
 //!        certificate itself is still fully authenticated against the pin.
 //!        `danger_accept_invalid_certs` is never called on this path either.
 //!      - Dev toggle (`allow_untrusted_tls == true` AND no usable pin): the
@@ -141,7 +141,7 @@ fn bare_host(base_url: &str) -> &str {
 /// - Pin present: the pinned DER is the sole trust anchor via
 ///   `add_root_certificate`; hostname verification is relaxed ONLY when the
 ///   connection host is a bare IP literal (never for a DNS name), and even
-///   then only the name check is skipped — the certificate itself is still
+///   then only the name check is skipped. The certificate itself is still
 ///   authenticated against the pin.
 /// - No pin, `allow_untrusted_tls == true`: the one dev-only path that calls
 ///   `danger_accept_invalid_certs(true)`. See the loud warning on
@@ -181,7 +181,7 @@ pub fn build_client(connection: &Connection) -> Result<reqwest::Client, CoreErro
 /// and a human-readable subject string, for trust-on-first-use approval.
 ///
 /// This performs a real TLS handshake but with certificate validation
-/// disabled — that relaxation is scoped ENTIRELY to this one-shot probe
+/// disabled. That relaxation is scoped ENTIRELY to this one-shot probe
 /// connection, which is dropped immediately after the handshake and never
 /// reused for any data request. No plaintext HTTP request is ever sent; the
 /// only bytes exchanged are the TLS handshake itself, which we abort as soon
@@ -270,7 +270,7 @@ fn subject_of(der: &[u8]) -> String {
 /// `captured`. This is deliberately, narrowly insecure: it exists ONLY
 /// inside `fetch_server_cert_der`'s throwaway probe connection, which sends
 /// no application data and is dropped immediately after the handshake. It
-/// must never be used to build a client for real requests — `build_client`
+/// must never be used to build a client for real requests. `build_client`
 /// never references this type.
 #[derive(Debug)]
 struct CapturingVerifier {
@@ -416,9 +416,9 @@ impl Transport {
 /// other request detail. `reqwest::Error`'s `Display` never includes body
 /// content or header values, only the URL and a short error-kind
 /// description, so stripping the URL is sufficient to guarantee no
-/// credential (password, OTP code, device token, session id) — all of which
+/// credential (password, OTP code, device token, session id), all of which
 /// travel in the body or as query values, never in the fixed path this
-/// strips down to — can leak through an error message.
+/// strips down to, can leak through an error message.
 fn scrub_reqwest_error(e: reqwest::Error) -> CoreError {
     CoreError::Network { message: format!("request failed: {}", e.without_url()) }
 }
