@@ -298,7 +298,7 @@ uint64_t uniffi_photoscore_fn_method_photoscore_crawl_space(void*_Nonnull ptr, R
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
-uint64_t uniffi_photoscore_fn_method_photoscore_download_original(void*_Nonnull ptr, RustBuffer space, int64_t asset_id, RustBuffer cache_key
+uint64_t uniffi_photoscore_fn_method_photoscore_download_original(void*_Nonnull ptr, RustBuffer space, int64_t unit_id, RustBuffer cache_key
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_ALBUMS
@@ -343,7 +343,7 @@ uint64_t uniffi_photoscore_fn_method_photoscore_sign_out(void*_Nonnull ptr
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_THUMBNAIL
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_THUMBNAIL
-uint64_t uniffi_photoscore_fn_method_photoscore_thumbnail(void*_Nonnull ptr, RustBuffer space, int64_t asset_id, RustBuffer cache_key, RustBuffer size
+uint64_t uniffi_photoscore_fn_method_photoscore_thumbnail(void*_Nonnull ptr, RustBuffer space, int64_t unit_id, RustBuffer cache_key, RustBuffer size
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_INIT_CALLBACK_VTABLE_FFICRAWLOBSERVER

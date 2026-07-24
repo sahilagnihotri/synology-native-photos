@@ -711,6 +711,15 @@ public func FfiConverterTypeApiCapability_lower(_ value: ApiCapability) -> RustB
 
 public struct Asset {
     public var id: Int64
+    /**
+     * The Synology unit id used for thumbnail/download requests. Distinct
+     * from `id` (the browse item id): the NAS thumbnail/download endpoints
+     * key on `additional.thumbnail.unit_id`, not on the item id, so this
+     * field is what fetch_thumbnail/download_original must send. Defaults
+     * to 0 when the server response did not carry a unit_id (see browse.rs);
+     * a 0 value means this asset cannot be thumbnailed/downloaded yet.
+     */
+    public var unitId: Int64
     public var cacheKey: String
     public var filename: String
     public var mediaKind: MediaKind
@@ -724,8 +733,17 @@ public struct Asset {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: Int64, cacheKey: String, filename: String, mediaKind: MediaKind, takenAt: Int64?, addedAt: Int64?, width: UInt32?, height: UInt32?, fileSize: UInt64?, space: Space, serverVersion: Int64?) {
+    public init(id: Int64, 
+        /**
+         * The Synology unit id used for thumbnail/download requests. Distinct
+         * from `id` (the browse item id): the NAS thumbnail/download endpoints
+         * key on `additional.thumbnail.unit_id`, not on the item id, so this
+         * field is what fetch_thumbnail/download_original must send. Defaults
+         * to 0 when the server response did not carry a unit_id (see browse.rs);
+         * a 0 value means this asset cannot be thumbnailed/downloaded yet.
+         */unitId: Int64, cacheKey: String, filename: String, mediaKind: MediaKind, takenAt: Int64?, addedAt: Int64?, width: UInt32?, height: UInt32?, fileSize: UInt64?, space: Space, serverVersion: Int64?) {
         self.id = id
+        self.unitId = unitId
         self.cacheKey = cacheKey
         self.filename = filename
         self.mediaKind = mediaKind
@@ -747,6 +765,9 @@ extension Asset: Sendable {}
 extension Asset: Equatable, Hashable {
     public static func ==(lhs: Asset, rhs: Asset) -> Bool {
         if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.unitId != rhs.unitId {
             return false
         }
         if lhs.cacheKey != rhs.cacheKey {
@@ -784,6 +805,7 @@ extension Asset: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+        hasher.combine(unitId)
         hasher.combine(cacheKey)
         hasher.combine(filename)
         hasher.combine(mediaKind)
@@ -807,6 +829,7 @@ public struct FfiConverterTypeAsset: FfiConverterRustBuffer {
         return
             try Asset(
                 id: FfiConverterInt64.read(from: &buf), 
+                unitId: FfiConverterInt64.read(from: &buf), 
                 cacheKey: FfiConverterString.read(from: &buf), 
                 filename: FfiConverterString.read(from: &buf), 
                 mediaKind: FfiConverterTypeMediaKind.read(from: &buf), 
@@ -822,6 +845,7 @@ public struct FfiConverterTypeAsset: FfiConverterRustBuffer {
 
     public static func write(_ value: Asset, into buf: inout [UInt8]) {
         FfiConverterInt64.write(value.id, into: &buf)
+        FfiConverterInt64.write(value.unitId, into: &buf)
         FfiConverterString.write(value.cacheKey, into: &buf)
         FfiConverterString.write(value.filename, into: &buf)
         FfiConverterTypeMediaKind.write(value.mediaKind, into: &buf)

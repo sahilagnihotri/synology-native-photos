@@ -18,11 +18,17 @@
 //! `version` with `info::pin_version` against a live capability probe
 //! rather than hardcoding it here.
 //!
-//! UNVERIFIED PARAM-NAME ASSUMPTIONS (no live thumbnail probe yet — confirm
-//! at first real login): the query parameters below (`id` for the asset id,
-//! `cache_key` as returned by `browse::list_items`, `type=unit` for a
-//! single-item fetch, and `size` taking `sm`/`m`/`xl`) follow the brief and
-//! community-client precedent, not a captured real response.
+//! VERIFIED against the real NAS: the `id` query parameter must be the
+//! item's `unit_id` (from `additional.thumbnail.unit_id`), NOT the browse
+//! item id. A thumbnail GET with the item id returns `text/html` (an error
+//! page); the same request with unit_id returns `image/jpeg` bytes. Sending
+//! the item id is exactly the bug that produced blank thumbnails/previews
+//! everywhere (ImageIO fails to decode the html error blob).
+//!
+//! Other query parameters (`cache_key` as returned by `browse::list_items`,
+//! `type=unit` for a single-item fetch, and `size` taking `sm`/`m`/`xl`)
+//! follow the brief and community-client precedent and remain otherwise
+//! unverified beyond the `id`/`unit_id` fact above.
 
 use crate::envelope::map_binary_or_error;
 use crate::namespace::thumbnail_api;
@@ -43,6 +49,12 @@ pub fn size_param(size: ThumbnailSize) -> &'static str {
 /// via `namespace::thumbnail_api`. On-disk caching of the returned bytes is
 /// a Swift-side concern, not this crate's; this function only fetches.
 ///
+/// `unit_id` MUST be the value from `Asset.unit_id` (originally
+/// `additional.thumbnail.unit_id` on the browse response), NOT the browse
+/// item id. It is sent as the `id` query parameter because that is the
+/// parameter name the real endpoint expects; see the module doc comment for
+/// the proof that sending the item id instead returns an html error page.
+///
 /// `syno_token` is `Session.syno_token` from login, sent as the
 /// `X-SYNO-TOKEN` header when present (DSM's CSRF check on top of `_sid`;
 /// without it a token-auth session gets rejected with synology error 119).
@@ -51,7 +63,7 @@ pub async fn fetch_thumbnail(
     transport: &Transport,
     sid: &str,
     space: Space,
-    asset_id: i64,
+    unit_id: i64,
     cache_key: &str,
     size: ThumbnailSize,
     version: u32,
@@ -62,7 +74,7 @@ pub async fn fetch_thumbnail(
         ("api", thumbnail_api(space).to_string()),
         ("version", version.to_string()),
         ("method", "get".to_string()),
-        ("id", asset_id.to_string()),
+        ("id", unit_id.to_string()),
         ("cache_key", cache_key.to_string()),
         ("type", "unit".to_string()),
         ("size", size_param(size).to_string()),

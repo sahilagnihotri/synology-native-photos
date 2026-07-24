@@ -27,7 +27,7 @@ mod tests {
 
     fn asset(id: i64, ver: i64) -> Asset {
         Asset {
-            id, cache_key: format!("ck{id}"), filename: format!("IMG_{id}.jpg"),
+            id, unit_id: id + 9000, cache_key: format!("ck{id}"), filename: format!("IMG_{id}.jpg"),
             media_kind: MediaKind::Photo, taken_at: Some(id * 10), added_at: Some(1),
             width: Some(100), height: Some(100), file_size: Some(1),
             space: Space::Personal, server_version: Some(ver),

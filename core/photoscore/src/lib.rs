@@ -336,11 +336,18 @@ impl PhotosCore {
         store.fetch_albums(space)
     }
 
-    /// Fetches a thumbnail for `asset_id` at `size`, served from a
+    /// Fetches a thumbnail for `unit_id` at `size`, served from a
     /// composite-key on-disk cache whenever possible.
     ///
+    /// `unit_id` MUST be `Asset.unit_id` (from `additional.thumbnail.unit_id`
+    /// on the browse response), NOT `Asset.id`. The Synology thumbnail
+    /// endpoint keys on unit_id; sending the browse item id returns an html
+    /// error page instead of image bytes, which is the root cause of a
+    /// previous blank-thumbnail bug. Callers (the Swift ThumbnailCache) pass
+    /// `asset.unitId`.
+    ///
     /// The cache path is `{cache_dir}/thumbs/{hex_digest}.jpg`, where
-    /// `hex_digest` is a hash of `(space, asset_id, size, cache_key)`. Hashing
+    /// `hex_digest` is a hash of `(space, unit_id, size, cache_key)`. Hashing
     /// the composite key rather than interpolating any of its parts (in
     /// particular the NAS-supplied `cache_key`) directly into the filename
     /// means the filename is always a fixed-length hex string: no path
@@ -365,12 +372,12 @@ impl PhotosCore {
     pub async fn thumbnail(
         &self,
         space: Space,
-        asset_id: i64,
+        unit_id: i64,
         cache_key: String,
         size: ThumbnailSize,
     ) -> Result<ThumbnailData, CoreError> {
         let dir = std::path::Path::new(&self.cache_dir).join("thumbs");
-        let path = dir.join(format!("{}.jpg", cache_digest(&[space_tag(space), &asset_id.to_string(), size_tag(size), &cache_key])));
+        let path = dir.join(format!("{}.jpg", cache_digest(&[space_tag(space), &unit_id.to_string(), size_tag(size), &cache_key])));
         if path.exists() {
             let bytes = std::fs::read(&path).map_err(|e| CoreError::Storage { message: e.to_string() })?;
             return Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes });
@@ -391,7 +398,7 @@ impl PhotosCore {
             &transport,
             &sid,
             space,
-            asset_id,
+            unit_id,
             &cache_key,
             size,
             version,
@@ -402,14 +409,17 @@ impl PhotosCore {
         Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes })
     }
 
-    /// Downloads the original full-resolution bytes for `asset_id` to a
+    /// Downloads the original full-resolution bytes for `unit_id` to a
     /// temp file and returns its absolute path. Read-only: never writes
     /// anything back to the NAS.
+    ///
+    /// `unit_id` MUST be `Asset.unit_id`, not `Asset.id`, for the same
+    /// reason as `thumbnail` above: the download endpoint keys on unit_id.
     ///
     /// Same lock discipline as `thumbnail`: `live` is locked only long enough
     /// to clone the transport/sid/version triple, then dropped before the
     /// network `.await`. The destination filename is a hash of
-    /// `(asset_id, cache_key)` for the same path-safety reason as `thumbnail`
+    /// `(unit_id, cache_key)` for the same path-safety reason as `thumbnail`
     /// (the NAS-supplied `cache_key` never appears literally in a path), and
     /// the bytes are written atomically (temp file, then renamed into place).
     ///
@@ -417,7 +427,7 @@ impl PhotosCore {
     pub async fn download_original(
         &self,
         space: Space,
-        asset_id: i64,
+        unit_id: i64,
         cache_key: String,
     ) -> Result<String, CoreError> {
         let (transport, sid, version, syno_token) = {
@@ -435,14 +445,14 @@ impl PhotosCore {
             &transport,
             &sid,
             space,
-            asset_id,
+            unit_id,
             &cache_key,
             version,
             syno_token.as_deref(),
         )
         .await?;
         let dir = std::env::temp_dir();
-        let tmp = dir.join(format!("syno-orig-{}", cache_digest(&[&asset_id.to_string(), &cache_key])));
+        let tmp = dir.join(format!("syno-orig-{}", cache_digest(&[&unit_id.to_string(), &cache_key])));
         write_cache_file_atomically(&dir, &tmp, &bytes)?;
         Ok(tmp.to_string_lossy().into())
     }
@@ -1071,6 +1081,7 @@ mod core_tests {
                 store
                     .upsert_asset(&Asset {
                         id,
+                        unit_id: id + 5000,
                         cache_key: format!("ck{id}"),
                         filename: format!("IMG_{id}.jpg"),
                         media_kind: models::MediaKind::Photo,
@@ -1087,6 +1098,7 @@ mod core_tests {
             store
                 .upsert_asset(&Asset {
                     id: 99,
+                    unit_id: 5099,
                     cache_key: "ck99".into(),
                     filename: "shared.jpg".into(),
                     media_kind: models::MediaKind::Photo,

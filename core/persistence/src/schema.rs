@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS assets (
     rowid_pk       INTEGER PRIMARY KEY AUTOINCREMENT,
     space          INTEGER NOT NULL,            -- 0 Personal, 1 Shared
     server_id      INTEGER NOT NULL,            -- Synology item id (identity within space)
+    unit_id        INTEGER NOT NULL DEFAULT 0,  -- Synology unit id, required by thumbnail/download
     cache_key      TEXT    NOT NULL,            -- version token, NOT identity
     filename       TEXT    NOT NULL,
     media_kind     INTEGER NOT NULL DEFAULT 2,  -- 0 photo, 1 video, 2 unknown
@@ -73,11 +74,37 @@ pub(crate) fn map_sql(e: rusqlite::Error) -> CoreError {
 /// statement is idempotent (`IF NOT EXISTS` / `INSERT OR IGNORE`).
 pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CoreError> {
     conn.execute_batch(DDL).map_err(map_sql)?;
+    add_unit_id_column_if_missing(conn)?;
     conn.execute(
         "INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '1')",
         [],
     )
     .map_err(map_sql)?;
+    Ok(())
+}
+
+/// Adds the `unit_id` column to a pre-existing `assets` table that predates
+/// this migration. `CREATE TABLE IF NOT EXISTS` in the embedded DDL above
+/// only takes effect on a brand new database; a database created before
+/// `unit_id` was added to the schema keeps its old column set forever unless
+/// something explicitly alters it. Checked via `PRAGMA table_info` rather
+/// than trying the `ALTER TABLE` and swallowing a "duplicate column" error,
+/// so this stays idempotent and cheap to call on every open. Existing rows
+/// get `unit_id = 0` (the same default a fresh insert would apply), which is
+/// safe: those rows already cannot be thumbnailed until the next crawl
+/// repopulates them with a real unit_id.
+fn add_unit_id_column_if_missing(conn: &Connection) -> Result<(), CoreError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(assets)").map_err(map_sql)?;
+    let has_unit_id = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(map_sql)?
+        .filter_map(|r| r.ok())
+        .any(|name| name == "unit_id");
+    drop(stmt);
+    if !has_unit_id {
+        conn.execute("ALTER TABLE assets ADD COLUMN unit_id INTEGER NOT NULL DEFAULT 0", [])
+            .map_err(map_sql)?;
+    }
     Ok(())
 }
 
@@ -109,5 +136,48 @@ mod tests {
         let store = crate::Store::open_in_memory().expect("open");
         run_migrations(&store.conn).expect("rerun");
         assert_eq!(store.schema_version().expect("version"), 1);
+    }
+
+    /// A database created before `unit_id` existed (simulated here by
+    /// creating the pre-migration `assets` shape directly) must still open
+    /// cleanly: `run_migrations` adds the missing column rather than
+    /// erroring on a table that already exists without it.
+    #[test]
+    fn legacy_assets_table_gains_unit_id_column_on_migration() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open");
+        conn.execute_batch(
+            "CREATE TABLE assets (
+                rowid_pk       INTEGER PRIMARY KEY AUTOINCREMENT,
+                space          INTEGER NOT NULL,
+                server_id      INTEGER NOT NULL,
+                cache_key      TEXT    NOT NULL,
+                filename       TEXT    NOT NULL,
+                media_kind     INTEGER NOT NULL DEFAULT 2,
+                taken_at       INTEGER,
+                added_at       INTEGER,
+                width          INTEGER,
+                height         INTEGER,
+                file_size      INTEGER,
+                server_version INTEGER,
+                updated_at     INTEGER NOT NULL,
+                UNIQUE (space, server_id)
+            );",
+        )
+        .expect("legacy table");
+        conn.execute(
+            "INSERT INTO assets (space, server_id, cache_key, filename, updated_at) VALUES (0, 1, 'ck1', 'a.jpg', 0)",
+            [],
+        )
+        .expect("legacy row");
+
+        run_migrations(&conn).expect("migration adds unit_id");
+
+        let unit_id: i64 = conn
+            .query_row("SELECT unit_id FROM assets WHERE server_id = 1", [], |r| r.get(0))
+            .expect("unit_id column readable");
+        assert_eq!(unit_id, 0, "legacy row defaults unit_id to 0");
+
+        // Running again must not fail with a duplicate-column error.
+        run_migrations(&conn).expect("second run is a no-op");
     }
 }

@@ -22,15 +22,18 @@
 //! not a `/photo/...`-prefixed path. This function follows the verified
 //! path, not the brief.
 //!
-//! UNVERIFIED PARAM-NAME ASSUMPTIONS (no live download probe yet — confirm
-//! at first real login): `unit_id` wrapped as a single-element array
-//! (`unit_id=[101]`) and `cache_key` as returned by `browse::list_items`,
-//! following the brief and community-client precedent (see
-//! `documentation/research/2026-07-23-feasibility-research.md`), not a
-//! captured real response. Whether `unit_id` is the same value as the
-//! asset `id` or a distinct field is also unverified; callers must pass
-//! whichever field the real `Browse.Item` response calls `unit_id` once
-//! that is confirmed.
+//! VERIFIED against the real NAS (via the thumbnail endpoint, which shares
+//! the same identity requirement): `unit_id` is a distinct field from the
+//! browse item `id`, taken from `additional.thumbnail.unit_id`, and it is
+//! `unit_id`, not the item id, that these endpoints require. Callers must
+//! pass `Asset.unit_id`, never `Asset.id`.
+//!
+//! UNVERIFIED PARAM-NAME ASSUMPTIONS remaining (no live download probe yet,
+//! confirm at first real login): `unit_id` wrapped as a single-element
+//! array (`unit_id=[101]`) and `cache_key` as returned by
+//! `browse::list_items`, following the brief and community-client
+//! precedent (see `documentation/research/2026-07-23-feasibility-research.md`),
+//! not a captured real response.
 //!
 //! LARGE FILE NOTE: this returns the full response body as an in-memory
 //! `Vec<u8>`. Full-resolution photos and especially videos can be large

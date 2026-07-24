@@ -553,20 +553,23 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func crawlSpace(space: Space, observer: FfiCrawlObserver) async throws  -> CrawlProgress
     
     /**
-     * Downloads the original full-resolution bytes for `asset_id` to a
+     * Downloads the original full-resolution bytes for `unit_id` to a
      * temp file and returns its absolute path. Read-only: never writes
      * anything back to the NAS.
+     *
+     * `unit_id` MUST be `Asset.unit_id`, not `Asset.id`, for the same
+     * reason as `thumbnail` above: the download endpoint keys on unit_id.
      *
      * Same lock discipline as `thumbnail`: `live` is locked only long enough
      * to clone the transport/sid/version triple, then dropped before the
      * network `.await`. The destination filename is a hash of
-     * `(asset_id, cache_key)` for the same path-safety reason as `thumbnail`
+     * `(unit_id, cache_key)` for the same path-safety reason as `thumbnail`
      * (the NAS-supplied `cache_key` never appears literally in a path), and
      * the bytes are written atomically (temp file, then renamed into place).
      *
      * Fails closed with `CoreError::Auth` if no session is held.
      */
-    func downloadOriginal(space: Space, assetId: Int64, cacheKey: String) async throws  -> String
+    func downloadOriginal(space: Space, unitId: Int64, cacheKey: String) async throws  -> String
     
     /**
      * Local read of every album in `space`, ordered by name. No network
@@ -669,11 +672,18 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func signOut() async throws 
     
     /**
-     * Fetches a thumbnail for `asset_id` at `size`, served from a
+     * Fetches a thumbnail for `unit_id` at `size`, served from a
      * composite-key on-disk cache whenever possible.
      *
+     * `unit_id` MUST be `Asset.unit_id` (from `additional.thumbnail.unit_id`
+     * on the browse response), NOT `Asset.id`. The Synology thumbnail
+     * endpoint keys on unit_id; sending the browse item id returns an html
+     * error page instead of image bytes, which is the root cause of a
+     * previous blank-thumbnail bug. Callers (the Swift ThumbnailCache) pass
+     * `asset.unitId`.
+     *
      * The cache path is `{cache_dir}/thumbs/{hex_digest}.jpg`, where
-     * `hex_digest` is a hash of `(space, asset_id, size, cache_key)`. Hashing
+     * `hex_digest` is a hash of `(space, unit_id, size, cache_key)`. Hashing
      * the composite key rather than interpolating any of its parts (in
      * particular the NAS-supplied `cache_key`) directly into the filename
      * means the filename is always a fixed-length hex string: no path
@@ -696,7 +706,7 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      *
      * Fails closed with `CoreError::Auth` if no session is held.
      */
-    func thumbnail(space: Space, assetId: Int64, cacheKey: String, size: ThumbnailSize) async throws  -> ThumbnailData
+    func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize) async throws  -> ThumbnailData
     
 }
 /**
@@ -846,26 +856,29 @@ open func crawlSpace(space: Space, observer: FfiCrawlObserver)async throws  -> C
 }
     
     /**
-     * Downloads the original full-resolution bytes for `asset_id` to a
+     * Downloads the original full-resolution bytes for `unit_id` to a
      * temp file and returns its absolute path. Read-only: never writes
      * anything back to the NAS.
+     *
+     * `unit_id` MUST be `Asset.unit_id`, not `Asset.id`, for the same
+     * reason as `thumbnail` above: the download endpoint keys on unit_id.
      *
      * Same lock discipline as `thumbnail`: `live` is locked only long enough
      * to clone the transport/sid/version triple, then dropped before the
      * network `.await`. The destination filename is a hash of
-     * `(asset_id, cache_key)` for the same path-safety reason as `thumbnail`
+     * `(unit_id, cache_key)` for the same path-safety reason as `thumbnail`
      * (the NAS-supplied `cache_key` never appears literally in a path), and
      * the bytes are written atomically (temp file, then renamed into place).
      *
      * Fails closed with `CoreError::Auth` if no session is held.
      */
-open func downloadOriginal(space: Space, assetId: Int64, cacheKey: String)async throws  -> String  {
+open func downloadOriginal(space: Space, unitId: Int64, cacheKey: String)async throws  -> String  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_photoscore_fn_method_photoscore_download_original(
                     self.uniffiClonePointer(),
-                    FfiConverterTypeSpace_lower(space),FfiConverterInt64.lower(assetId),FfiConverterString.lower(cacheKey)
+                    FfiConverterTypeSpace_lower(space),FfiConverterInt64.lower(unitId),FfiConverterString.lower(cacheKey)
                 )
             },
             pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
@@ -1081,11 +1094,18 @@ open func signOut()async throws   {
 }
     
     /**
-     * Fetches a thumbnail for `asset_id` at `size`, served from a
+     * Fetches a thumbnail for `unit_id` at `size`, served from a
      * composite-key on-disk cache whenever possible.
      *
+     * `unit_id` MUST be `Asset.unit_id` (from `additional.thumbnail.unit_id`
+     * on the browse response), NOT `Asset.id`. The Synology thumbnail
+     * endpoint keys on unit_id; sending the browse item id returns an html
+     * error page instead of image bytes, which is the root cause of a
+     * previous blank-thumbnail bug. Callers (the Swift ThumbnailCache) pass
+     * `asset.unitId`.
+     *
      * The cache path is `{cache_dir}/thumbs/{hex_digest}.jpg`, where
-     * `hex_digest` is a hash of `(space, asset_id, size, cache_key)`. Hashing
+     * `hex_digest` is a hash of `(space, unit_id, size, cache_key)`. Hashing
      * the composite key rather than interpolating any of its parts (in
      * particular the NAS-supplied `cache_key`) directly into the filename
      * means the filename is always a fixed-length hex string: no path
@@ -1108,13 +1128,13 @@ open func signOut()async throws   {
      *
      * Fails closed with `CoreError::Auth` if no session is held.
      */
-open func thumbnail(space: Space, assetId: Int64, cacheKey: String, size: ThumbnailSize)async throws  -> ThumbnailData  {
+open func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize)async throws  -> ThumbnailData  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_photoscore_fn_method_photoscore_thumbnail(
                     self.uniffiClonePointer(),
-                    FfiConverterTypeSpace_lower(space),FfiConverterInt64.lower(assetId),FfiConverterString.lower(cacheKey),FfiConverterTypeThumbnailSize_lower(size)
+                    FfiConverterTypeSpace_lower(space),FfiConverterInt64.lower(unitId),FfiConverterString.lower(cacheKey),FfiConverterTypeThumbnailSize_lower(size)
                 )
             },
             pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
@@ -1481,7 +1501,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_crawl_space() != 58321) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_download_original() != 61699) {
+    if (uniffi_photoscore_checksum_method_photoscore_download_original() != 35832) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_albums() != 8838) {
@@ -1508,7 +1528,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_sign_out() != 54821) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_thumbnail() != 60710) {
+    if (uniffi_photoscore_checksum_method_photoscore_thumbnail() != 41967) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_constructor_photoscore_new() != 54313) {

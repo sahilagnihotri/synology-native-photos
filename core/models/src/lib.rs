@@ -45,6 +45,13 @@ pub struct Session {
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct Asset {
     pub id: i64,
+    /// The Synology unit id used for thumbnail/download requests. Distinct
+    /// from `id` (the browse item id): the NAS thumbnail/download endpoints
+    /// key on `additional.thumbnail.unit_id`, not on the item id, so this
+    /// field is what fetch_thumbnail/download_original must send. Defaults
+    /// to 0 when the server response did not carry a unit_id (see browse.rs);
+    /// a 0 value means this asset cannot be thumbnailed/downloaded yet.
+    pub unit_id: i64,
     pub cache_key: String,
     pub filename: String,
     pub media_kind: MediaKind,
@@ -140,6 +147,7 @@ mod tests {
     fn asset_holds_all_contract_fields() {
         let a = Asset {
             id: 42,
+            unit_id: 4242,
             cache_key: "ck-1".to_string(),
             filename: "IMG_0001.HEIC".to_string(),
             media_kind: MediaKind::Photo,
@@ -152,6 +160,7 @@ mod tests {
             server_version: Some(7),
         };
         assert_eq!(a.id, 42);
+        assert_eq!(a.unit_id, 4242);
         assert_eq!(a.space, Space::Personal);
         assert_eq!(a.media_kind, MediaKind::Photo);
         assert_eq!(a.width, Some(4032));

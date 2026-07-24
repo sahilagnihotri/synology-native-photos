@@ -132,6 +132,7 @@ mod tests {
     fn asset_v(id: i64, ver: i64, taken: Option<i64>) -> Asset {
         Asset {
             id,
+            unit_id: id + 9000,
             cache_key: format!("ck{id}-v{ver}"),
             filename: format!("IMG_{id}.jpg"),
             media_kind: MediaKind::Photo,

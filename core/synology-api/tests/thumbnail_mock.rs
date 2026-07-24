@@ -40,6 +40,47 @@ async fn fetch_thumbnail_returns_binary_bytes() {
     assert_eq!(bytes, jpeg_magic);
 }
 
+/// Pins the proven root cause: the request must send `id = unit_id`, not
+/// the item id. Uses the real-NAS numbers from the fix brief (item
+/// id=73459, unit_id=55805) so a regression that swaps them back cannot
+/// pass silently just because both are plausible-looking integers.
+#[tokio::test]
+async fn fetch_thumbnail_sends_unit_id_as_id_param_not_item_id() {
+    let mut server = mockito::Server::new_async().await;
+    let jpeg_magic = vec![0xFF, 0xD8, 0xFF, 0xE0];
+    let item_id: i64 = 73459;
+    let unit_id: i64 = 55805;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("id".into(), unit_id.to_string()),
+            Matcher::UrlEncoded("type".into(), "unit".into()),
+            Matcher::UrlEncoded("cache_key".into(), "55805_1483199977".into()),
+        ]))
+        .match_header("X-SYNO-TOKEN", "TOK123")
+        .with_status(200)
+        .with_header("content-type", "image/jpeg")
+        .with_body(jpeg_magic.clone())
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let bytes = fetch_thumbnail(
+        &t,
+        "SID",
+        Space::Personal,
+        unit_id,
+        "55805_1483199977",
+        ThumbnailSize::Sm,
+        2,
+        Some("TOK123"),
+    )
+    .await
+    .expect("thumb ok when id param carries unit_id");
+    assert_eq!(bytes, jpeg_magic);
+    _m.assert_async().await;
+    assert_ne!(item_id, unit_id, "sanity: the two ids really are different in this fixture");
+}
+
 #[tokio::test]
 async fn fetch_thumbnail_json_error_maps_to_core_error() {
     let mut server = mockito::Server::new_async().await;

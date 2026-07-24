@@ -41,6 +41,12 @@
 //! precedent, not a captured real response. `filename` and `id` are the
 //! most likely to be correct as-is since they match Synology's officially
 //! documented File Station conventions, but should still be checked.
+//!
+//! VERIFIED against the real NAS: `additional.thumbnail.unit_id` sits next
+//! to `cache_key` in the same thumbnail object, and it, not the item `id`,
+//! is what the thumbnail/download endpoints key on. A thumbnail request
+//! sent with the item id returns an html error page; the same request with
+//! unit_id returns the real image bytes. See `thumbnail.rs`/`download.rs`.
 
 use crate::envelope::decode_envelope;
 use crate::namespace::{browse_album_api, browse_item_api};
@@ -116,6 +122,15 @@ struct Thumb {
     // thumbnail/download calls is nested at `additional.thumbnail.cache_key`.
     #[serde(default)]
     cache_key: String,
+    // VERIFIED against the real NAS: the id the thumbnail/download endpoints
+    // actually key on lives here, at `additional.thumbnail.unit_id`, NOT on
+    // the item's own `id`. A thumbnail GET with the item id returns an html
+    // error page; with unit_id it returns the real image. Defaults to
+    // absent (None) so a response that omits it (unexpected but not
+    // impossible) does not fail decode; the caller falls back to 0 and logs
+    // a warning rather than dropping the item.
+    #[serde(default)]
+    unit_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -208,9 +223,11 @@ async fn get_body(
 /// every returned `Asset.space` is set to the same `space` the caller asked
 /// for (the item payload itself carries no space marker). Requests
 /// `additional=["thumbnail","resolution"]` so each item comes back with a
-/// `cache_key` (needed for thumbnails/downloads) and pixel dimensions.
-/// Unknown item fields are ignored; an unrecognized `type` decodes as
-/// `MediaKind::Unknown` rather than failing the whole list.
+/// `cache_key` (needed for thumbnails/downloads), a `unit_id` (the id the
+/// thumbnail/download endpoints actually key on, see the module doc
+/// comment), and pixel dimensions. Unknown item fields are ignored; an
+/// unrecognized `type` decodes as `MediaKind::Unknown` rather than failing
+/// the whole list.
 ///
 /// Decoding is per-element and tolerant: an element that fails to
 /// deserialize into `RawItem` at all, or one that decodes but is missing
@@ -252,7 +269,8 @@ pub async fn list_items(
         .filter_map(|raw| {
             let item: RawItem = decode_one(raw, "browse item")?;
             let additional = item.additional.unwrap_or_default();
-            let cache_key = additional.thumbnail.map(|t| t.cache_key).unwrap_or_default();
+            let thumb = additional.thumbnail;
+            let cache_key = thumb.as_ref().map(|t| t.cache_key.clone()).unwrap_or_default();
             if cache_key.is_empty() {
                 tracing::warn!(
                     "skipping browse item (id={}): missing cache_key, not usable for thumbnails/downloads",
@@ -261,12 +279,25 @@ pub async fn list_items(
                 skipped += 1;
                 return None;
             }
+            // unit_id (not the item id) is what the thumbnail/download
+            // endpoints actually key on, verified against the real NAS. An
+            // item that lacks it is still imported (so the grid count stays
+            // correct) rather than dropped, but it defaults to 0, which
+            // cannot be thumbnailed/downloaded, so this is logged loudly.
+            let unit_id = thumb.and_then(|t| t.unit_id).unwrap_or_else(|| {
+                tracing::warn!(
+                    "browse item (id={}): missing additional.thumbnail.unit_id, thumbnails/downloads for it will fail (defaulting unit_id=0)",
+                    item.id
+                );
+                0
+            });
             let (width, height) = match additional.resolution {
                 Some(r) => (r.width, r.height),
                 None => (None, None),
             };
             Some(Asset {
                 id: item.id,
+                unit_id,
                 cache_key,
                 filename: item.filename.unwrap_or_else(|| item.id.to_string()),
                 media_kind: parse_media_kind(&item.kind),

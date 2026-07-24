@@ -18,10 +18,10 @@ async fn list_items_personal_parses_assets_and_ignores_unknown_fields() {
         .with_body(
             r#"{"success":true,"data":{"list":[
             {"id":101,"filename":"a.jpg","type":"photo","time":1700000000,"filesize":2048,
-             "additional":{"thumbnail":{"cache_key":"CK101"},"resolution":{"width":4000,"height":3000}},
+             "additional":{"thumbnail":{"cache_key":"CK101","unit_id":55805},"resolution":{"width":4000,"height":3000}},
              "unmodeled":"ignore me"},
             {"id":102,"filename":"b.mp4","type":"video","time":1700000100,
-             "additional":{"thumbnail":{"cache_key":"CK102"}}}
+             "additional":{"thumbnail":{"cache_key":"CK102","unit_id":55900}}}
         ]}}"#,
         )
         .create_async()
@@ -31,6 +31,7 @@ async fn list_items_personal_parses_assets_and_ignores_unknown_fields() {
     assert_eq!(assets.len(), 2);
     let a = &assets[0];
     assert_eq!(a.id, 101);
+    assert_eq!(a.unit_id, 55805);
     assert_eq!(a.cache_key, "CK101");
     assert_eq!(a.filename, "a.jpg");
     assert_eq!(a.media_kind, MediaKind::Photo);
@@ -41,8 +42,65 @@ async fn list_items_personal_parses_assets_and_ignores_unknown_fields() {
     assert_eq!(a.space, Space::Personal);
     let b = &assets[1];
     assert_eq!(b.media_kind, MediaKind::Video);
+    assert_eq!(b.unit_id, 55900);
     assert_eq!(b.cache_key, "CK102");
     assert_eq!(b.width, None);
+}
+
+/// The proven root cause: unit_id, not the item id, is what the thumbnail
+/// endpoint needs. This pins the decode against the exact real-NAS shape
+/// captured in the fix brief (item id=73459, unit_id=55805, cache_key
+/// "55805_1483199977") so a future regression in field naming is caught here
+/// rather than downstream in a blank-thumbnail bug report.
+#[tokio::test]
+async fn list_items_decodes_unit_id_distinct_from_item_id() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":73459,"filename":"real.jpg","type":"photo",
+             "additional":{"thumbnail":{"cache_key":"55805_1483199977","unit_id":55805}}}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok");
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0].id, 73459);
+    assert_eq!(assets[0].unit_id, 55805);
+    assert_ne!(assets[0].unit_id, assets[0].id, "unit_id must not be confused with the item id");
+}
+
+/// An item whose `additional.thumbnail` is missing `unit_id` must still be
+/// imported (not dropped, so the grid count stays correct) with unit_id
+/// defaulted to 0, per the brief: dropping it would repeat the earlier
+/// over-aggressive-skip mistake.
+#[tokio::test]
+async fn list_items_missing_unit_id_defaults_to_zero_without_dropping_item() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":401,"filename":"no-unit-id.jpg","type":"photo",
+             "additional":{"thumbnail":{"cache_key":"CK401"}}}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None)
+        .await
+        .expect("list ok even though unit_id is absent");
+    assert_eq!(assets.len(), 1, "item missing unit_id must still be imported");
+    assert_eq!(assets[0].id, 401);
+    assert_eq!(assets[0].unit_id, 0);
 }
 
 #[tokio::test]

@@ -59,10 +59,11 @@ impl Store {
         self.conn
             .execute(
                 "INSERT INTO assets
-                    (space, server_id, cache_key, filename, media_kind,
+                    (space, server_id, unit_id, cache_key, filename, media_kind,
                      taken_at, added_at, width, height, file_size, server_version, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
                  ON CONFLICT(space, server_id) DO UPDATE SET
+                     unit_id        = excluded.unit_id,
                      cache_key      = excluded.cache_key,
                      filename       = excluded.filename,
                      media_kind     = excluded.media_kind,
@@ -76,6 +77,7 @@ impl Store {
                 params![
                     space_to_int(asset.space),
                     asset.id,
+                    asset.unit_id,
                     asset.cache_key,
                     asset.filename,
                     media_kind_to_int(asset.media_kind),
@@ -166,7 +168,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT server_id, cache_key, filename, media_kind, taken_at,
+                "SELECT server_id, unit_id, cache_key, filename, media_kind, taken_at,
                         added_at, width, height, file_size, server_version, space
                  FROM assets
                  WHERE space = ?1
@@ -180,16 +182,17 @@ impl Store {
                 |r| {
                     Ok(Asset {
                         id: r.get(0)?,
-                        cache_key: r.get(1)?,
-                        filename: r.get(2)?,
-                        media_kind: int_to_media_kind(r.get::<_, i64>(3)?),
-                        taken_at: r.get(4)?,
-                        added_at: r.get(5)?,
-                        width: r.get::<_, Option<i64>>(6)?.map(|v| v as u32),
-                        height: r.get::<_, Option<i64>>(7)?.map(|v| v as u32),
-                        file_size: r.get::<_, Option<i64>>(8)?.map(|v| v as u64),
-                        server_version: r.get(9)?,
-                        space: int_to_space(r.get::<_, i64>(10)?),
+                        unit_id: r.get(1)?,
+                        cache_key: r.get(2)?,
+                        filename: r.get(3)?,
+                        media_kind: int_to_media_kind(r.get::<_, i64>(4)?),
+                        taken_at: r.get(5)?,
+                        added_at: r.get(6)?,
+                        width: r.get::<_, Option<i64>>(7)?.map(|v| v as u32),
+                        height: r.get::<_, Option<i64>>(8)?.map(|v| v as u32),
+                        file_size: r.get::<_, Option<i64>>(9)?.map(|v| v as u64),
+                        server_version: r.get(10)?,
+                        space: int_to_space(r.get::<_, i64>(11)?),
                     })
                 },
             )
@@ -210,6 +213,7 @@ mod tests {
     fn asset(space: Space, id: i64, taken: Option<i64>, ver: Option<i64>) -> Asset {
         Asset {
             id,
+            unit_id: id + 1000,
             cache_key: format!("ck{id}"),
             filename: format!("IMG_{id}.jpg"),
             media_kind: MediaKind::Photo,
@@ -236,6 +240,30 @@ mod tests {
         let ids: Vec<i64> = page.iter().map(|a| a.id).collect();
         assert_eq!(ids, vec![2, 3, 1]);
         assert_eq!(page[0].space, Space::Personal);
+    }
+
+    /// unit_id must survive upsert followed by a windowed fetch, and must
+    /// update in place when a re-crawl reports a new unit_id for the same
+    /// (space, server_id) row (mirrors how the real endpoint keys
+    /// thumbnails/downloads on unit_id, not the item id).
+    #[test]
+    fn unit_id_round_trips_through_upsert_and_windowed_fetch() {
+        let store = Store::open_in_memory().unwrap();
+        let mut a = asset(Space::Personal, 73459, Some(100), Some(1));
+        a.unit_id = 55805;
+        store.upsert_asset(&a).unwrap();
+
+        let page = store.fetch_assets(Space::Personal, 0, 10).unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].unit_id, 55805);
+
+        // Re-upsert the same server_id with a different unit_id: the stored
+        // row must update, not keep the stale value.
+        let mut updated = a.clone();
+        updated.unit_id = 60000;
+        store.upsert_asset(&updated).unwrap();
+        let page = store.fetch_assets(Space::Personal, 0, 10).unwrap();
+        assert_eq!(page[0].unit_id, 60000);
     }
 
     #[test]
@@ -387,6 +415,7 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let original = Asset {
             id: 77,
+            unit_id: 55805,
             cache_key: "ck-round-trip".to_string(),
             filename: "IMG_0077.HEIC".to_string(),
             media_kind: MediaKind::Video,
@@ -403,6 +432,7 @@ mod tests {
         assert_eq!(page.len(), 1);
         let round_tripped = &page[0];
         assert_eq!(round_tripped.id, original.id);
+        assert_eq!(round_tripped.unit_id, original.unit_id);
         assert_eq!(round_tripped.cache_key, original.cache_key);
         assert_eq!(round_tripped.filename, original.filename);
         assert_eq!(round_tripped.media_kind, original.media_kind);
