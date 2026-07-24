@@ -11,22 +11,21 @@
 //!      - Default (no pin, `allow_untrusted_tls == false`): system roots,
 //!        standard hostname verification. `danger_accept_invalid_certs` is
 //!        never reachable on this path.
-//!      - Pinned (`pinned_cert_der` is `Some`): built-in root certificates
-//!        are disabled (`tls_built_in_root_certs(false)`) and the pinned DER
-//!        is added as the sole trust anchor via `add_root_certificate`. Only
-//!        the pin itself (or a certificate it issued, if it is a CA) can
-//!        complete the handshake; no public CA is trusted on this path.
-//!        Hostname verification is always relaxed on this path
-//!        (`danger_accept_invalid_hostnames(true)`), for any host, not only
-//!        a bare IP literal. This is safe because the pin is an exact-DER
-//!        match: once the certificate itself is authenticated against the
-//!        pin, checking that its subject/SAN also names the connection host
-//!        adds nothing, and the NAS's certificate never covers the private
-//!        addresses this app actually connects through (a LAN IP, a
-//!        Tailscale IP, or a Tailscale MagicDNS name such as
-//!        `foo.tailnet.ts.net`), none of which appear in a certificate
-//!        issued for the public DDNS name. `danger_accept_invalid_certs` is
-//!        never called on this path either.
+//!      - Pinned (`pinned_cert_der` is `Some`): a custom rustls certificate
+//!        verifier (`PinnedCertVerifier`) replaces chain and hostname
+//!        verification entirely. It accepts the handshake if and only if the
+//!        end-entity (leaf) certificate the server presents is byte-for-byte
+//!        identical to the pinned DER; any other certificate, including one
+//!        signed by a real public CA, is rejected. This is exact-leaf
+//!        pinning: the Synology NAS presents a leaf certificate (Basic
+//!        Constraints CA:FALSE) as part of its chain, which is not a valid
+//!        trust anchor, so adding it via `add_root_certificate` (the earlier
+//!        approach) left rustls unable to build any trusted path and the
+//!        handshake failed outright. Comparing the leaf DER directly sidesteps
+//!        chain building altogether: no root store, no intermediate, no
+//!        hostname check is needed once the exact certificate has been
+//!        authenticated. `danger_accept_invalid_certs` is never called on this
+//!        path.
 //!      - Dev toggle (`allow_untrusted_tls == true` AND no usable pin): the
 //!        one and only path that calls `danger_accept_invalid_certs(true)`.
 //!        This is insecure by design (see `Connection::allow_untrusted_tls`)
@@ -122,26 +121,6 @@ fn ensure_port(host_and_maybe_port: &str) -> String {
     }
 }
 
-/// Whether `build_client` should relax hostname verification for `connection`.
-///
-/// True whenever a pin is present, for any host, regardless of whether that
-/// host is an IP literal, a bare hostname, or a Tailscale MagicDNS name
-/// (`foo.tailnet.ts.net`). The reasoning: `pinned_cert_der` is an exact-DER
-/// match, the strongest possible identity check there is; the certificate is
-/// already fully authenticated against the pin before hostname matching would
-/// even run. Checking that the same certificate's subject/SAN also happens to
-/// name the connection host adds no additional security once that exact-DER
-/// match has succeeded, and the NAS's real-world certificate (issued for its
-/// public DDNS name) never covers any of the private addresses this app
-/// actually dials: a LAN IP, a Tailscale IP, or a Tailscale MagicDNS
-/// hostname. An earlier version of this function only relaxed the check for
-/// IP literals, which left every non-IP private hostname (in particular
-/// Tailscale MagicDNS names) unable to complete a pinned handshake at all,
-/// even after the user had explicitly approved the exact certificate.
-pub fn should_relax_hostname_check(connection: &Connection) -> bool {
-    connection.pinned_cert_der.is_some()
-}
-
 /// Extracts the bare host (no scheme, no port, brackets stripped for IPv6)
 /// from a normalized `scheme://host:port` base URL, for TLS trust decisions.
 fn bare_host(base_url: &str) -> &str {
@@ -158,13 +137,13 @@ fn bare_host(base_url: &str) -> &str {
 /// the top of this module:
 /// - No pin, `allow_untrusted_tls == false` (the default): system roots,
 ///   standard verification, fully strict.
-/// - Pin present: built-in root certificates are disabled and the pinned DER
-///   is added as the sole trust anchor via `add_root_certificate`, so ONLY
-///   the pin (no public CA) can complete the handshake. Hostname
-///   verification is always relaxed on this path (see
-///   `should_relax_hostname_check`): only the name check is skipped, the
-///   certificate itself is still fully authenticated against the pin, never
-///   against a public root.
+/// - Pin present: a custom rustls verifier (`PinnedCertVerifier`) is
+///   installed via `use_preconfigured_tls`. It accepts a handshake only when
+///   the presented leaf certificate is byte-for-byte identical to the pinned
+///   DER; there is no root store and no hostname check on this path at all,
+///   because the exact-DER match already is the strongest possible identity
+///   proof. See the module doc comment for why `add_root_certificate` (the
+///   previous approach) could not work for a real Synology leaf cert.
 /// - No pin, `allow_untrusted_tls == true`: the one dev-only path that calls
 ///   `danger_accept_invalid_certs(true)`. See the loud warning on
 ///   `Connection::allow_untrusted_tls`.
@@ -174,36 +153,118 @@ fn bare_host(base_url: &str) -> &str {
 /// never be silently downgraded to "accept anything" by a leftover dev flag.
 pub fn build_client(connection: &Connection) -> Result<reqwest::Client, CoreError> {
     let mut builder = reqwest::Client::builder()
-        .use_rustls_tls()
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(10));
 
     if let Some(der) = &connection.pinned_cert_der {
-        let cert = reqwest::Certificate::from_der(der).map_err(|e| CoreError::Network {
-            message: format!("pinned certificate is not valid DER: {e}"),
-        })?;
-        let relax_hostname = should_relax_hostname_check(connection);
-        // Built-in roots must be disabled here, otherwise the pin is only
-        // additive: the handshake would succeed against EITHER the pinned
-        // DER OR any certificate chaining to a public CA, which is not
-        // pinning at all. Disabling them makes the pinned DER the sole
-        // trust anchor, so only it (or a certificate it issued, if it is a
-        // CA) can complete the handshake, even with hostname checking
-        // relaxed below.
-        builder = builder
-            .tls_built_in_root_certs(false)
-            .add_root_certificate(cert)
-            .danger_accept_invalid_hostnames(relax_hostname);
-    } else if connection.allow_untrusted_tls {
-        // DEV-ONLY, INSECURE: accepts any certificate from any server. Only
-        // reachable when there is no pin at all; see the doc comment on
-        // `Connection::allow_untrusted_tls`.
-        builder = builder.danger_accept_invalid_certs(true);
+        let config = pinned_rustls_config(der)?;
+        builder = builder.use_preconfigured_tls(config);
+    } else {
+        builder = builder.use_rustls_tls();
+        if connection.allow_untrusted_tls {
+            // DEV-ONLY, INSECURE: accepts any certificate from any server.
+            // Only reachable when there is no pin at all; see the doc
+            // comment on `Connection::allow_untrusted_tls`.
+            builder = builder.danger_accept_invalid_certs(true);
+        }
     }
 
     builder.build().map_err(|e| CoreError::Network {
         message: format!("failed to build HTTP client: {e}"),
     })
+}
+
+/// Builds the rustls `ClientConfig` for the pinned path: a custom certificate
+/// verifier that accepts only the exact pinned leaf DER, with ALPN set to
+/// `http/1.1` to match the plain `use_rustls_tls()` path (reqwest otherwise
+/// negotiates ALPN itself, but a preconfigured rustls config bypasses that).
+fn pinned_rustls_config(pinned_der: &[u8]) -> Result<rustls::ClientConfig, CoreError> {
+    if x509_parser::parse_x509_certificate(pinned_der).is_err() {
+        return Err(CoreError::Network {
+            message: "pinned certificate is not valid DER: could not parse as an X.509 certificate".to_string(),
+        });
+    }
+
+    let verifier = PinnedCertVerifier { pinned_der: pinned_der.to_vec() };
+    let mut config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(verifier))
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Ok(config)
+}
+
+/// A `rustls` certificate verifier implementing true exact-leaf pinning: it
+/// accepts a server's certificate if and only if the end-entity (leaf)
+/// certificate is byte-for-byte identical to `pinned_der`, and rejects every
+/// other certificate, including one signed by a legitimate public CA. This
+/// fully replaces chain and hostname verification for the pinned path; no
+/// root store is consulted and no name is ever checked, because the DER match
+/// alone is a stronger identity proof than either.
+///
+/// Signature verification (`verify_tls12_signature` / `verify_tls13_signature`)
+/// is NOT weakened: both delegate to rustls' own `ring`-backed verification of
+/// the handshake signature against the algorithms the default crypto provider
+/// supports, following rustls' documented pattern for a custom verifier. Only
+/// chain-of-trust and identity (subject/SAN) checks are replaced by the DER
+/// comparison; a signature that does not actually verify still fails the
+/// handshake even on the pinned path.
+#[derive(Debug)]
+struct PinnedCertVerifier {
+    pinned_der: Vec<u8>,
+}
+
+impl rustls::client::danger::ServerCertVerifier for PinnedCertVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls_pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls_pki_types::CertificateDer<'_>],
+        _server_name: &rustls_pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls_pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        if end_entity.as_ref() == self.pinned_der.as_slice() {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        } else {
+            Err(rustls::Error::General(
+                "presented certificate does not match the pinned certificate".to_string(),
+            ))
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls_pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls_pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
 }
 
 /// Fetches the DER bytes of the TLS certificate presented by `host` (a raw
@@ -571,25 +632,6 @@ mod tests {
     fn transport_normalizes_bare_host() {
         let t = Transport::new(&conn("192.168.1.10", None)).expect("transport builds");
         assert_eq!(t.base_url(), "https://192.168.1.10:5001");
-    }
-
-    #[test]
-    fn relaxes_hostname_check_for_any_host_when_pinned() {
-        // The bug this guards against: hostname relaxation must not be
-        // gated on the host being an IP literal. A Tailscale MagicDNS name
-        // is exactly as unable to match the NAS's public-DDNS-name
-        // certificate as a bare IP is, so it must relax the same way.
-        assert!(should_relax_hostname_check(&conn("192.168.1.10", Some(vec![1]))));
-        assert!(should_relax_hostname_check(&conn("100.87.107.5", Some(vec![1]))));
-        assert!(should_relax_hostname_check(&conn("fafnir.ladon-pirate.ts.net", Some(vec![1]))));
-        assert!(should_relax_hostname_check(&conn("agnihotri.synology.me", Some(vec![1]))));
-        assert!(should_relax_hostname_check(&conn("nas.example.com", Some(vec![1]))));
-    }
-
-    #[test]
-    fn does_not_relax_hostname_check_with_no_pin() {
-        assert!(!should_relax_hostname_check(&conn("fafnir.ladon-pirate.ts.net", None)));
-        assert!(!should_relax_hostname_check(&conn("192.168.1.10", None)));
     }
 
     #[tokio::test]

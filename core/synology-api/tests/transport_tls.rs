@@ -1,15 +1,21 @@
 //! End-to-end TLS trust tests against a real (self-signed, in-process) TLS
 //! server: proves the three build_client paths (default strict, pinned
-//! cert+hostname-relaxed-only, dev-only danger toggle) against actual TLS
-//! handshakes rather than only unit-testing the builder configuration.
+//! exact-leaf, dev-only danger toggle) against actual TLS handshakes rather
+//! than only unit-testing the builder configuration.
 //!
 //! The test server is a bare `rustls`/`tokio-rustls` TCP+TLS listener (no
 //! HTTP framing needed): each accepted connection is handed the configured
 //! certificate during the handshake and then the connection is dropped. That
 //! is enough to exercise `fetch_server_cert_der` (captures the leaf cert) and
-//! `build_client`'s pinned/relaxed-hostname connect (a real `reqwest` client
-//! completing a handshake against it), without needing to speak the
-//! Synology envelope at all.
+//! `build_client`'s pinned connect (a real `reqwest` client completing a
+//! handshake against it), without needing to speak the Synology envelope at
+//! all.
+//!
+//! The leaf-pin tests below are the regression coverage for the real bug:
+//! `start_server` generates a plain leaf certificate (Basic Constraints
+//! CA:FALSE), exactly the shape the real Synology NAS presents, whereas the
+//! old test suite only ever pinned an in-test CA certificate (a valid trust
+//! anchor), which is why it passed while the real NAS handshake failed.
 
 use models::Connection;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
@@ -43,17 +49,26 @@ async fn start_server(subject_alt_names: Vec<String>) -> TestTlsServer {
     let addr = listener.local_addr().expect("listener has an addr");
 
     // Accept connections in a background task for the test's whole lifetime;
-    // each one just completes the handshake (or fails, e.g. on a hostname or
-    // cert mismatch check the *client* makes) and is dropped. No HTTP needs
-    // to be served: `fetch_server_cert_der` never sends a request past the
-    // handshake, and the `build_client`-driven connect attempts in these
-    // tests only need the handshake outcome, not a real response body.
+    // each one completes the handshake (or fails, e.g. on a cert mismatch the
+    // *client* makes) and then, if the handshake succeeded, writes back a
+    // minimal fixed HTTP/1.1 response so a real `reqwest` GET through this
+    // connection observes a clean success rather than a `ConnectionReset`
+    // that a bare dropped socket would otherwise produce after a successful
+    // handshake. `fetch_server_cert_der` never sends a request past the
+    // handshake at all, so this response is only ever read by the
+    // `build_client`-driven connect attempts in the tests below.
     tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else { return };
             let acceptor = acceptor.clone();
             tokio::spawn(async move {
-                let _ = acceptor.accept(stream).await;
+                if let Ok(mut tls) = acceptor.accept(stream).await {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = tls
+                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                        .await;
+                    let _ = tls.shutdown().await;
+                }
             });
         }
     });
@@ -73,16 +88,99 @@ async fn fetch_server_cert_der_captures_the_presented_leaf_cert() {
 }
 
 #[tokio::test]
-async fn pinned_cert_for_ip_host_connects_with_hostname_check_relaxed() {
-    // The cert's SAN is a DNS name, not the IP we connect to (mirrors the
-    // real agnihotri.synology.me-cert-over-Tailscale-IP failure case), so a
-    // strict client would reject it on hostname grounds even with the right
-    // cert pinned. The pinned path must still succeed by relaxing hostname
-    // matching ONLY, while the cert identity itself is authenticated by the
-    // pin.
+async fn pinned_leaf_cert_connects_ok() {
+    // THE regression test for the real bug: the server presents a LEAF
+    // certificate (Basic Constraints CA:FALSE, exactly what the real
+    // Synology NAS presents), pinned to that exact leaf DER. Before the
+    // custom-verifier fix, the pinned path added the leaf via
+    // `add_root_certificate` with built-in roots disabled, which cannot
+    // verify a chain rooted in a non-CA certificate, so this handshake
+    // failed at setup with the opaque "error sending request". The fix
+    // (`PinnedCertVerifier`) authenticates by exact leaf-DER match instead
+    // of chain building, so this must now connect successfully.
     let server = start_server(vec!["nas.example.internal".to_string()]).await;
     let host = format!("{}:{}", server.addr.ip(), server.addr.port());
 
+    let info = fetch_server_cert_der(&host).await.expect("cert probe should succeed");
+    assert_eq!(info.der, server.cert_der, "sanity: the probed cert is the leaf the server presents");
+
+    let connection = Connection {
+        host: host.clone(),
+        verify_tls: true,
+        pinned_cert_der: Some(info.der.clone()),
+        allow_untrusted_tls: false,
+    };
+    let client = build_client(&connection).expect("client builds with pin");
+    let result = client.get(format!("https://{host}/")).send().await;
+    assert!(
+        result.is_ok(),
+        "pinning the exact leaf DER the server presents must connect successfully, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn pinned_leaf_cert_rejects_a_different_leaf() {
+    // Anti-MITM property: pin server A's leaf, then connect to server B,
+    // which presents a DIFFERENT leaf (different key, same SAN). Only the
+    // exact pinned DER may complete the handshake, so this must be rejected
+    // even though B's certificate is otherwise perfectly well-formed. A
+    // verifier that accepted any leaf, or that fell back to chain trust,
+    // would let this through and defeat pinning entirely.
+    let server_a = start_server(vec!["nas.example.internal".to_string()]).await;
+    let info_a = fetch_server_cert_der(&format!("{}:{}", server_a.addr.ip(), server_a.addr.port()))
+        .await
+        .expect("cert probe on server A should succeed");
+
+    let server_b = start_server(vec!["nas.example.internal".to_string()]).await;
+    let host_b = format!("{}:{}", server_b.addr.ip(), server_b.addr.port());
+    assert_ne!(info_a.der, server_b.cert_der, "the two leaves must actually differ for this test to prove anything");
+
+    let connection = Connection { host: host_b.clone(), verify_tls: true, pinned_cert_der: Some(info_a.der), allow_untrusted_tls: false };
+    let client = build_client(&connection).expect("client builds with a pin for a different server");
+    let result = client.get(format!("https://{host_b}/")).send().await;
+    assert!(result.is_err(), "connecting to a server presenting a leaf that is NOT the pin must be rejected");
+}
+
+#[tokio::test]
+async fn pinned_leaf_cert_connects_ok_when_server_presents_a_chain() {
+    // Proves chain length is irrelevant to the pinned path: the server here
+    // presents a leaf signed by an intermediate/CA (a 2-cert chain), and only
+    // the leaf DER is pinned. The custom verifier only ever looks at the
+    // end-entity certificate, so this must connect exactly like the
+    // single-cert self-signed case, whether or not an issuer is attached.
+    let (server, _ca_der) = start_server_with_ca_signed_leaf(vec!["nas.example.internal".to_string()]).await;
+    let host = format!("{}:{}", server.addr.ip(), server.addr.port());
+
+    let info = fetch_server_cert_der(&host).await.expect("cert probe should succeed");
+    assert_eq!(info.der, server.cert_der, "sanity: the probed cert is the leaf the server presents");
+
+    let connection = Connection {
+        host: host.clone(),
+        verify_tls: true,
+        pinned_cert_der: Some(info.der.clone()),
+        allow_untrusted_tls: false,
+    };
+    let client = build_client(&connection).expect("client builds with pin");
+    let result = client.get(format!("https://{host}/")).send().await;
+    assert!(
+        result.is_ok(),
+        "pinning the leaf of a CA-issued chain must connect regardless of chain length, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn pinned_cert_connects_even_when_san_names_a_different_host() {
+    // Historical failure case, now trivially true under exact-leaf pinning:
+    // the server's certificate SAN (`nas.example.internal`) never names the
+    // address we actually connect through (mirrors the real NAS cert, issued
+    // for its public DDNS name, never covering the LAN/Tailscale address the
+    // app dials). The custom verifier never inspects the connection hostname
+    // at all, so a SAN/host mismatch must not matter once the leaf DER is
+    // pinned; connecting by bare IP:port here (rather than a resolvable
+    // MagicDNS-style name) is enough to prove hostname checking never runs,
+    // since `PinnedCertVerifier` does not special-case IP literals either.
+    let server = start_server(vec!["nas.example.internal".to_string()]).await;
+    let host = format!("{}:{}", server.addr.ip(), server.addr.port());
     let info = fetch_server_cert_der(&host).await.expect("cert probe should succeed");
 
     let connection = Connection {
@@ -93,92 +191,10 @@ async fn pinned_cert_for_ip_host_connects_with_hostname_check_relaxed() {
     };
     let client = build_client(&connection).expect("client builds with pin");
     let result = client.get(format!("https://{host}/")).send().await;
-    // We only care that the TLS handshake itself succeeded (name+cert trust
-    // resolved); the peer never speaks HTTP back, so the request itself may
-    // still error out afterward (e.g. on reading a response). What must NOT
-    // happen is a certificate or hostname verification error.
-    match result {
-        Ok(_) => {}
-        Err(e) => {
-            let msg = e.to_string();
-            assert!(
-                !msg.to_lowercase().contains("certificate") && !msg.to_lowercase().contains("hostname") && !msg.to_lowercase().contains("name"),
-                "handshake must not fail on cert/hostname grounds with a correct pin: {msg}"
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn pinned_cert_for_tailscale_magicdns_host_connects_with_hostname_check_relaxed() {
-    // The real failure case: a Tailscale MagicDNS name
-    // (fafnir.ladon-pirate.ts.net) is a DNS hostname, not an IP literal, but
-    // the NAS's certificate is issued for the public DDNS name
-    // (agnihotri.synology.me), which the MagicDNS name will never match. A
-    // client that only relaxes hostname checking for IP literals (the
-    // previous behavior) would still reject this handshake on hostname
-    // grounds even with the correct cert pinned, which is exactly the bug:
-    // pinning the exact certificate DER already authenticates the server,
-    // so the hostname check must be relaxed for ANY host once a pin is
-    // present, not only when that host happens to be an IP literal.
-    //
-    // The server's cert SAN is deliberately a different DNS name than the
-    // connection host below, mirroring agnihotri.synology.me vs.
-    // fafnir.ladon-pirate.ts.net: a strict hostname check would reject this
-    // even with the right cert pinned. Note the failure is easy to miss:
-    // reqwest's `Display` for this error is just "error sending request for
-    // url (...)", it does not surface "hostname"/"certificate" at the top
-    // level at all (that text only appears in the `Debug` chain, inside the
-    // wrapped `rustls::Error::InvalidCertificate(NotValidForNameContext)`),
-    // which is exactly the unhelpful "request failed: error sending
-    // request" text seen in the real bug report. So this test inspects the
-    // full `{:?}` debug chain, not just `{}, `to actually prove the
-    // handshake succeeded rather than merely failing with a vague message.
-    let server = start_server(vec!["nas.example.internal".to_string()]).await;
-    let info = fetch_server_cert_der(&format!("{}:{}", server.addr.ip(), server.addr.port()))
-        .await
-        .expect("cert probe should succeed");
-
-    // Build the client exactly the way `build_client` does, driven by a
-    // `Connection` whose host is a MagicDNS-shaped hostname (not an IP
-    // literal), then `.resolve()` that hostname onto the real loopback
-    // socket the test server listens on so the TLS handshake actually
-    // targets the live server while using the MagicDNS name as SNI/hostname
-    // for verification purposes, exactly like the real Tailscale case.
-    let host = "fafnir.ladon-pirate.ts.net";
-    let connection = Connection {
-        host: format!("{host}:{}", server.addr.port()),
-        verify_tls: true,
-        pinned_cert_der: Some(info.der.clone()),
-        allow_untrusted_tls: false,
-    };
-    let mut client_builder = build_client_builder_for_test(&connection, &info.der);
-    client_builder = client_builder.resolve(host, server.addr);
-    let client = client_builder.build().expect("client builds");
-
-    let result = client.get(format!("https://{host}:{}/", server.addr.port())).send().await;
-    match result {
-        Ok(_) => {}
-        Err(e) => {
-            let debug_msg = format!("{e:?}").to_lowercase();
-            assert!(
-                !debug_msg.contains("notvalidforname") && !debug_msg.contains("invalidcertificate"),
-                "handshake must not fail on a hostname mismatch with a correct pin for a non-IP (MagicDNS-style) host: {e:?}"
-            );
-        }
-    }
-}
-
-/// Rebuilds exactly the pinned-path builder logic `build_client` uses,
-/// against the crate's own `should_relax_hostname_check` decision function,
-/// so this test proves the real decision function's behavior rather than a
-/// hand-rolled copy that could silently drift from `build_client` itself.
-fn build_client_builder_for_test(connection: &Connection, der: &[u8]) -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .use_rustls_tls()
-        .tls_built_in_root_certs(false)
-        .add_root_certificate(reqwest::Certificate::from_der(der).expect("der parses"))
-        .danger_accept_invalid_hostnames(synology_api::transport::should_relax_hostname_check(connection))
+    assert!(
+        result.is_ok(),
+        "a SAN naming a different host than the one dialed must not matter once the leaf DER is pinned: {result:?}"
+    );
 }
 
 #[tokio::test]
@@ -255,7 +271,13 @@ async fn start_server_with_ca_signed_leaf(subject_alt_names: Vec<String>) -> (Te
             let Ok((stream, _)) = listener.accept().await else { return };
             let acceptor = acceptor.clone();
             tokio::spawn(async move {
-                let _ = acceptor.accept(stream).await;
+                if let Ok(mut tls) = acceptor.accept(stream).await {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = tls
+                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                        .await;
+                    let _ = tls.shutdown().await;
+                }
             });
         }
     });
@@ -301,25 +323,3 @@ async fn pinned_path_rejects_a_ca_signed_cert_that_is_not_the_pin() {
     );
 }
 
-#[tokio::test]
-async fn reconnect_against_a_different_cert_fails_the_pin() {
-    // Pin the cert from server A, then attempt to connect to server B (a
-    // different self-signed cert, different key, same SAN). The pinned
-    // client trusts only A's exact DER, so a handshake against B's
-    // certificate must fail: this is the whole point of pinning (detects
-    // cert rotation / a MITM presenting a different cert on reconnect).
-    let server_a = start_server(vec!["nas.example.internal".to_string()]).await;
-    let info_a = fetch_server_cert_der(&format!("{}:{}", server_a.addr.ip(), server_a.addr.port()))
-        .await
-        .expect("cert probe on server A should succeed");
-
-    let server_b = start_server(vec!["nas.example.internal".to_string()]).await;
-    let host_b = format!("{}:{}", server_b.addr.ip(), server_b.addr.port());
-
-    assert_ne!(info_a.der, server_b.cert_der, "the two self-signed certs must actually differ for this test to prove anything");
-
-    let connection = Connection { host: host_b.clone(), verify_tls: true, pinned_cert_der: Some(info_a.der), allow_untrusted_tls: false };
-    let client = build_client(&connection).expect("client builds with a stale pin");
-    let result = client.get(format!("https://{host_b}/")).send().await;
-    assert!(result.is_err(), "connecting to a server presenting a DIFFERENT cert than the pin must fail");
-}
