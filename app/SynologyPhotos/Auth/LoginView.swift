@@ -118,6 +118,7 @@ final class LoginFormModel {
 /// than logging in.
 struct LoginView: View {
     @State private var model: LoginFormModel
+    @State private var showPassword = false
     private let auth: AuthStateMachine
 
     init(auth: AuthStateMachine, client: PhotosCoreProtocol) {
@@ -132,8 +133,28 @@ struct LoginView: View {
                 .textContentType(.URL).accessibilityIdentifier("login.host")
             TextField("Username", text: $model.username)
                 .textContentType(.username).accessibilityIdentifier("login.username")
-            SecureField("Password", text: $model.password)
-                .textContentType(.password).accessibilityIdentifier("login.password")
+            HStack {
+                Group {
+                    if showPassword {
+                        TextField("Password", text: $model.password)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                    } else {
+                        SecureField("Password", text: $model.password)
+                            .textContentType(.password)
+                    }
+                }
+                .accessibilityIdentifier("login.password")
+                Button {
+                    showPassword.toggle()
+                } label: {
+                    Image(systemName: showPassword ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(showPassword ? "Hide password" : "Show password")
+                .accessibilityIdentifier("login.password.reveal")
+            }
             if model.showOtp {
                 TextField("Two-factor code", text: $model.otpCode)
                     .accessibilityIdentifier("login.otp")
