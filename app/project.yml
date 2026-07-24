@@ -1,6 +1,6 @@
 name: SynologyPhotos
 options:
-  bundleIdPrefix: com.sahil.synologyphotos
+  bundleIdPrefix: se.agnihotri
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
@@ -53,7 +53,7 @@ targets:
         link: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.sahil.synologyphotos
+        PRODUCT_BUNDLE_IDENTIFIER: se.agnihotri.synologyphotos
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         ENABLE_HARDENED_RUNTIME: YES
@@ -79,7 +79,7 @@ targets:
         # generate` and to `xcodebuild`.
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "Apple Development"
-        DEVELOPMENT_TEAM: "${DEVELOPMENT_TEAM}"
+        DEVELOPMENT_TEAM: "5W67TF3579"
         # PhotosCoreFFI/modelsFFI are the raw UniFFI C scaffolding that
         # bindings/PhotosCore.swift and bindings/models.swift guard behind
         # `#if canImport(...)`. No public symbol of the PhotosCore Swift

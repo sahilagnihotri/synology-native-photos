@@ -27,7 +27,7 @@ enum KeychainError: Error {
 /// ever talks to the user's own NAS and must not leak session material off
 /// the device.
 enum KeychainSID {
-    private static let service = "com.synologynativephotos.session"
+    private static let service = "se.agnihotri.synologyphotos.session"
 
     private static func account(host: String, username: String) -> String {
         "\(host)|\(username)"
@@ -157,7 +157,7 @@ enum KeychainSID {
 /// prompt, because a pinned certificate is public server-identity data, not
 /// a secret, and never belonged in the Keychain in the first place.
 private enum LegacyKeychainCertPin {
-    static let service = "com.synologynativephotos.certpin"
+    static let service = "se.agnihotri.synologyphotos.certpin"
 
     static func baseQuery(host: String? = nil) -> [String: Any] {
         var query: [String: Any] = [
@@ -320,7 +320,7 @@ enum KeychainCertPin {
 /// is kept) across a plain sign-out. Only an explicit "forget this device"
 /// action clears it.
 enum KeychainDeviceToken {
-    private static let service = "com.synologynativephotos.devicetoken"
+    private static let service = "se.agnihotri.synologyphotos.devicetoken"
 
     private static func account(host: String, username: String) -> String {
         "\(host)|\(username)"

@@ -33,7 +33,7 @@ final class PathMonitor {
     var reachability: Reachability = .unknown
 
     private let monitor = NWPathMonitor()
-    private let queue = DispatchQueue(label: "com.synologynativephotos.pathmonitor")
+    private let queue = DispatchQueue(label: "se.agnihotri.synologyphotos.pathmonitor")
 
     /// Starts observing path updates. Safe to call once per instance; the
     /// underlying `NWPathMonitor` is started on a private background queue,

@@ -440,7 +440,7 @@
 						TestTargetID = BC07A7F7541E137012CC5D87;
 					};
 					BC07A7F7541E137012CC5D87 = {
-						DevelopmentTeam = "${DEVELOPMENT_TEAM}";
+						DevelopmentTeam = 5W67TF3579;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -626,7 +626,7 @@
 					"-lphotoscore",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos.PhotosCore;
+				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.PhotosCore;
 				PRODUCT_MODULE_NAME = PhotosCore;
 				PRODUCT_NAME = PhotosCore;
 				SDKROOT = macosx;
@@ -648,7 +648,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos.SynologyPhotosTests;
+				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.SynologyPhotosTests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SynologyPhotos.app/Contents/MacOS/SynologyPhotos";
 			};
@@ -678,7 +678,7 @@
 					"-lphotoscore",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos.PhotosCore;
+				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.PhotosCore;
 				PRODUCT_MODULE_NAME = PhotosCore;
 				PRODUCT_NAME = PhotosCore;
 				SDKROOT = macosx;
@@ -768,7 +768,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos.SynologyPhotosTests;
+				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.SynologyPhotosTests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SynologyPhotos.app/Contents/MacOS/SynologyPhotos";
 			};
@@ -786,7 +786,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos.SynologyPhotosUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.SynologyPhotosUITests;
 				SDKROOT = macosx;
 				TEST_TARGET_NAME = SynologyPhotos;
 			};
@@ -804,7 +804,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos.SynologyPhotosUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.SynologyPhotosUITests;
 				SDKROOT = macosx;
 				TEST_TARGET_NAME = SynologyPhotos;
 			};
@@ -817,7 +817,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
+				DEVELOPMENT_TEAM = 5W67TF3579;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
@@ -826,7 +826,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos;
+				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.synologyphotos;
 				SDKROOT = macosx;
 			};
 			name = Release;
@@ -838,7 +838,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
+				DEVELOPMENT_TEAM = 5W67TF3579;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
@@ -847,7 +847,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos;
+				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.synologyphotos;
 				SDKROOT = macosx;
 			};
 			name = Debug;

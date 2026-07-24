@@ -23,10 +23,10 @@ struct LoginPreferences: Equatable {
 }
 
 enum LoginPreferencesStore {
-    private static let hostKey = "com.synologynativephotos.login.host"
-    private static let usernameKey = "com.synologynativephotos.login.username"
-    private static let rememberMeKey = "com.synologynativephotos.login.rememberMe"
-    private static let allowUntrustedTlsKey = "com.synologynativephotos.login.allowUntrustedTls"
+    private static let hostKey = "se.agnihotri.synologyphotos.login.host"
+    private static let usernameKey = "se.agnihotri.synologyphotos.login.username"
+    private static let rememberMeKey = "se.agnihotri.synologyphotos.login.rememberMe"
+    private static let allowUntrustedTlsKey = "se.agnihotri.synologyphotos.login.allowUntrustedTls"
 
     /// Loads the last saved prefill, or `.empty` (remember-me defaulting to
     /// on, the insecure toggle defaulting to off) on a fresh install where
