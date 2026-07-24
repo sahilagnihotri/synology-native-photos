@@ -8,10 +8,23 @@
 
 /* Begin PBXBuildFile section */
 		0CAAE0B56C2B775746CEE2B4 /* SynologyPhotosApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D65797EEE04B6F9658674A2 /* SynologyPhotosApp.swift */; };
-		2536C8F74952614EA001D671 /* PhotosCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 03B54DD7433C5CA9A7C6E9AE /* PhotosCore.xcframework */; };
+		18CECECE9EEAB167F3D61DBF /* PathMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE5C177E3FA3BAFB7092CF5 /* PathMonitorTests.swift */; };
+		22D1BE9FCE8695C6B3994AF0 /* PhotosCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		249AE0CD7E87E83C61CC8001 /* PhotosCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */; };
+		24D0A816AC4835369675B6A2 /* FakePhotosCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271D63AA455C96290DFEF262 /* FakePhotosCore.swift */; };
+		4A102FE0D8B5ED56831E327C /* ImageDownsampleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5261051EEA590BD7268673F8 /* ImageDownsampleTests.swift */; };
+		559A4CE3AE0FCE63660CB2CE /* KeychainSID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935811E0F479F10FB1C713F0 /* KeychainSID.swift */; };
+		6159312037F2C83346C2E0E6 /* PhotosCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */; };
+		7A1544430BEC8AB2DB36D464 /* FakePhotosCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 096746CDFF6A253E76BAF96F /* FakePhotosCoreTests.swift */; };
+		81E1E0367711A5C5B9873DF9 /* models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857A71F880766524090BB89F /* models.swift */; };
+		8E6AC06CAA7CF3A875BCE82B /* PathMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AB2048962505837D9708B9 /* PathMonitor.swift */; };
+		A7516BBFB26FE8A4BB8E7C71 /* KeychainSIDTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE99F2531E1D21E6A4EFF105 /* KeychainSIDTests.swift */; };
 		A761D411E8F16EF7E0139F37 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8FB877BDAFA0CCD4FB422FB8 /* Assets.xcassets */; };
+		B134008E092B23F8AAF88C33 /* PhotosCoreLinkSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 963BFD800ADD8A86EE152301 /* PhotosCoreLinkSmokeUITests.swift */; };
+		C55CE7B0CC7FFF07D7CCABA4 /* PhotosCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32261FB0D2010F3CDA46C270 /* PhotosCore.swift */; };
+		D28B4EA5BCBE0BD4E371B0AE /* PhotosCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */; };
+		E8936FC2A8E25821FDA0ED64 /* ImageDownsample.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B5A556BC6D75D787EC6353 /* ImageDownsample.swift */; };
 		F3DF81EDC7A33D114986BE0D /* CoreBridgeSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */; };
-		FB0AD3736B989EA2F274A01D /* PhotosCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32261FB0D2010F3CDA46C270 /* PhotosCore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -22,6 +35,13 @@
 			remoteGlobalIDString = BC07A7F7541E137012CC5D87;
 			remoteInfo = SynologyPhotos;
 		};
+		6D05C10D0C06F4D9A859CF63 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 24B8101E6F1D4E0E8EECA08C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7F407C9B8D433D5104E6977A;
+			remoteInfo = PhotosCore;
+		};
 		81B70C62B8212A93CE572D80 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 24B8101E6F1D4E0E8EECA08C /* Project object */;
@@ -29,18 +49,56 @@
 			remoteGlobalIDString = BC07A7F7541E137012CC5D87;
 			remoteInfo = SynologyPhotos;
 		};
+		A34BA4AC952102BE56A1E970 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 24B8101E6F1D4E0E8EECA08C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7F407C9B8D433D5104E6977A;
+			remoteInfo = PhotosCore;
+		};
+		CE34357C8D57C010D692EE63 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 24B8101E6F1D4E0E8EECA08C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7F407C9B8D433D5104E6977A;
+			remoteInfo = PhotosCore;
+		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		82404F8488A5D6F5B8AAC51F /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				22D1BE9FCE8695C6B3994AF0 /* PhotosCore.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
-		03B54DD7433C5CA9A7C6E9AE /* PhotosCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = PhotosCore.xcframework; path = ../PhotosCore.xcframework; sourceTree = "<group>"; };
+		096746CDFF6A253E76BAF96F /* FakePhotosCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakePhotosCoreTests.swift; sourceTree = "<group>"; };
 		148A77DD8DD39D08CECC497B /* SynologyPhotosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SynologyPhotosUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		19BBC4E1F7A1058D8DB5711F /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		1D65797EEE04B6F9658674A2 /* SynologyPhotosApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynologyPhotosApp.swift; sourceTree = "<group>"; };
+		271D63AA455C96290DFEF262 /* FakePhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakePhotosCore.swift; sourceTree = "<group>"; };
 		31BC99794475619316AE36D9 /* SynologyPhotosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SynologyPhotosTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		32261FB0D2010F3CDA46C270 /* PhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PhotosCore.swift; path = ../bindings/PhotosCore.swift; sourceTree = "<group>"; };
+		4FE5C177E3FA3BAFB7092CF5 /* PathMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathMonitorTests.swift; sourceTree = "<group>"; };
+		5261051EEA590BD7268673F8 /* ImageDownsampleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownsampleTests.swift; sourceTree = "<group>"; };
+		53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PhotosCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		7657EE2CDC6D87A89FDA33A8 /* SynologyPhotos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SynologyPhotos.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreBridgeSmokeTests.swift; sourceTree = "<group>"; };
+		857A71F880766524090BB89F /* models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = models.swift; path = ../bindings/models.swift; sourceTree = "<group>"; };
 		8FB877BDAFA0CCD4FB422FB8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		935811E0F479F10FB1C713F0 /* KeychainSID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSID.swift; sourceTree = "<group>"; };
+		963BFD800ADD8A86EE152301 /* PhotosCoreLinkSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosCoreLinkSmokeUITests.swift; sourceTree = "<group>"; };
+		C4AB2048962505837D9708B9 /* PathMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathMonitor.swift; sourceTree = "<group>"; };
+		E3B5A556BC6D75D787EC6353 /* ImageDownsample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownsample.swift; sourceTree = "<group>"; };
+		EE99F2531E1D21E6A4EFF105 /* KeychainSIDTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSIDTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,7 +106,23 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2536C8F74952614EA001D671 /* PhotosCore.xcframework in Frameworks */,
+				D28B4EA5BCBE0BD4E371B0AE /* PhotosCore.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9F451AEF78634895B6BE842B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6159312037F2C83346C2E0E6 /* PhotosCore.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CB77206029754490C8A88D9F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				249AE0CD7E87E83C61CC8001 /* PhotosCore.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -59,6 +133,11 @@
 			isa = PBXGroup;
 			children = (
 				7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */,
+				271D63AA455C96290DFEF262 /* FakePhotosCore.swift */,
+				096746CDFF6A253E76BAF96F /* FakePhotosCoreTests.swift */,
+				5261051EEA590BD7268673F8 /* ImageDownsampleTests.swift */,
+				EE99F2531E1D21E6A4EFF105 /* KeychainSIDTests.swift */,
+				4FE5C177E3FA3BAFB7092CF5 /* PathMonitorTests.swift */,
 			);
 			path = SynologyPhotosTests;
 			sourceTree = "<group>";
@@ -67,7 +146,10 @@
 			isa = PBXGroup;
 			children = (
 				1D65797EEE04B6F9658674A2 /* SynologyPhotosApp.swift */,
+				C5F71B6145AB499F874AE82C /* Auth */,
+				7806B3CDD7747E751B39EC57 /* Reachability */,
 				C0636E0E01E33B4D7FA68CB2 /* Resources */,
+				4A61A443046BAD2F577B58C2 /* Thumbnails */,
 			);
 			path = SynologyPhotos;
 			sourceTree = "<group>";
@@ -75,6 +157,7 @@
 		228732D4CA3B3EF3882899D4 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */,
 				7657EE2CDC6D87A89FDA33A8 /* SynologyPhotos.app */,
 				31BC99794475619316AE36D9 /* SynologyPhotosTests.xctest */,
 				148A77DD8DD39D08CECC497B /* SynologyPhotosUITests.xctest */,
@@ -82,10 +165,27 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		4A61A443046BAD2F577B58C2 /* Thumbnails */ = {
+			isa = PBXGroup;
+			children = (
+				E3B5A556BC6D75D787EC6353 /* ImageDownsample.swift */,
+			);
+			path = Thumbnails;
+			sourceTree = "<group>";
+		};
+		7806B3CDD7747E751B39EC57 /* Reachability */ = {
+			isa = PBXGroup;
+			children = (
+				C4AB2048962505837D9708B9 /* PathMonitor.swift */,
+			);
+			path = Reachability;
+			sourceTree = "<group>";
+		};
 		9C2A91BB50CEC84F266B5E63 /* SynologyPhotosUITests */ = {
 			isa = PBXGroup;
 			children = (
 				19BBC4E1F7A1058D8DB5711F /* .gitkeep */,
+				963BFD800ADD8A86EE152301 /* PhotosCoreLinkSmokeUITests.swift */,
 			);
 			path = SynologyPhotosUITests;
 			sourceTree = "<group>";
@@ -93,6 +193,7 @@
 		AC8C890F47C1247FF5C8CC2B /* Generated */ = {
 			isa = PBXGroup;
 			children = (
+				857A71F880766524090BB89F /* models.swift */,
 				32261FB0D2010F3CDA46C270 /* PhotosCore.swift */,
 			);
 			name = Generated;
@@ -105,7 +206,6 @@
 				0C5103877ACBC42BD5B52B00 /* SynologyPhotos */,
 				00105CDAEC72D08D1B927A56 /* SynologyPhotosTests */,
 				9C2A91BB50CEC84F266B5E63 /* SynologyPhotosUITests */,
-				F3CB797E5AD5DC792957CEAA /* Frameworks */,
 				228732D4CA3B3EF3882899D4 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -118,12 +218,12 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
-		F3CB797E5AD5DC792957CEAA /* Frameworks */ = {
+		C5F71B6145AB499F874AE82C /* Auth */ = {
 			isa = PBXGroup;
 			children = (
-				03B54DD7433C5CA9A7C6E9AE /* PhotosCore.xcframework */,
+				935811E0F479F10FB1C713F0 /* KeychainSID.swift */,
 			);
-			name = Frameworks;
+			path = Auth;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -134,11 +234,13 @@
 			buildConfigurationList = 3D0F1E918551A13AD5236595 /* Build configuration list for PBXNativeTarget "SynologyPhotosTests" */;
 			buildPhases = (
 				72A5C6CA83AAF7D1009E8EAD /* Sources */,
+				CB77206029754490C8A88D9F /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				AE217961677B3259B71699D2 /* PBXTargetDependency */,
+				6164F94B2CE11107FFE40603 /* PBXTargetDependency */,
 			);
 			name = SynologyPhotosTests;
 			packageProductDependencies = (
@@ -152,11 +254,13 @@
 			buildConfigurationList = F4082200A838881EBAFDDDFB /* Build configuration list for PBXNativeTarget "SynologyPhotosUITests" */;
 			buildPhases = (
 				8E4CAB1C1D8A32241C814DE1 /* Sources */,
+				9F451AEF78634895B6BE842B /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				EE3C21FCCAE16554A3D7C85C /* PBXTargetDependency */,
+				D8D990893FDE813E3906CC7F /* PBXTargetDependency */,
 			);
 			name = SynologyPhotosUITests;
 			packageProductDependencies = (
@@ -165,6 +269,24 @@
 			productReference = 148A77DD8DD39D08CECC497B /* SynologyPhotosUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		7F407C9B8D433D5104E6977A /* PhotosCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 527E9BE5BDFBD2E747956071 /* Build configuration list for PBXNativeTarget "PhotosCore" */;
+			buildPhases = (
+				276C10EB011ED3F7DA7EA8C6 /* Ensure PhotosCore.xcframework */,
+				37CD2751B285675F9DFFDCD0 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PhotosCore;
+			packageProductDependencies = (
+			);
+			productName = PhotosCore;
+			productReference = 53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */;
+			productType = "com.apple.product-type.framework";
+		};
 		BC07A7F7541E137012CC5D87 /* SynologyPhotos */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = DD42724C6280FA72BBB0FFCF /* Build configuration list for PBXNativeTarget "SynologyPhotos" */;
@@ -172,10 +294,12 @@
 				490D990DD0E07C9E2A9E0151 /* Sources */,
 				AAD8340B9F4AC820FCB915C8 /* Resources */,
 				81268E7672CE74519FE8BCA4 /* Frameworks */,
+				82404F8488A5D6F5B8AAC51F /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				1B26C970BA47158DA7A136DE /* PBXTargetDependency */,
 			);
 			name = SynologyPhotos;
 			packageProductDependencies = (
@@ -212,6 +336,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				7F407C9B8D433D5104E6977A /* PhotosCore */,
 				BC07A7F7541E137012CC5D87 /* SynologyPhotos */,
 				146887E3C60031978D467DE4 /* SynologyPhotosTests */,
 				709E6DD897BE5E0C0C217D93 /* SynologyPhotosUITests */,
@@ -230,12 +355,45 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		276C10EB011ED3F7DA7EA8C6 /* Ensure PhotosCore.xcframework */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Ensure PhotosCore.xcframework";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/libphotoscore.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/../scripts/xcodegen/ensure-xcframework.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
+		37CD2751B285675F9DFFDCD0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C55CE7B0CC7FFF07D7CCABA4 /* PhotosCore.swift in Sources */,
+				81E1E0367711A5C5B9873DF9 /* models.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		490D990DD0E07C9E2A9E0151 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				FB0AD3736B989EA2F274A01D /* PhotosCore.swift in Sources */,
+				E8936FC2A8E25821FDA0ED64 /* ImageDownsample.swift in Sources */,
+				559A4CE3AE0FCE63660CB2CE /* KeychainSID.swift in Sources */,
+				8E6AC06CAA7CF3A875BCE82B /* PathMonitor.swift in Sources */,
 				0CAAE0B56C2B775746CEE2B4 /* SynologyPhotosApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -245,6 +403,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				F3DF81EDC7A33D114986BE0D /* CoreBridgeSmokeTests.swift in Sources */,
+				24D0A816AC4835369675B6A2 /* FakePhotosCore.swift in Sources */,
+				7A1544430BEC8AB2DB36D464 /* FakePhotosCoreTests.swift in Sources */,
+				4A102FE0D8B5ED56831E327C /* ImageDownsampleTests.swift in Sources */,
+				A7516BBFB26FE8A4BB8E7C71 /* KeychainSIDTests.swift in Sources */,
+				18CECECE9EEAB167F3D61DBF /* PathMonitorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -252,16 +415,32 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B134008E092B23F8AAF88C33 /* PhotosCoreLinkSmokeUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		1B26C970BA47158DA7A136DE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7F407C9B8D433D5104E6977A /* PhotosCore */;
+			targetProxy = CE34357C8D57C010D692EE63 /* PBXContainerItemProxy */;
+		};
+		6164F94B2CE11107FFE40603 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7F407C9B8D433D5104E6977A /* PhotosCore */;
+			targetProxy = 6D05C10D0C06F4D9A859CF63 /* PBXContainerItemProxy */;
+		};
 		AE217961677B3259B71699D2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = BC07A7F7541E137012CC5D87 /* SynologyPhotos */;
 			targetProxy = 04AE6FE6D8AB4DA6A4C1D2B1 /* PBXContainerItemProxy */;
+		};
+		D8D990893FDE813E3906CC7F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7F407C9B8D433D5104E6977A /* PhotosCore */;
+			targetProxy = A34BA4AC952102BE56A1E970 /* PBXContainerItemProxy */;
 		};
 		EE3C21FCCAE16554A3D7C85C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -271,12 +450,47 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		1372EB0856DBB6BCAA7A432C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUILD_LIBRARY_FOR_DISTRIBUTION = NO;
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64";
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lphotoscore",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos.PhotosCore;
+				PRODUCT_MODULE_NAME = PhotosCore;
+				PRODUCT_NAME = PhotosCore;
+				SDKROOT = macosx;
+				SKIP_INSTALL = NO;
+				SWIFT_VERSION = 5.0;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
 		2D22208C535C48F76B70185B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -285,6 +499,40 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos.SynologyPhotosTests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SynologyPhotos.app/Contents/MacOS/SynologyPhotos";
+			};
+			name = Release;
+		};
+		67374489E2E24B24C0441D33 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUILD_LIBRARY_FOR_DISTRIBUTION = NO;
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64";
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lphotoscore",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.sahil.synologyphotos.PhotosCore;
+				PRODUCT_MODULE_NAME = PhotosCore;
+				PRODUCT_NAME = PhotosCore;
+				SDKROOT = macosx;
+				SKIP_INSTALL = NO;
+				SWIFT_VERSION = 5.0;
+				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
 		};
@@ -362,6 +610,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -379,6 +628,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -396,6 +646,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -413,11 +664,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"\"..\"",
-				);
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -434,11 +682,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"\"..\"",
-				);
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -528,6 +773,15 @@
 			buildConfigurations = (
 				9DA1CF7F93C6394F8AD496A6 /* Debug */,
 				2D22208C535C48F76B70185B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		527E9BE5BDFBD2E747956071 /* Build configuration list for PBXNativeTarget "PhotosCore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1372EB0856DBB6BCAA7A432C /* Debug */,
+				67374489E2E24B24C0441D33 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
