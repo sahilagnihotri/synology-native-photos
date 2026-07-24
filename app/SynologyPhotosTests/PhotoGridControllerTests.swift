@@ -23,7 +23,12 @@ struct PhotoGridControllerTests {
         await ds.refreshCount()
         await ds.loadWindow(offset: 0, limit: 60)
         await controller.applySnapshot()
-        #expect(controller.snapshotItemCount() == 60)
+        // One item identifier per index across the whole space (120), not
+        // per loaded window (60): the placeholder-id strategy keeps the
+        // snapshot count equal to totalCount so scrollbar geometry is
+        // correct as soon as the count is known, regardless of how much of
+        // the window has actually loaded.
+        #expect(controller.snapshotItemCount() == 120)
     }
 
     @Test func cellConfigureDoesNotCrashWithoutImage() {
