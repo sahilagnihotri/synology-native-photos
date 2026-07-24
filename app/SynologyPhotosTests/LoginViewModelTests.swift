@@ -87,6 +87,59 @@ struct LoginViewModelTests {
         #expect(session.sid == "S1")
     }
 
+    /// Regression test for the real-NAS bug: typing a Tailscale MagicDNS
+    /// host (e.g. `fafnir.ladon-pirate.ts.net`) whose certificate's subject
+    /// names a completely different, unreachable public DDNS hostname (e.g.
+    /// `agnihotri.synology.me`) must never cause the app to connect to, pin,
+    /// fetch a second certificate from, or log in against the SUBJECT. The
+    /// subject is display-only. Every network-shaped call in this flow
+    /// (`fetchCertificate`, the pin's Keychain key, and the login
+    /// `Connection.host`) must carry exactly the host the user typed, from
+    /// first submit through approval through the login that follows.
+    @Test func loginTargetsTypedHostNeverTheCertSubject() async throws {
+        let typedHost = "https://fafnir.ladon-pirate.ts.net:5001"
+        let subjectHost = "CN=agnihotri.synology.me"
+        defer { try? KeychainCertPin.clear(host: typedHost) }
+
+        let fake = FakePhotosCore()
+        fake.fetchCertificateResult = .success(
+            CertInfo(der: Data([5, 5, 5, 5]), sha256Hex: "55:55", subject: subjectHost))
+        fake.loginResult = .success(Session(sid: "TS1", synoToken: nil, username: "photo", deviceDid: nil))
+
+        let m = makeModel(fake: fake)
+        m.host = typedHost; m.username = "photo"; m.password = "pw"
+
+        await m.submit()
+        // The very first fetch must be against the typed host, never the
+        // (as yet unknown, since it comes back IN the response) subject.
+        #expect(fake.lastFetchCertificateHost == typedHost)
+        #expect(fake.fetchCertificateCallCount == 1)
+
+        guard case .needsApproval(let info) = m.cert.phase else {
+            Issue.record("expected needsApproval, got \(m.cert.phase)")
+            return
+        }
+        #expect(info.subject == subjectHost, "subject is shown for display only")
+
+        await m.approveCertAndRetry()
+
+        // No second fetch: the DER from the first fetch is reused as the pin.
+        #expect(fake.fetchCertificateCallCount == 1, "approving must not trigger a second certificate fetch")
+        #expect(fake.loginCallCount == 1)
+        #expect(fake.lastLoginConnection?.host == typedHost, "login must target the typed host, not the cert subject")
+        #expect(fake.lastLoginConnection?.host != subjectHost)
+        #expect(fake.lastLoginConnection?.pinnedCertDer == Data([5, 5, 5, 5]))
+        #expect(try KeychainCertPin.load(host: typedHost) == Data([5, 5, 5, 5]),
+                "the pin must be stored keyed by the typed host, not the subject")
+        #expect(try KeychainCertPin.load(host: subjectHost) == nil,
+                "nothing should ever be pinned under the subject as a key")
+        guard case .valid(let session) = m.auth.phase else {
+            Issue.record("expected valid phase after approved login")
+            return
+        }
+        #expect(session.sid == "TS1")
+    }
+
     /// Once a host has a stored pin (from an earlier approval), a fresh
     /// `LoginFormModel`/`CertApprovalViewModel` for the same host must load
     /// it straight into `.approved` with no fetch and no approval prompt.
