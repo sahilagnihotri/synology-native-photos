@@ -89,7 +89,7 @@ struct TempCacheTests {
 
     @Test func extensionPrefersAssetFilenameSuffix() {
         let asset = Asset(
-            id: 1, cacheKey: "ck", filename: "IMG_0001.HEIC", mediaKind: .photo,
+            id: 1, unitId: 10001, cacheKey: "ck", filename: "IMG_0001.HEIC", mediaKind: .photo,
             takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
             space: .personal, serverVersion: nil)
         #expect(QuickLookFilename.derive(for: asset) == "IMG_0001.HEIC")
@@ -97,7 +97,7 @@ struct TempCacheTests {
 
     @Test func extensionFallsBackToPhotoWhenFilenameHasNoExtension() {
         let asset = Asset(
-            id: 2, cacheKey: "ck", filename: "IMG_0002", mediaKind: .photo,
+            id: 2, unitId: 10002, cacheKey: "ck", filename: "IMG_0002", mediaKind: .photo,
             takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
             space: .personal, serverVersion: nil)
         #expect(QuickLookFilename.derive(for: asset) == "IMG_0002.jpg")
@@ -105,7 +105,7 @@ struct TempCacheTests {
 
     @Test func extensionFallsBackToVideoWhenFilenameHasNoExtension() {
         let asset = Asset(
-            id: 3, cacheKey: "ck", filename: "clip", mediaKind: .video,
+            id: 3, unitId: 10003, cacheKey: "ck", filename: "clip", mediaKind: .video,
             takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
             space: .personal, serverVersion: nil)
         #expect(QuickLookFilename.derive(for: asset) == "clip.mov")
@@ -113,7 +113,7 @@ struct TempCacheTests {
 
     @Test func extensionFallsBackToBinWhenUnknownAndNoExtension() {
         let asset = Asset(
-            id: 4, cacheKey: "ck", filename: "mystery", mediaKind: .unknown,
+            id: 4, unitId: 10004, cacheKey: "ck", filename: "mystery", mediaKind: .unknown,
             takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
             space: .personal, serverVersion: nil)
         #expect(QuickLookFilename.derive(for: asset) == "mystery.bin")
@@ -121,11 +121,11 @@ struct TempCacheTests {
 
     @Test func extensionDerivationHandlesRawAndVideoContainersFromFilename() {
         let raw = Asset(
-            id: 5, cacheKey: "ck", filename: "DSC_0005.NEF", mediaKind: .photo,
+            id: 5, unitId: 10005, cacheKey: "ck", filename: "DSC_0005.NEF", mediaKind: .photo,
             takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
             space: .personal, serverVersion: nil)
         let mp4 = Asset(
-            id: 6, cacheKey: "ck", filename: "movie.mp4", mediaKind: .video,
+            id: 6, unitId: 10006, cacheKey: "ck", filename: "movie.mp4", mediaKind: .video,
             takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
             space: .personal, serverVersion: nil)
         #expect(QuickLookFilename.derive(for: raw) == "DSC_0005.NEF")
@@ -136,7 +136,7 @@ struct TempCacheTests {
         // A hostile/unexpected filename from the NAS must never be able to
         // place the QuickLook copy outside the temp cache directory.
         let asset = Asset(
-            id: 7, cacheKey: "ck", filename: "../../etc/passwd.jpg", mediaKind: .photo,
+            id: 7, unitId: 10007, cacheKey: "ck", filename: "../../etc/passwd.jpg", mediaKind: .photo,
             takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
             space: .personal, serverVersion: nil)
         let derived = QuickLookFilename.derive(for: asset)

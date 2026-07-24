@@ -102,8 +102,12 @@ actor ThumbnailCache {
 
         let data: ThumbnailData
         do {
+            // Must pass asset.unitId, not asset.id: the NAS thumbnail
+            // endpoint keys on unit_id (additional.thumbnail.unit_id from
+            // the browse response), and sending the browse item id instead
+            // returns an html error page that ImageIO cannot decode.
             data = try await client.thumbnail(
-                space: space, assetId: asset.id, cacheKey: asset.cacheKey, size: size)
+                space: space, unitId: asset.unitId, cacheKey: asset.cacheKey, size: size)
         } catch {
             return nil
         }

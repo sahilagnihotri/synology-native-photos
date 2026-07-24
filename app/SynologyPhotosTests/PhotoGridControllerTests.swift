@@ -8,8 +8,13 @@ import PhotosCore
 
 @MainActor
 struct PhotoGridControllerTests {
+    // unitId intentionally equals id here: several tests in this file key
+    // FakePhotosCore's per-asset delay/result dictionaries by the value
+    // ThumbnailCache passes through as unitId (asset.unitId, not asset.id),
+    // so keeping them equal in this fixture is what lets those tests target
+    // a specific asset's simulated network behavior by its id.
     private func asset(_ id: Int64) -> Asset {
-        Asset(id: id, cacheKey: "v", filename: "\(id).jpg", mediaKind: .photo,
+        Asset(id: id, unitId: id, cacheKey: "v", filename: "\(id).jpg", mediaKind: .photo,
               takenAt: 1_700_000_000 + id, addedAt: nil, width: 100, height: 100,
               fileSize: nil, space: .personal, serverVersion: id)
     }

@@ -22,7 +22,7 @@ struct ThumbnailCacheTests {
     }
 
     private func asset(id: Int64) -> Asset {
-        Asset(id: id, cacheKey: "v1", filename: "IMG_\(id).jpg", mediaKind: .photo,
+        Asset(id: id, unitId: id + 10_000, cacheKey: "v1", filename: "IMG_\(id).jpg", mediaKind: .photo,
               takenAt: 1_700_000_000, addedAt: nil, width: 800, height: 600,
               fileSize: nil, space: .personal, serverVersion: 1)
     }
@@ -86,7 +86,7 @@ struct ThumbnailCacheTests {
         let pathV2 = writePNG(width: 400, height: 400)
         defer { try? FileManager.default.removeItem(atPath: pathV2) }
         fake.thumbnailResult = .success(ThumbnailData(cachedPath: pathV2, bytes: Data()))
-        staleAsset = Asset(id: staleAsset.id, cacheKey: "v2", filename: staleAsset.filename,
+        staleAsset = Asset(id: staleAsset.id, unitId: staleAsset.unitId, cacheKey: "v2", filename: staleAsset.filename,
                             mediaKind: staleAsset.mediaKind, takenAt: staleAsset.takenAt,
                             addedAt: staleAsset.addedAt, width: staleAsset.width,
                             height: staleAsset.height, fileSize: staleAsset.fileSize,

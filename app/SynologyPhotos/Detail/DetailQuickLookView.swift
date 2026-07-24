@@ -196,8 +196,10 @@ struct DetailQuickLookView: NSViewRepresentable {
         let a = asset, s = space, c = client, tc = cache
         Task {
             do {
+                // Must pass a.unitId, not a.id: the download endpoint keys
+                // on unit_id the same way the thumbnail endpoint does.
                 let downloadedPath = try await c.downloadOriginal(
-                    space: s, assetId: a.id, cacheKey: a.cacheKey)
+                    space: s, unitId: a.unitId, cacheKey: a.cacheKey)
                 let filename = QuickLookFilename.derive(for: a)
                 let url = await tc.store(path: downloadedPath, preferredFilename: filename)
                 await MainActor.run { nsView.previewItem = url as NSURL }

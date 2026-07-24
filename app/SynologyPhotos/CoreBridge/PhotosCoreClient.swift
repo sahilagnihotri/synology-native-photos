@@ -28,10 +28,10 @@ actor PhotosCoreClient {
     }
     func assetCount(space: Space) throws -> UInt64 { try core.assetCount(space: space) }
     func fetchAlbums(space: Space) throws -> [Album] { try core.fetchAlbums(space: space) }
-    func thumbnail(space: Space, assetId: Int64, cacheKey: String, size: ThumbnailSize) async throws -> ThumbnailData {
-        try await core.thumbnail(space: space, assetId: assetId, cacheKey: cacheKey, size: size)
+    func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize) async throws -> ThumbnailData {
+        try await core.thumbnail(space: space, unitId: unitId, cacheKey: cacheKey, size: size)
     }
-    func downloadOriginal(space: Space, assetId: Int64, cacheKey: String) async throws -> String {
-        try await core.downloadOriginal(space: space, assetId: assetId, cacheKey: cacheKey)
+    func downloadOriginal(space: Space, unitId: Int64, cacheKey: String) async throws -> String {
+        try await core.downloadOriginal(space: space, unitId: unitId, cacheKey: cacheKey)
     }
 }

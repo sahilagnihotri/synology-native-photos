@@ -5,7 +5,7 @@ import PhotosCore
 @MainActor
 struct SpaceToggleTests {
     private func asset(_ id: Int64, _ space: Space) -> Asset {
-        Asset(id: id, cacheKey: "v", filename: "\(id).jpg", mediaKind: .photo,
+        Asset(id: id, unitId: id + 10_000, cacheKey: "v", filename: "\(id).jpg", mediaKind: .photo,
               takenAt: 1_700_000_000, addedAt: nil, width: 1, height: 1,
               fileSize: nil, space: space, serverVersion: id)
     }

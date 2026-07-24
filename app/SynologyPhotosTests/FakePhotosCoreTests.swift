@@ -178,18 +178,18 @@ struct FakePhotosCoreTests {
         let fake = FakePhotosCore()
         fake.thumbnailResult = .success(ThumbnailData(cachedPath: "/tmp/thumb.jpg", bytes: Data([1, 2, 3])))
 
-        let thumb = try await fake.thumbnail(space: .personal, assetId: 7, cacheKey: "ck7", size: .m)
+        let thumb = try await fake.thumbnail(space: .personal, unitId: 7, cacheKey: "ck7", size: .m)
 
         #expect(thumb.cachedPath == "/tmp/thumb.jpg")
         #expect(fake.thumbnailCallCount == 1)
-        #expect(fake.lastThumbnailRequest?.assetId == 7)
+        #expect(fake.lastThumbnailRequest?.unitId == 7)
     }
 
     @Test func fakeDownloadOriginalReturnsConfiguredPath() async throws {
         let fake = FakePhotosCore()
         fake.downloadResult = .success("/tmp/downloaded.jpg")
 
-        let path = try await fake.downloadOriginal(space: .personal, assetId: 9, cacheKey: "ck9")
+        let path = try await fake.downloadOriginal(space: .personal, unitId: 9, cacheKey: "ck9")
 
         #expect(path == "/tmp/downloaded.jpg")
         #expect(fake.downloadOriginalCallCount == 1)
@@ -199,7 +199,7 @@ struct FakePhotosCoreTests {
     // MARK: - Fixtures
 
     static func asset(id: Int64) -> Asset {
-        Asset(id: id, cacheKey: "ck\(id)", filename: "IMG_\(id).jpg", mediaKind: .photo,
+        Asset(id: id, unitId: id + 10_000, cacheKey: "ck\(id)", filename: "IMG_\(id).jpg", mediaKind: .photo,
               takenAt: 1_700_000_000 + id, addedAt: nil, width: 4032, height: 3024,
               fileSize: nil, space: .personal, serverVersion: id)
     }

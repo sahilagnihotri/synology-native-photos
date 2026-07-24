@@ -105,8 +105,8 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var lastFetchCertificateHost: String?
     private(set) var lastCrawledSpace: Space?
     private(set) var lastReconciledSpace: Space?
-    private(set) var lastThumbnailRequest: (space: Space, assetId: Int64, cacheKey: String, size: ThumbnailSize)?
-    private(set) var lastDownloadRequest: (space: Space, assetId: Int64, cacheKey: String)?
+    private(set) var lastThumbnailRequest: (space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize)?
+    private(set) var lastDownloadRequest: (space: Space, unitId: Int64, cacheKey: String)?
 
     init() {}
 
@@ -198,18 +198,18 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
 
     func thumbnail(
         space: Space,
-        assetId: Int64,
+        unitId: Int64,
         cacheKey: String,
         size: ThumbnailSize
     ) async throws -> ThumbnailData {
         thumbnailCallCount += 1
-        lastThumbnailRequest = (space, assetId, cacheKey, size)
-        let delay = thumbnailDelayByAssetId[assetId] ?? thumbnailDelay
+        lastThumbnailRequest = (space, unitId, cacheKey, size)
+        let delay = thumbnailDelayByAssetId[unitId] ?? thumbnailDelay
         // Captured before the delay, not read again after it: this is what
         // pins the result to the asset this call was made for even if
         // another asset's call reassigns the shared `thumbnailResult` var
         // while this call is still asleep.
-        let result = thumbnailResultByAssetId[assetId] ?? thumbnailResult
+        let result = thumbnailResultByAssetId[unitId] ?? thumbnailResult
         if delay > .zero {
             // Deliberately a *detached* sleep, not a plain `try? await
             // Task.sleep(for: delay)` inline here. `PhotoCellView` cancels
@@ -228,9 +228,9 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         return try result.get()
     }
 
-    func downloadOriginal(space: Space, assetId: Int64, cacheKey: String) async throws -> String {
+    func downloadOriginal(space: Space, unitId: Int64, cacheKey: String) async throws -> String {
         downloadOriginalCallCount += 1
-        lastDownloadRequest = (space, assetId, cacheKey)
+        lastDownloadRequest = (space, unitId, cacheKey)
         return try downloadResult.get()
     }
 }

@@ -5,7 +5,7 @@ import PhotosCore
 @MainActor
 struct WindowedDataSourceTests {
     private func asset(_ id: Int64) -> Asset {
-        Asset(id: id, cacheKey: "v", filename: "\(id).jpg", mediaKind: .photo,
+        Asset(id: id, unitId: id + 10_000, cacheKey: "v", filename: "\(id).jpg", mediaKind: .photo,
               takenAt: 1_700_000_000 + id, addedAt: nil, width: 100, height: 100,
               fileSize: nil, space: .personal, serverVersion: id)
     }
@@ -81,7 +81,7 @@ struct WindowedDataSourceTests {
         // re-fetches an already-loaded page, these reads would observe the
         // new sentinel values instead of the originally cached ones.
         fake.assets[.personal] = (0..<500).map { _ in
-            Asset(id: -1, cacheKey: "stale", filename: "stale.jpg", mediaKind: .photo,
+            Asset(id: -1, unitId: -1, cacheKey: "stale", filename: "stale.jpg", mediaKind: .photo,
                   takenAt: nil, addedAt: nil, width: nil, height: nil,
                   fileSize: nil, space: .personal, serverVersion: nil)
         }
