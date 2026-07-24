@@ -117,4 +117,36 @@ enum KeychainSID {
             throw KeychainError.unexpectedStatus(status)
         }
     }
+
+    /// Returns the single stored session, if any, without the caller
+    /// needing to already know its (host, username).
+    ///
+    /// This app supports exactly one signed-in account at a time
+    /// (`SignOutController`'s contract), so at most one item should ever
+    /// exist under this service; launch-time restore uses this to recover
+    /// which account to attempt `AuthStateMachine.restore(host:username:)`
+    /// against without persisting the username anywhere outside the
+    /// Keychain itself. If more than one item is somehow present (e.g.
+    /// leftover state from a build predating the single-account
+    /// invariant), the query's own ordering picks one and the rest are
+    /// simply not returned; it does not attempt to merge or choose among
+    /// them.
+    static func loadMostRecentAccount() throws -> StoredSession? {
+        var query = baseQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var out: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
+        if status == errSecItemNotFound {
+            return nil
+        }
+        guard status == errSecSuccess, let data = out as? Data else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+        guard let stored = try? JSONDecoder().decode(StoredSession.self, from: data) else {
+            throw KeychainError.decodeFailed
+        }
+        return stored
+    }
 }

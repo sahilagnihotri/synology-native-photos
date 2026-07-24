@@ -11,11 +11,18 @@ import PhotosCore
 /// `ThumbnailCache`; the controller's job is identity and layout, not image
 /// loading.
 @MainActor
-final class PhotoGridController: NSViewController, NSCollectionViewPrefetching {
+final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, NSCollectionViewDelegate {
     private let dataSource: WindowedDataSource
     private let cache: ThumbnailCache
     let collectionView = NSCollectionView()
     private var diffable: NSCollectionViewDiffableDataSource<Int, AssetItemID>!
+
+    /// Invoked with the asset behind a newly selected cell, or `nil` on
+    /// deselect. Left as an injectable closure (rather than a hard
+    /// dependency on a detail view type) so this controller stays
+    /// AppKit/grid-only; the caller (the app's library screen) is
+    /// responsible for what selecting a photo actually opens.
+    var onSelect: ((Asset?) -> Void)?
 
     /// A single fixed section. The grid does not (yet) group by day/month,
     /// so there is exactly one section for the whole space.
@@ -40,6 +47,7 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching {
         collectionView.collectionViewLayout = layout
         collectionView.isSelectable = true
         collectionView.prefetchDataSource = self
+        collectionView.delegate = self
         collectionView.register(PhotoCellView.self, forItemWithIdentifier: PhotoCellView.reuseIdentifier)
         collectionView.setAccessibilityIdentifier("grid.collection")
         scroll.documentView = collectionView
@@ -144,6 +152,26 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching {
         Task {
             await dataSource.loadWindow(offset: offset, limit: dataSource.pageSize)
             await applySnapshot()
+        }
+    }
+
+    /// `NSCollectionViewDelegate`: reports the asset behind the first newly
+    /// selected index path to `onSelect`. A row that has not loaded yet
+    /// (`dataSource.item(at:)` returns `nil`, e.g. a placeholder identifier
+    /// from a still-in-flight page) reports nothing rather than opening
+    /// detail on incomplete data; the selection itself is still recorded by
+    /// the collection view, so the cell shows as selected either way.
+    func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+        guard let indexPath = indexPaths.first else { return }
+        onSelect?(dataSource.item(at: indexPath.item))
+    }
+
+    /// `NSCollectionViewDelegate`: clears the detail view when the grid's
+    /// selection is cleared (e.g. the user dismisses the sheet, which
+    /// deselects the underlying cell).
+    func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+        if collectionView.selectionIndexPaths.isEmpty {
+            onSelect?(nil)
         }
     }
 }

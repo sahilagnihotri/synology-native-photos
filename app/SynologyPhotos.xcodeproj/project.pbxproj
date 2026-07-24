@@ -30,7 +30,9 @@
 		8564012B2713C3D67FBAE433 /* SignOutControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED40FEE968B41906C8B464D7 /* SignOutControllerTests.swift */; };
 		86DB0E0DF2F5341B0064EF03 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 516C70ED26B5432FC290A9B0 /* LoginView.swift */; };
 		8E6AC06CAA7CF3A875BCE82B /* PathMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AB2048962505837D9708B9 /* PathMonitor.swift */; };
+		94260F0FC0643CE368E6F2FD /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5FC30BA732D8B3CBC757EE /* RootView.swift */; };
 		95D528A305471E65390D3F57 /* ImportProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24E700BE934BC17C20A127A /* ImportProgressView.swift */; };
+		9EC064131BB27458E2DFD5FE /* RootRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1B1528D3D458F8C696F52A /* RootRouterTests.swift */; };
 		A0336627776762D4B7072519 /* ThumbnailCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C220E6EFABA5E50B72BF6CD9 /* ThumbnailCacheTests.swift */; };
 		A263DC9AA52F72AAD703B803 /* CrawlProgressModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66AAF71547574AB2C70C51D8 /* CrawlProgressModelTests.swift */; };
 		A3F66FB3E9B5904B3250C547 /* SignOutController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D6B4D9A2B9E36DA1A58399 /* SignOutController.swift */; };
@@ -147,6 +149,8 @@
 		ED40FEE968B41906C8B464D7 /* SignOutControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignOutControllerTests.swift; sourceTree = "<group>"; };
 		EE99F2531E1D21E6A4EFF105 /* KeychainSIDTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSIDTests.swift; sourceTree = "<group>"; };
 		F24E700BE934BC17C20A127A /* ImportProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProgressView.swift; sourceTree = "<group>"; };
+		FD1B1528D3D458F8C696F52A /* RootRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootRouterTests.swift; sourceTree = "<group>"; };
+		FF5FC30BA732D8B3CBC757EE /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -191,6 +195,7 @@
 				4FE5C177E3FA3BAFB7092CF5 /* PathMonitorTests.swift */,
 				A24005987A18E578A801F215 /* PhotoGridControllerTests.swift */,
 				26622FE9B92A0DFCF2A7EDBE /* PhotosCoreClientTests.swift */,
+				FD1B1528D3D458F8C696F52A /* RootRouterTests.swift */,
 				ED40FEE968B41906C8B464D7 /* SignOutControllerTests.swift */,
 				943F182991480AA732E73857 /* SpaceToggleTests.swift */,
 				61C8C541A89432E18AE11C26 /* TempCacheTests.swift */,
@@ -203,6 +208,7 @@
 		0C5103877ACBC42BD5B52B00 /* SynologyPhotos */ = {
 			isa = PBXGroup;
 			children = (
+				FF5FC30BA732D8B3CBC757EE /* RootView.swift */,
 				1D65797EEE04B6F9658674A2 /* SynologyPhotosApp.swift */,
 				C5F71B6145AB499F874AE82C /* Auth */,
 				0D9DB11C7B3AD1E3B9E901CA /* CoreBridge */,
@@ -508,6 +514,7 @@
 				721BE53CAA3551576B98CD33 /* PhotoGridController.swift in Sources */,
 				B7AB89D9B89D6FA8D4BD0743 /* PhotoGridView.swift in Sources */,
 				0020BEA65B5CB4AFECDCA917 /* PhotosCoreClient.swift in Sources */,
+				94260F0FC0643CE368E6F2FD /* RootView.swift in Sources */,
 				A3F66FB3E9B5904B3250C547 /* SignOutController.swift in Sources */,
 				CC6D77248580CE50A4C86747 /* SpaceToggle.swift in Sources */,
 				0CAAE0B56C2B775746CEE2B4 /* SynologyPhotosApp.swift in Sources */,
@@ -531,6 +538,7 @@
 				18CECECE9EEAB167F3D61DBF /* PathMonitorTests.swift in Sources */,
 				55C7B0D64234966CC0AD8971 /* PhotoGridControllerTests.swift in Sources */,
 				2BBAB8C2D95BF845B1E8691F /* PhotosCoreClientTests.swift in Sources */,
+				9EC064131BB27458E2DFD5FE /* RootRouterTests.swift in Sources */,
 				8564012B2713C3D67FBAE433 /* SignOutControllerTests.swift in Sources */,
 				F96DBEA44C5C1026B35AA13B /* SpaceToggleTests.swift in Sources */,
 				CCADB18E2CA7EEE7B9375C23 /* TempCacheTests.swift in Sources */,
