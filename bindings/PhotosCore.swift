@@ -559,7 +559,10 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      *
      * Same lock discipline as `thumbnail`: `live` is locked only long enough
      * to clone the transport/sid/version triple, then dropped before the
-     * network `.await`.
+     * network `.await`. The destination filename is a hash of
+     * `(asset_id, cache_key)` for the same path-safety reason as `thumbnail`
+     * (the NAS-supplied `cache_key` never appears literally in a path), and
+     * the bytes are written atomically (temp file, then renamed into place).
      *
      * Fails closed with `CoreError::Auth` if no session is held.
      */
@@ -645,20 +648,27 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * Fetches a thumbnail for `asset_id` at `size`, served from a
      * composite-key on-disk cache whenever possible.
      *
-     * The cache path is keyed on `(space, asset_id, size, cache_key)` -
-     * `{cache_dir}/thumbs/{space}/{asset_id}/{size}_{cache_key}.jpg`.
-     * `cache_key` is a version token from the NAS (`SYNO.Foto.Browse.Item`'s
-     * `additional.thumbnail.cache_key`): whenever the server-side asset
-     * changes, the NAS mints a new cache_key, so a stale cache_key can never
-     * collide with a fresh file on disk - the path itself changes, which is
-     * what makes this an invalidating cache rather than one that needs
-     * separate eviction logic.
+     * The cache path is `{cache_dir}/thumbs/{hex_digest}.jpg`, where
+     * `hex_digest` is a hash of `(space, asset_id, size, cache_key)`. Hashing
+     * the composite key rather than interpolating any of its parts (in
+     * particular the NAS-supplied `cache_key`) directly into the filename
+     * means the filename is always a fixed-length hex string: no path
+     * separator, no `..`, no length blowup can ever reach the filesystem,
+     * even if `cache_key` were ever malformed or unexpectedly large. A
+     * changed `cache_key` still hashes to a different digest, so this keeps
+     * the same invalidation property as before: whenever the server-side
+     * asset changes and the NAS mints a new cache_key, the new call produces
+     * a different path and can never be served a stale file.
      *
      * On a cache hit, this returns entirely from disk with no network
      * access. On a miss, `live` is locked only long enough to clone the
      * transport/sid/version triple it needs; the guard is dropped before the
      * `fetch_thumbnail` `.await`, matching the discipline used by
-     * `page_source_for`/`crawl_space` elsewhere in this file.
+     * `page_source_for`/`crawl_space` elsewhere in this file. The fetched
+     * bytes are written atomically (temp file in the same directory, then
+     * renamed into place) so a concurrent reader/writer or a symlink planted
+     * at the target path can never observe a partial write or be written
+     * through.
      *
      * Fails closed with `CoreError::Auth` if no session is held.
      */
@@ -818,7 +828,10 @@ open func crawlSpace(space: Space, observer: FfiCrawlObserver)async throws  -> C
      *
      * Same lock discipline as `thumbnail`: `live` is locked only long enough
      * to clone the transport/sid/version triple, then dropped before the
-     * network `.await`.
+     * network `.await`. The destination filename is a hash of
+     * `(asset_id, cache_key)` for the same path-safety reason as `thumbnail`
+     * (the NAS-supplied `cache_key` never appears literally in a path), and
+     * the bytes are written atomically (temp file, then renamed into place).
      *
      * Fails closed with `CoreError::Auth` if no session is held.
      */
@@ -1008,20 +1021,27 @@ open func signOut()async throws   {
      * Fetches a thumbnail for `asset_id` at `size`, served from a
      * composite-key on-disk cache whenever possible.
      *
-     * The cache path is keyed on `(space, asset_id, size, cache_key)` -
-     * `{cache_dir}/thumbs/{space}/{asset_id}/{size}_{cache_key}.jpg`.
-     * `cache_key` is a version token from the NAS (`SYNO.Foto.Browse.Item`'s
-     * `additional.thumbnail.cache_key`): whenever the server-side asset
-     * changes, the NAS mints a new cache_key, so a stale cache_key can never
-     * collide with a fresh file on disk - the path itself changes, which is
-     * what makes this an invalidating cache rather than one that needs
-     * separate eviction logic.
+     * The cache path is `{cache_dir}/thumbs/{hex_digest}.jpg`, where
+     * `hex_digest` is a hash of `(space, asset_id, size, cache_key)`. Hashing
+     * the composite key rather than interpolating any of its parts (in
+     * particular the NAS-supplied `cache_key`) directly into the filename
+     * means the filename is always a fixed-length hex string: no path
+     * separator, no `..`, no length blowup can ever reach the filesystem,
+     * even if `cache_key` were ever malformed or unexpectedly large. A
+     * changed `cache_key` still hashes to a different digest, so this keeps
+     * the same invalidation property as before: whenever the server-side
+     * asset changes and the NAS mints a new cache_key, the new call produces
+     * a different path and can never be served a stale file.
      *
      * On a cache hit, this returns entirely from disk with no network
      * access. On a miss, `live` is locked only long enough to clone the
      * transport/sid/version triple it needs; the guard is dropped before the
      * `fetch_thumbnail` `.await`, matching the discipline used by
-     * `page_source_for`/`crawl_space` elsewhere in this file.
+     * `page_source_for`/`crawl_space` elsewhere in this file. The fetched
+     * bytes are written atomically (temp file in the same directory, then
+     * renamed into place) so a concurrent reader/writer or a symlink planted
+     * at the target path can never observe a partial write or be written
+     * through.
      *
      * Fails closed with `CoreError::Auth` if no session is held.
      */
@@ -1398,7 +1418,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_crawl_space() != 58321) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_download_original() != 57885) {
+    if (uniffi_photoscore_checksum_method_photoscore_download_original() != 61699) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_albums() != 8838) {
@@ -1422,7 +1442,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_sign_out() != 54821) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_thumbnail() != 51956) {
+    if (uniffi_photoscore_checksum_method_photoscore_thumbnail() != 60710) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_constructor_photoscore_new() != 54313) {

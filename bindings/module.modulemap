@@ -1,3 +1,10 @@
+module modelsFFI {
+    header "modelsFFI.h"
+    export *
+    use "Darwin"
+    use "_Builtin_stdbool"
+    use "_Builtin_stdint"
+}
 module PhotosCoreFFI {
     header "PhotosCoreFFI.h"
     export *
