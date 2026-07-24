@@ -16,6 +16,19 @@ pub enum ThumbnailSize { Sm, M, Xl }
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionState { Valid, Expired, Invalid }
 
+/// A discovery-browse collection to fetch photos for: one of People,
+/// Places, Tags, or the user's Favorites. Personal space only (see
+/// `synology_api::browse::CollectionFilter`, which this maps onto
+/// one-for-one); there is deliberately no `Subject` variant because no
+/// working item filter was found for Concept/Subjects on the real NAS.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiscoveryCollection {
+    Person { id: i64 },
+    Place { id: i64 },
+    Tag { id: i64 },
+    Favorites,
+}
+
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct Connection {
     pub host: String,
@@ -308,5 +321,16 @@ mod tests {
         assert_eq!(s.name, "Food");
         let t = Tag { id: 1, name: "vacation".to_string(), item_count: 4 };
         assert_eq!(t.item_count, 4);
+    }
+
+    #[test]
+    fn discovery_collection_variants_carry_their_ids() {
+        let person = DiscoveryCollection::Person { id: 12279 };
+        let place = DiscoveryCollection::Place { id: 756 };
+        let tag = DiscoveryCollection::Tag { id: 5 };
+        let favorites = DiscoveryCollection::Favorites;
+        assert_eq!(person, DiscoveryCollection::Person { id: 12279 });
+        assert_ne!(person, place);
+        assert_ne!(tag, favorites);
     }
 }

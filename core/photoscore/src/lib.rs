@@ -3,13 +3,14 @@
 use std::sync::{Arc, Mutex};
 
 use models::{
-    Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, Session, SessionState, Space,
-    ThumbnailData, ThumbnailSize,
+    Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DiscoveryCollection, Person, Place,
+    Session, SessionState, Space, Subject, Tag, ThumbnailData, ThumbnailSize,
 };
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
 use sync_engine::delta::DeltaReconciler;
 use sync_engine::{AssetPage, PageSource};
+use synology_api::browse::CollectionFilter;
 use synology_api::Transport;
 
 uniffi::setup_scaffolding!("photoscore");
@@ -336,6 +337,67 @@ impl PhotosCore {
         store.fetch_albums(space)
     }
 
+    /// Lists People (`SYNO.Foto.Browse.Person`), a live network call every
+    /// time: unlike `fetch_assets`/`fetch_albums`, discovery-browse
+    /// collections have no local index in this pass, so this always hits
+    /// the NAS. Requires a live session; fails closed with `CoreError::Auth`
+    /// otherwise.
+    pub async fn fetch_people(&self, offset: u32, limit: u32) -> Result<Vec<Person>, CoreError> {
+        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Person")?;
+        synology_api::list_people(&transport, &sid, offset, limit, version, syno_token.as_deref()).await
+    }
+
+    /// Lists Places (`SYNO.Foto.Browse.Geocoding`). Same live-call and auth
+    /// discipline as `fetch_people`.
+    pub async fn fetch_places(&self, offset: u32, limit: u32) -> Result<Vec<Place>, CoreError> {
+        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Geocoding")?;
+        synology_api::list_places(&transport, &sid, offset, limit, version, syno_token.as_deref()).await
+    }
+
+    /// Lists Subjects (`SYNO.Foto.Browse.Concept`). Same live-call and auth
+    /// discipline as `fetch_people`. Listing works; there is deliberately no
+    /// `fetch_assets_for` variant for a subject yet (see
+    /// `DiscoveryCollection`'s doc comment), so a subject tile has nothing
+    /// to route to on this NAS until a working item filter is found.
+    pub async fn fetch_subjects(&self, offset: u32, limit: u32) -> Result<Vec<Subject>, CoreError> {
+        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Concept")?;
+        synology_api::list_subjects(&transport, &sid, offset, limit, version, syno_token.as_deref()).await
+    }
+
+    /// Lists Tags (`SYNO.Foto.Browse.GeneralTag`). Same live-call and auth
+    /// discipline as `fetch_people`.
+    pub async fn fetch_tags(&self, offset: u32, limit: u32) -> Result<Vec<Tag>, CoreError> {
+        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.GeneralTag")?;
+        synology_api::list_tags(&transport, &sid, offset, limit, version, syno_token.as_deref()).await
+    }
+
+    /// Fetches the photos belonging to one discovery-browse `collection`
+    /// (a person, place, tag, or the user's favorites), windowed the same
+    /// way `fetch_assets` windows the library grid. Unlike `fetch_assets`,
+    /// this always hits the NAS directly (no local index for discovery
+    /// collections yet), but keeps the same unit_id/token invariants every
+    /// other browse call in this crate relies on.
+    ///
+    /// Requires a live session; fails closed with `CoreError::Auth`
+    /// otherwise. Personal space only, matching
+    /// `synology_api::browse::CollectionFilter`'s own scope.
+    pub async fn fetch_assets_for(
+        &self,
+        collection: DiscoveryCollection,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Asset>, CoreError> {
+        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Item")?;
+        let filter = match collection {
+            DiscoveryCollection::Person { id } => CollectionFilter::Person(id),
+            DiscoveryCollection::Place { id } => CollectionFilter::Place(id),
+            DiscoveryCollection::Tag { id } => CollectionFilter::Tag(id),
+            DiscoveryCollection::Favorites => CollectionFilter::Favorites,
+        };
+        synology_api::list_items_filtered(&transport, &sid, filter, offset, limit, version, syno_token.as_deref())
+            .await
+    }
+
     /// Fetches a thumbnail for `unit_id` at `size`, served from a
     /// composite-key on-disk cache whenever possible.
     ///
@@ -567,6 +629,32 @@ impl PhotosCore {
             version,
             syno_token: live.session.syno_token.clone(),
         })
+    }
+
+    /// Builds the `(transport, sid, version, syno_token)` tuple every
+    /// discovery-browse facade method (`fetch_people`/`fetch_places`/
+    /// `fetch_subjects`/`fetch_tags`/`fetch_assets_for`) needs, pinning
+    /// `api`'s version from the cached capability set the same way
+    /// `page_source_for` does for `SYNO.Foto.Browse.Item`. Falls back to `1`
+    /// if `api` was never probed (matching `page_source_for`'s own
+    /// fallback) rather than failing closed on a capability-probe gap alone;
+    /// a genuinely absent/removed API still surfaces as whatever error the
+    /// request itself returns.
+    ///
+    /// Locks `live` only long enough to clone what is needed; the guard is
+    /// dropped before returning, well before any caller `.await`s the
+    /// resulting transport's network call, same discipline as
+    /// `page_source_for`/`thumbnail`/`download_original`.
+    fn discovery_call_context(&self, api: &str) -> Result<(Transport, String, u32, Option<String>), CoreError> {
+        let guard = self.live.lock().expect("live mutex poisoned");
+        let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
+        let version = synology_api::pin_version(&live.capabilities, api, 1).unwrap_or(1);
+        Ok((
+            Transport::new(&live.connection)?,
+            live.session.sid.clone(),
+            version,
+            live.session.syno_token.clone(),
+        ))
     }
 
     /// Runs `work` (the sync-engine crawl or reconcile call) against an
@@ -1545,5 +1633,139 @@ mod core_tests {
             .expect("second login with stored device token should succeed without otp");
         assert_eq!(session2.sid, "SID-2");
         _trap.assert_async().await;
+    }
+
+    /// Logs a core in against `server` with a trivial capability probe so
+    /// `discovery_call_context` has a `Live` to read. Shared by every
+    /// discovery-facade test below.
+    async fn logged_in_core(label: &str, server: &mockito::ServerGuard) -> Arc<PhotosCore> {
+        let core = core_at(label);
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.expect("login ok");
+        core
+    }
+
+    #[tokio::test]
+    async fn fetch_people_hits_the_nas_and_returns_real_shape() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _people = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Person".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[{"cover":39646,"id":12279,"item_count":23,"name":"","show":true}]}}"#)
+            .create_async().await;
+        let core = logged_in_core("fetch-people", &server).await;
+        let people = core.fetch_people(0, 50).await.expect("fetch_people ok");
+        assert_eq!(people.len(), 1);
+        assert_eq!(people[0].id, 12279);
+        assert!(people[0].name.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_places_hits_the_nas_and_returns_real_shape() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _places = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Geocoding".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[{"country":"Norway","country_id":1,"first_level":"Oslo","id":762,"item_count":10,"name":"Grunerlokka, Oslo","second_level":"Grunerlokka"}]}}"#)
+            .create_async().await;
+        let core = logged_in_core("fetch-places", &server).await;
+        let places = core.fetch_places(0, 50).await.expect("fetch_places ok");
+        assert_eq!(places.len(), 1);
+        assert_eq!(places[0].country, "Norway");
+    }
+
+    #[tokio::test]
+    async fn fetch_subjects_hits_the_nas_and_returns_real_shape() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _concept = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Concept".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[{"display_threshold":1,"id":103,"item_count":2,"name":"Food","sort_index":10,"visibility":true}]}}"#)
+            .create_async().await;
+        let core = logged_in_core("fetch-subjects", &server).await;
+        let subjects = core.fetch_subjects(0, 50).await.expect("fetch_subjects ok");
+        assert_eq!(subjects.len(), 1);
+        assert_eq!(subjects[0].name, "Food");
+    }
+
+    #[tokio::test]
+    async fn fetch_tags_returns_empty_list_cleanly() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _tags = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.GeneralTag".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[]}}"#)
+            .create_async().await;
+        let core = logged_in_core("fetch-tags", &server).await;
+        let tags = core.fetch_tags(0, 50).await.expect("fetch_tags ok");
+        assert!(tags.is_empty(), "no tags exist yet on this NAS; must decode to an empty list, not error");
+    }
+
+    #[tokio::test]
+    async fn fetch_assets_for_person_sends_bare_int_person_id() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _filtered = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Item".into()),
+                mockito::Matcher::UrlEncoded("person_id".into(), "12279".into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[{"id":73501,"filename":"IMG_1664.JPG","type":"photo","additional":{"thumbnail":{"cache_key":"CK1","unit_id":55847}}}]}}"#)
+            .create_async().await;
+        let core = logged_in_core("fetch-assets-for-person", &server).await;
+        let assets = core
+            .fetch_assets_for(DiscoveryCollection::Person { id: 12279 }, 0, 50)
+            .await
+            .expect("fetch_assets_for person ok");
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].unit_id, 55847);
+    }
+
+    #[tokio::test]
+    async fn fetch_assets_for_favorites_sends_favorite_true() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _filtered = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("favorite".into(), "true".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[{"id":73459,"filename":"IMG_1910.JPG","type":"photo","additional":{"thumbnail":{"cache_key":"CK3","unit_id":55805}}}]}}"#)
+            .create_async().await;
+        let core = logged_in_core("fetch-assets-for-favorites", &server).await;
+        let assets = core
+            .fetch_assets_for(DiscoveryCollection::Favorites, 0, 50)
+            .await
+            .expect("fetch_assets_for favorites ok");
+        assert_eq!(assets.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn fetch_people_without_login_returns_auth_error() {
+        let core = core_at("fetch-people-no-login");
+        let err = core.fetch_people(0, 50).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn fetch_assets_for_without_login_returns_auth_error() {
+        let core = core_at("fetch-assets-for-no-login");
+        let err = core.fetch_assets_for(DiscoveryCollection::Favorites, 0, 50).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 }
