@@ -20,6 +20,7 @@
 		4A102FE0D8B5ED56831E327C /* ImageDownsampleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5261051EEA590BD7268673F8 /* ImageDownsampleTests.swift */; };
 		559A4CE3AE0FCE63660CB2CE /* KeychainSID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935811E0F479F10FB1C713F0 /* KeychainSID.swift */; };
 		55C7B0D64234966CC0AD8971 /* PhotoGridControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24005987A18E578A801F215 /* PhotoGridControllerTests.swift */; };
+		5A412877FD01F2FC4261DAE0 /* CrawlProgressModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FA765056488E7A054B60011 /* CrawlProgressModel.swift */; };
 		6159312037F2C83346C2E0E6 /* PhotosCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */; };
 		61CC623CDC49327F80B4350D /* WindowedDataSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E196A12DA01B778895850A5D /* WindowedDataSourceTests.swift */; };
 		721BE53CAA3551576B98CD33 /* PhotoGridController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B1A20932069EDAAD2273F9 /* PhotoGridController.swift */; };
@@ -29,7 +30,9 @@
 		8564012B2713C3D67FBAE433 /* SignOutControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED40FEE968B41906C8B464D7 /* SignOutControllerTests.swift */; };
 		86DB0E0DF2F5341B0064EF03 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 516C70ED26B5432FC290A9B0 /* LoginView.swift */; };
 		8E6AC06CAA7CF3A875BCE82B /* PathMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AB2048962505837D9708B9 /* PathMonitor.swift */; };
+		95D528A305471E65390D3F57 /* ImportProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24E700BE934BC17C20A127A /* ImportProgressView.swift */; };
 		A0336627776762D4B7072519 /* ThumbnailCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C220E6EFABA5E50B72BF6CD9 /* ThumbnailCacheTests.swift */; };
+		A263DC9AA52F72AAD703B803 /* CrawlProgressModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66AAF71547574AB2C70C51D8 /* CrawlProgressModelTests.swift */; };
 		A3F66FB3E9B5904B3250C547 /* SignOutController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D6B4D9A2B9E36DA1A58399 /* SignOutController.swift */; };
 		A7516BBFB26FE8A4BB8E7C71 /* KeychainSIDTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE99F2531E1D21E6A4EFF105 /* KeychainSIDTests.swift */; };
 		A761D411E8F16EF7E0139F37 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8FB877BDAFA0CCD4FB422FB8 /* Assets.xcassets */; };
@@ -113,11 +116,13 @@
 		31BC99794475619316AE36D9 /* SynologyPhotosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SynologyPhotosTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		32261FB0D2010F3CDA46C270 /* PhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PhotosCore.swift; path = ../bindings/PhotosCore.swift; sourceTree = "<group>"; };
 		40F28C05A900845C4AD4649A /* AuthStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStateMachine.swift; sourceTree = "<group>"; };
+		4FA765056488E7A054B60011 /* CrawlProgressModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrawlProgressModel.swift; sourceTree = "<group>"; };
 		4FE5C177E3FA3BAFB7092CF5 /* PathMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathMonitorTests.swift; sourceTree = "<group>"; };
 		516C70ED26B5432FC290A9B0 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		5261051EEA590BD7268673F8 /* ImageDownsampleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownsampleTests.swift; sourceTree = "<group>"; };
 		53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PhotosCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		61C8C541A89432E18AE11C26 /* TempCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TempCacheTests.swift; sourceTree = "<group>"; };
+		66AAF71547574AB2C70C51D8 /* CrawlProgressModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrawlProgressModelTests.swift; sourceTree = "<group>"; };
 		7657EE2CDC6D87A89FDA33A8 /* SynologyPhotos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SynologyPhotos.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		775FE46E23FB2AF20B3E5442 /* CoreError+Swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CoreError+Swift.swift"; sourceTree = "<group>"; };
 		7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreBridgeSmokeTests.swift; sourceTree = "<group>"; };
@@ -141,6 +146,7 @@
 		E3B5A556BC6D75D787EC6353 /* ImageDownsample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownsample.swift; sourceTree = "<group>"; };
 		ED40FEE968B41906C8B464D7 /* SignOutControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignOutControllerTests.swift; sourceTree = "<group>"; };
 		EE99F2531E1D21E6A4EFF105 /* KeychainSIDTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSIDTests.swift; sourceTree = "<group>"; };
+		F24E700BE934BC17C20A127A /* ImportProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProgressView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -176,6 +182,7 @@
 			children = (
 				1EF3205B25839B5C3B86CE9E /* AuthStateMachineTests.swift */,
 				7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */,
+				66AAF71547574AB2C70C51D8 /* CrawlProgressModelTests.swift */,
 				271D63AA455C96290DFEF262 /* FakePhotosCore.swift */,
 				096746CDFF6A253E76BAF96F /* FakePhotosCoreTests.swift */,
 				5261051EEA590BD7268673F8 /* ImageDownsampleTests.swift */,
@@ -221,6 +228,7 @@
 		2224556009F95DC904618E01 /* Grid */ = {
 			isa = PBXGroup;
 			children = (
+				F24E700BE934BC17C20A127A /* ImportProgressView.swift */,
 				8FE6EEC887786D958567A7A5 /* PhotoCellView.swift */,
 				A9B1A20932069EDAAD2273F9 /* PhotoGridController.swift */,
 				2A06C5754F8669A8D883CA53 /* PhotoGridView.swift */,
@@ -297,6 +305,7 @@
 		C4412ECB9AAD6982B12A9F66 /* Session */ = {
 			isa = PBXGroup;
 			children = (
+				4FA765056488E7A054B60011 /* CrawlProgressModel.swift */,
 				08D6B4D9A2B9E36DA1A58399 /* SignOutController.swift */,
 				D47EE427A3E9626140AF79FE /* SpaceToggle.swift */,
 			);
@@ -488,8 +497,10 @@
 			files = (
 				20C709DA59D73EC4AFB5462F /* AuthStateMachine.swift in Sources */,
 				37C315EB053CA2E9B258A359 /* CoreError+Swift.swift in Sources */,
+				5A412877FD01F2FC4261DAE0 /* CrawlProgressModel.swift in Sources */,
 				7F5D2228537668351F75629F /* DetailQuickLookView.swift in Sources */,
 				E8936FC2A8E25821FDA0ED64 /* ImageDownsample.swift in Sources */,
+				95D528A305471E65390D3F57 /* ImportProgressView.swift in Sources */,
 				559A4CE3AE0FCE63660CB2CE /* KeychainSID.swift in Sources */,
 				86DB0E0DF2F5341B0064EF03 /* LoginView.swift in Sources */,
 				8E6AC06CAA7CF3A875BCE82B /* PathMonitor.swift in Sources */,
@@ -511,6 +522,7 @@
 			files = (
 				BCB21063765E6F5A0842D854 /* AuthStateMachineTests.swift in Sources */,
 				F3DF81EDC7A33D114986BE0D /* CoreBridgeSmokeTests.swift in Sources */,
+				A263DC9AA52F72AAD703B803 /* CrawlProgressModelTests.swift in Sources */,
 				24D0A816AC4835369675B6A2 /* FakePhotosCore.swift in Sources */,
 				7A1544430BEC8AB2DB36D464 /* FakePhotosCoreTests.swift in Sources */,
 				4A102FE0D8B5ED56831E327C /* ImageDownsampleTests.swift in Sources */,

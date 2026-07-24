@@ -168,4 +168,67 @@ struct PhotoGridControllerTests {
         cell.configure(asset: asset(11), space: .personal, cache: cache)
         #expect(cell.representedAssetId == 11)
     }
+
+    /// The critical safety proof: mid-crawl, the grid must never present a
+    /// partial library as complete. Even though the snapshot's item count
+    /// climbs to match `totalCount` (a partial count that will keep
+    /// growing as the crawl continues), `snapshotIsComplete` must stay
+    /// false, because it is sourced from `dataSource.isReady` (the crawl
+    /// barrier), not from any row count. A regression that goes back to
+    /// deciding completeness by reading `totalCount` unconditionally would
+    /// make this test fail: `snapshotItemCount()` alone equalling
+    /// `totalCount` is exactly the false signal this guards against.
+    @Test func snapshotIsNotCompleteWhileCrawlIsInProgress() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<100).map { asset(Int64($0)) }
+        // Mid-crawl: 100 rows already indexed, but the barrier has not
+        // flipped, so the true library size may still be far larger.
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 100, total: 1000, complete: false)
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: 50)
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        _ = controller.view
+
+        await ds.refreshCount()
+        #expect(ds.isReady == false)
+
+        await ds.loadWindow(offset: 0, limit: 50)
+        await controller.applySnapshot()
+
+        // The grid does show the rows it has: browsing is not blocked on
+        // the crawl finishing.
+        #expect(controller.snapshotItemCount() == 100)
+        // But it must not be reported as the complete library.
+        #expect(controller.snapshotIsComplete == false)
+    }
+
+    /// Once the barrier flips, a fresh `applySnapshot()` call picks that up
+    /// and reports the grid as complete, driven by the same `isReady` read
+    /// that reported `false` above rather than by any count comparison.
+    @Test func snapshotBecomesCompleteOnceBarrierFlips() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<100).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 100, total: 1000, complete: false)
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: 50)
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        _ = controller.view
+
+        await ds.refreshCount()
+        await controller.applySnapshot()
+        #expect(controller.snapshotIsComplete == false)
+
+        // The crawl finishes: the core now reports the barrier as complete
+        // with the library's true final size.
+        fake.assets[.personal] = (0..<1000).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 1000, total: 1000, complete: true)
+        await ds.refreshCount()
+        #expect(ds.isReady == true)
+
+        await controller.applySnapshot()
+        #expect(controller.snapshotIsComplete == true)
+        #expect(controller.snapshotItemCount() == 1000)
+    }
 }

@@ -64,6 +64,19 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching {
     /// Rebuilds the snapshot from `dataSource.totalCount` rows, one item
     /// identifier per index the space is expected to have.
     ///
+    /// This intentionally still renders whatever rows exist while
+    /// `dataSource.isReady` is false: the initial crawl can take a long time
+    /// on a large library, and blocking the grid entirely until it finishes
+    /// would make the app unusable during that window. What must NEVER
+    /// happen is presenting that partial state as if it were the finished
+    /// library. `snapshotIsComplete` (set below from the same `isReady` read)
+    /// is the explicit, count-independent signal callers use to show the
+    /// "Importing N of M" banner: `snapshotItemCount()` alone climbing
+    /// toward some number is not evidence of completeness, only
+    /// `dataSource.isReady`/`CrawlProgress.complete` is. This method reads
+    /// `isReady` on every call specifically so a stale read from an earlier
+    /// snapshot can never linger after the barrier flips.
+    ///
     /// Item identity for a not-yet-loaded index is still well-defined:
     /// `AssetItemID` only needs `space` and a stable per-row `serverId`, and
     /// since the real server id is not known until the row loads, a
@@ -85,6 +98,13 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching {
     /// set only ever grows or the space changes wholesale, neither of which
     /// benefits from a cross-fade.
     func applySnapshot() async {
+        // Captured up front (not derived from the row count below) so the
+        // "is this presentation of the grid the complete library" question
+        // always has one answer, driven only by the crawl barrier. This is
+        // read fresh on every call: a snapshot applied while mid-crawl and
+        // then never refreshed after the barrier flips would otherwise keep
+        // reporting stale readiness forever.
+        snapshotIsComplete = dataSource.isReady
         var snapshot = NSDiffableDataSourceSnapshot<Int, AssetItemID>()
         snapshot.appendSections([Self.section])
         var identifiers: [AssetItemID] = []
@@ -99,6 +119,15 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching {
         snapshot.appendItems(identifiers, toSection: Self.section)
         diffable.apply(snapshot, animatingDifferences: false)
     }
+
+    /// Whether the most recently applied snapshot reflects a fully-crawled
+    /// library, per `dataSource.isReady` at the time `applySnapshot()` last
+    /// ran. `snapshotItemCount()` climbing to match `dataSource.totalCount`
+    /// is NOT sufficient evidence of this: a mid-crawl `totalCount` grows
+    /// too, so `snapshotItemCount() == totalCount` can be true while this is
+    /// still false. Callers deciding whether to present the grid as "the
+    /// full library" must check this, not the item count.
+    private(set) var snapshotIsComplete: Bool = false
 
     func snapshotItemCount() -> Int {
         diffable.snapshot().numberOfItems

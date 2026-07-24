@@ -52,6 +52,10 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     var crawlProgressToEmit: [CrawlProgress] = []
     /// Final value returned by `crawlSpace` / `reconcileDelta` per space.
     var crawlFinal: [Space: CrawlProgress] = [:]
+    /// Overrides the outcome of `crawlSpace` entirely when set. Lets a test
+    /// simulate a crawl that fails outright (e.g. network drop mid-crawl)
+    /// rather than always succeeding with `crawlFinal`.
+    var crawlSpaceResult: Result<Void, CoreError>?
     /// Value returned by the synchronous `crawlProgress(space:)` read per space.
     var progressBySpace: [Space: CrawlProgress] = [:]
 
@@ -117,6 +121,9 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         lastCrawledSpace = space
         for progress in crawlProgressToEmit {
             observer.onProgress(progress: progress)
+        }
+        if let crawlSpaceResult {
+            try crawlSpaceResult.get()
         }
         return crawlFinal[space] ?? CrawlProgress(space: space, done: 0, total: 0, complete: true)
     }
