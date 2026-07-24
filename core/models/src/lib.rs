@@ -73,6 +73,71 @@ pub struct Album {
     pub space: Space,
 }
 
+/// One row from `SYNO.Foto.Browse.Person`: a face cluster DSM has detected.
+/// `name` is the empty string for a person DSM has not been given a name
+/// for yet (the app shows this as a disabled "Add Name" placeholder rather
+/// than naming people itself, which is a later, gated mutation). `cover`
+/// is the unit_id DSM reports for the cluster's representative thumbnail;
+/// it goes through the same thumbnail fetch path as `Asset.unit_id`, but
+/// has no `cache_key` of its own (Person does not return one), so callers
+/// pass an empty cache_key when fetching it. `show` mirrors DSM's own
+/// "hide this person" toggle; a hidden person is still modeled here (never
+/// silently dropped) so the caller can decide whether to filter it.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct Person {
+    pub id: i64,
+    pub name: String,
+    pub item_count: u32,
+    pub cover_unit_id: Option<i64>,
+    pub show: bool,
+}
+
+/// One row from `SYNO.Foto.Browse.Geocoding`: a place cluster DSM has
+/// grouped photos into by location. `name` is the ready-to-display label
+/// DSM already composes (e.g. "Grunerlokka, Oslo"); `country`/
+/// `first_level`/`second_level` are kept for a caller that wants to build
+/// its own hierarchy or grouping instead of the flat `name`. Geocoding
+/// rows carry no cover thumbnail on this API (verified against the real
+/// NAS), so there is no `cover_unit_id` field here.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct Place {
+    pub id: i64,
+    pub name: String,
+    pub country: String,
+    pub first_level: String,
+    pub second_level: String,
+    pub item_count: u32,
+}
+
+/// One row from `SYNO.Foto.Browse.Concept` ("Subjects" in the sidebar).
+/// VERIFIED against the real NAS: the list API itself works and returns
+/// real categories (Food, Nature, Animals, Transportation, ...), but no
+/// working `Browse.Item` filter param or dedicated item-list API was found
+/// for it (see the discovery-browse plan doc for every candidate tried).
+/// This model exists so the list can still be shown; `fetch_assets_for`
+/// intentionally has no `Subject` variant yet, so selecting a subject tile
+/// has nothing to route to until DSM's filter surface for Concept is
+/// found.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct Subject {
+    pub id: i64,
+    pub name: String,
+    pub item_count: u32,
+}
+
+/// One row from `SYNO.Foto.Browse.GeneralTag`. VERIFIED shape against the
+/// real NAS (the list itself was empty -- no tags exist yet on this
+/// account -- but the envelope decodes cleanly either way). The
+/// `general_tag_id` Browse.Item filter param was confirmed accepted (a
+/// made-up id returns a clean empty list rather than being silently
+/// ignored) though not yet exercised against a real non-empty tag.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct Tag {
+    pub id: i64,
+    pub name: String,
+    pub item_count: u32,
+}
+
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct CrawlProgress {
     pub space: Space,
@@ -212,5 +277,36 @@ mod tests {
     fn thumbnail_size_variants_distinct() {
         assert_ne!(ThumbnailSize::Sm, ThumbnailSize::Xl);
         assert_eq!(ThumbnailSize::M, ThumbnailSize::M);
+    }
+
+    #[test]
+    fn person_holds_unnamed_and_named_shapes() {
+        let unnamed = Person { id: 12279, name: String::new(), item_count: 23, cover_unit_id: Some(39646), show: true };
+        assert!(unnamed.name.is_empty(), "an unnamed person must round-trip as an empty name, not a placeholder string");
+        let named = Person { id: 1, name: "Sahil".to_string(), item_count: 5, cover_unit_id: None, show: false };
+        assert_eq!(named.name, "Sahil");
+        assert!(!named.show);
+    }
+
+    #[test]
+    fn place_holds_all_geocoding_fields() {
+        let p = Place {
+            id: 762,
+            name: "Grunerlokka, Oslo".to_string(),
+            country: "Norway".to_string(),
+            first_level: "Oslo".to_string(),
+            second_level: "Grunerlokka".to_string(),
+            item_count: 10,
+        };
+        assert_eq!(p.item_count, 10);
+        assert_eq!(p.country, "Norway");
+    }
+
+    #[test]
+    fn subject_and_tag_hold_id_name_count() {
+        let s = Subject { id: 103, name: "Food".to_string(), item_count: 2 };
+        assert_eq!(s.name, "Food");
+        let t = Tag { id: 1, name: "vacation".to_string(), item_count: 4 };
+        assert_eq!(t.item_count, 4);
     }
 }
