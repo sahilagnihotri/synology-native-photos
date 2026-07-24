@@ -12,6 +12,13 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "26.0"
     SWIFT_STRICT_CONCURRENCY: minimal
     OTHER_LDFLAGS: ["-lc++"]
+    # Project-wide signing so the app AND the test bundles share one team.
+    # If only the app target carries DEVELOPMENT_TEAM, the test bundle is
+    # signed with a different (ad-hoc) identity and the runner refuses to
+    # load it: "mapping process and mapped file have different Team IDs".
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "Apple Development"
+    DEVELOPMENT_TEAM: "5W67TF3579"
 targets:
   PhotosCore:
     type: framework
