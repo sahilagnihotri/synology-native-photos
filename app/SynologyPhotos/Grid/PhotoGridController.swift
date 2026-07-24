@@ -152,7 +152,14 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     @discardableResult
     func handleKey(_ event: NSEvent) -> Bool {
         guard let action = GridKeyMapper.action(for: event) else { return false }
-        let count = dataSource.totalCount
+        // Bounded by the collection view's own applied item count, not
+        // `dataSource.totalCount` directly: the two can disagree (e.g.
+        // before `applySnapshot()` has ever run, or between the data
+        // source's count updating and the next snapshot apply picking it
+        // up), and `scrollToItems`/`selectionIndexPaths` below crash with
+        // an AppKit-level assertion if asked for an index path the
+        // collection view has not actually laid out yet.
+        let count = snapshotItemCount()
 
         switch action {
         case .selectAll:
@@ -181,17 +188,30 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
             return true
 
         case .previous, .next, .up, .down:
-            guard let current = currentIndex() else { return false }
-            let perRow = GridNavigation.itemsPerRow(
-                availableWidth: collectionView.bounds.width,
-                itemSize: itemSize,
-                gap: Self.interItemGap)
-            guard let target = GridNavigation.target(for: action, from: current, itemsPerRow: perRow, count: count) else {
-                return true
+            guard count > 0 else { return false }
+            let target: Int
+            if let current = currentIndex() {
+                let perRow = GridNavigation.itemsPerRow(
+                    availableWidth: collectionView.bounds.width,
+                    itemSize: itemSize,
+                    gap: Self.interItemGap)
+                guard let moved = GridNavigation.target(for: action, from: current, itemsPerRow: perRow, count: count) else {
+                    return true
+                }
+                target = moved
+            } else {
+                // No selection yet: any arrow key starts navigation at the
+                // first item, matching Finder/Photos (pressing an arrow key
+                // with nothing selected selects item 0 regardless of
+                // direction, rather than doing nothing or requiring Right
+                // specifically).
+                target = 0
             }
             selection.click(target)
             syncSelectionHighlight()
-            collectionView.scrollToItems(at: [IndexPath(item: target, section: Self.section)], scrollPosition: .nearestHorizontalEdge)
+            if target < snapshotItemCount() {
+                collectionView.scrollToItems(at: [IndexPath(item: target, section: Self.section)], scrollPosition: .nearestHorizontalEdge)
+            }
             onSelect?(target)
             return true
         }
@@ -199,8 +219,8 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
 
     /// The index arrow-key navigation should move from: the selection
     /// anchor if there is one, else the first selected index, else `nil`
-    /// (no selection to navigate from yet; callers should let the grid's
-    /// own default first-item behavior, if any, take over).
+    /// (no selection to navigate from yet, in which case `handleKey`
+    /// starts fresh at index 0).
     private func currentIndex() -> Int? {
         selection.anchor ?? selection.sortedIndices.first
     }
@@ -432,8 +452,15 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// than AppKit's own mouse handling (Cmd-A, keyboard range moves): those
     /// paths mutate `selection` directly and must push the result back into
     /// AppKit so the accent-ring highlight matches.
+    ///
+    /// Filtered to indices actually within the applied snapshot's row
+    /// count: `selection` is driven by `dataSource.totalCount`, which can
+    /// be ahead of what the collection view has actually laid out (e.g.
+    /// before the first `applySnapshot()`), and handing AppKit an index
+    /// path it has no item for is an assertion crash, not a graceful no-op.
     func syncSelectionHighlight() {
-        let indexPaths = Set(selection.selected.map { IndexPath(item: $0, section: Self.section) })
+        let itemCount = snapshotItemCount()
+        let indexPaths = Set(selection.selected.filter { $0 < itemCount }.map { IndexPath(item: $0, section: Self.section) })
         collectionView.selectionIndexPaths = indexPaths
     }
 }

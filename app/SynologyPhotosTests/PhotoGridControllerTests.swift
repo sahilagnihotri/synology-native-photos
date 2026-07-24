@@ -433,4 +433,164 @@ struct PhotoGridControllerTests {
         cell.configure(asset: asset(5), space: .personal, cache: cache)
         #expect(cell.displayedImage === firstImage)
     }
+
+    // MARK: - Keyboard map integration (handleKey)
+
+    private func keyEvent(_ keyCode: UInt16, command: Bool = false) -> NSEvent {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: command ? .command : [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "",
+            charactersIgnoringModifiers: "",
+            isARepeat: false,
+            keyCode: keyCode
+        )!
+    }
+
+    /// Builds a controller with `count` rows already resident and a
+    /// snapshot already applied, matching how the real grid always looks
+    /// by the time a key event can reach it (the grid is only ever in the
+    /// view hierarchy once the crawl has completed and `applySnapshot()`
+    /// has run at least once). `handleKey`'s row-count bound
+    /// (`snapshotItemCount()`, not `dataSource.totalCount`) depends on
+    /// this: skipping the snapshot apply here would silently test against
+    /// a collection view with zero laid-out items regardless of `count`.
+    private func makeController(count: Int) async -> (PhotoGridController, WindowedDataSource) {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<count).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: UInt64(count), total: UInt64(count), complete: true)
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: max(count, 1))
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        _ = controller.view
+        await ds.refreshCount()
+        await ds.loadWindow(offset: 0, limit: max(count, 1))
+        await controller.applySnapshot()
+        return (controller, ds)
+    }
+
+    /// Any arrow key on a grid with no prior selection starts at index 0,
+    /// matching Finder/Photos (an arrow press with nothing selected selects
+    /// the first item regardless of direction).
+    @Test func arrowKeyWithNoSelectionStartsAtFirstItem() async {
+        let (controller, _) = await makeController(count: 10)
+
+        var selectedIndex: Int?
+        controller.onSelect = { selectedIndex = $0 }
+
+        #expect(controller.handleKey(keyEvent(KeyCode.rightArrow)) == true)
+        #expect(controller.selection.selected == [0])
+        #expect(selectedIndex == 0)
+    }
+
+    @Test func leftArrowMovesSelectionBackByOne() async {
+        let (controller, _) = await makeController(count: 10)
+        controller.selection.click(4)
+
+        #expect(controller.handleKey(keyEvent(KeyCode.leftArrow)) == true)
+        #expect(controller.selection.selected == [3])
+    }
+
+    @Test func rightArrowAtLastItemIsConsumedButDoesNotMove() async {
+        let (controller, _) = await makeController(count: 5)
+        controller.selection.click(4)
+
+        #expect(controller.handleKey(keyEvent(KeyCode.rightArrow)) == true)
+        #expect(controller.selection.selected == [4])
+    }
+
+    @Test func cmdASelectsEveryItem() async {
+        let (controller, _) = await makeController(count: 7)
+
+        #expect(controller.handleKey(keyEvent(KeyCode.a, command: true)) == true)
+        #expect(controller.selection.selected == Set(0..<7))
+    }
+
+    @Test func escapeClearsSelectionAndNotifiesCaller() async {
+        let (controller, _) = await makeController(count: 5)
+        controller.selection.click(2)
+
+        var cleared = false
+        controller.onClearSelection = { cleared = true }
+
+        #expect(controller.handleKey(keyEvent(KeyCode.escape)) == true)
+        #expect(controller.selection.isEmpty)
+        #expect(cleared)
+    }
+
+    @Test func returnOpensDetailForCurrentSelection() async {
+        let (controller, _) = await makeController(count: 5)
+        controller.selection.click(3)
+
+        var opened: Int?
+        controller.onOpenDetail = { opened = $0 }
+
+        #expect(controller.handleKey(keyEvent(KeyCode.returnKey)) == true)
+        #expect(opened == 3)
+    }
+
+    @Test func spaceTogglesQuickLookForCurrentSelection() async {
+        let (controller, _) = await makeController(count: 5)
+        controller.selection.click(1)
+
+        var toggled: Int?
+        controller.onToggleQuickLook = { toggled = $0 }
+
+        #expect(controller.handleKey(keyEvent(KeyCode.space)) == true)
+        #expect(toggled == 1)
+    }
+
+    @Test func deleteRequestsWithCurrentSelectionCountAndNeverDeletes() async {
+        let (controller, _) = await makeController(count: 5)
+        controller.selection.click(0)
+        controller.selection.toggle(2)
+
+        var requestedCount: Int?
+        controller.onDeleteRequested = { requestedCount = $0 }
+
+        #expect(controller.handleKey(keyEvent(KeyCode.delete)) == true)
+        #expect(requestedCount == 2)
+        // Selection itself is untouched: Delete never mutates state on its
+        // own, it only reports the count for the caller's confirm affordance.
+        #expect(controller.selection.selected == [0, 2])
+    }
+
+    @Test func unrecognizedKeyIsNotConsumed() async {
+        let (controller, _) = await makeController(count: 5)
+        #expect(controller.handleKey(keyEvent(0xFF)) == false)
+    }
+
+    @Test func arrowKeyOnEmptyGridIsNotConsumed() async {
+        let (controller, _) = await makeController(count: 0)
+        #expect(controller.handleKey(keyEvent(KeyCode.rightArrow)) == false)
+    }
+
+    /// The exact crash this fix targets: calling `handleKey` before the
+    /// collection view has ever had a snapshot applied (so its own laid-out
+    /// item count is 0) must not crash even though `dataSource.totalCount`
+    /// already reports rows. `scrollToItems`/`selectionIndexPaths` given an
+    /// index path the collection view does not know about is an AppKit
+    /// assertion failure, not a Swift-catchable error, so this proves the
+    /// bound is against the applied snapshot, not the data source count.
+    @Test func arrowKeyBeforeAnySnapshotAppliedDoesNotCrash() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: 10)
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        _ = controller.view
+        await ds.refreshCount()
+        // Deliberately no `loadWindow`/`applySnapshot()` call: the
+        // collection view's own item count is still 0 here even though
+        // `dataSource.totalCount` is 10.
+
+        #expect(controller.handleKey(keyEvent(KeyCode.rightArrow)) == false)
+    }
 }
