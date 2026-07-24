@@ -88,7 +88,7 @@ struct HostSelector {
     ///   certificate can be trusted. TLS verification stays on either way;
     ///   this never disables validation, it only supplies an additional
     ///   trust anchor for the one host that needs it.
-    static func connection(for host: PreferredHost, pinnedCertDer: [UInt8]?) -> Connection {
+    static func connection(for host: PreferredHost, pinnedCertDer: Data?) -> Connection {
         switch host {
         case .lan(let h):
             return Connection(host: h, verifyTls: true, pinnedCertDer: nil)

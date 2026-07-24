@@ -18,7 +18,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     var signOutResult: Result<Void, CoreError> = .success(())
     var capabilitiesResult: Result<[ApiCapability], CoreError> = .success([])
     var thumbnailResult: Result<ThumbnailData, CoreError> =
-        .success(ThumbnailData(cachedPath: "/tmp/fake.jpg", bytes: []))
+        .success(ThumbnailData(cachedPath: "/tmp/fake.jpg", bytes: Data()))
     var downloadResult: Result<String, CoreError> = .success("/tmp/original.jpg")
 
     /// Progress events replayed to the observer during `crawlSpace`, in order.

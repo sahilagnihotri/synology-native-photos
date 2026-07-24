@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosCore
 
 @main
 struct SynologyPhotosApp: App {

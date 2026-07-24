@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import PhotosCore
 @testable import SynologyPhotos
@@ -21,14 +22,14 @@ struct PathMonitorTests {
     }
 
     @Test func lanConnectionUsesSystemTrust() {
-        let conn = HostSelector.connection(for: .lan("https://192.168.1.10:5001"), pinnedCertDer: [1, 2, 3])
+        let conn = HostSelector.connection(for: .lan("https://192.168.1.10:5001"), pinnedCertDer: Data([1, 2, 3]))
         #expect(conn.verifyTls == true)
         #expect(conn.pinnedCertDer == nil)
     }
 
     @Test func tailscaleConnectionPinsCert() {
-        let conn = HostSelector.connection(for: .tailscale("https://nas.ts.net:5001"), pinnedCertDer: [9, 9])
+        let conn = HostSelector.connection(for: .tailscale("https://nas.ts.net:5001"), pinnedCertDer: Data([9, 9]))
         #expect(conn.verifyTls == true)
-        #expect(conn.pinnedCertDer == [9, 9])
+        #expect(conn.pinnedCertDer == Data([9, 9]))
     }
 }

@@ -1,4 +1,5 @@
 import XCTest
+import PhotosCore
 @testable import SynologyPhotos
 
 final class CoreBridgeSmokeTests: XCTestCase {

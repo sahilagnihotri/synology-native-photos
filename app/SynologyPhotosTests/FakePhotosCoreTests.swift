@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import PhotosCore
 @testable import SynologyPhotos
@@ -175,7 +176,7 @@ struct FakePhotosCoreTests {
 
     @Test func fakeThumbnailReturnsConfiguredData() async throws {
         let fake = FakePhotosCore()
-        fake.thumbnailResult = .success(ThumbnailData(cachedPath: "/tmp/thumb.jpg", bytes: [1, 2, 3]))
+        fake.thumbnailResult = .success(ThumbnailData(cachedPath: "/tmp/thumb.jpg", bytes: Data([1, 2, 3])))
 
         let thumb = try await fake.thumbnail(space: .personal, assetId: 7, cacheKey: "ck7", size: .m)
 
