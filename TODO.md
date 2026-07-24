@@ -4,8 +4,7 @@ Only pending work. Completed items live in `Fixed.md`. Live scratch progress in 
 
 ## In progress
 
-- [ ] Apple Photos-style UI + keyboard model: sidebar, justified zoomable grid, multi-select, polished detail viewer, keyboard map (arrows/space/return/escape/cmd-A, delete stubbed to a safe-confirm until Phase 2). Brief: `.superpowers/sdd/fix-apple-photos-ui-brief.md`. Design spec: `documentation/design/2026-07-24-apple-photos-ui.md`.
-- [ ] Fix test pollution of real UserDefaults: `LoginView.swift` `LoginPreferencesStore.save()` uses `.standard`, so running the test suite wrote fixture host/username (`devicetoken-send.local` / `devicetokenresend`) into the real app prefs. Inject `UserDefaults` into `LoginFormModel` for load AND save; tests use an isolated suite. (Real prefs already cleared manually.)
+- [ ] Apple Photos-style UI + keyboard model: sidebar, zoomable grid, multi-select, and keyboard map (arrows/space/return/escape/cmd-A, delete routes to a safe-confirm affordance until Phase 2) shipped; see `.superpowers/sdd/fix-apple-photos-ui-report.md` for what landed. Still open: real delete wiring (Phase 2) and date-section headers (see Phase 3+ below). Brief: `.superpowers/sdd/fix-apple-photos-ui-brief.md`. Design spec: `documentation/design/2026-07-24-apple-photos-ui.md`.
 
 ## Security (before real use)
 
