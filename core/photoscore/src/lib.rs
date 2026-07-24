@@ -304,20 +304,27 @@ impl PhotosCore {
     /// Fetches a thumbnail for `asset_id` at `size`, served from a
     /// composite-key on-disk cache whenever possible.
     ///
-    /// The cache path is keyed on `(space, asset_id, size, cache_key)` -
-    /// `{cache_dir}/thumbs/{space}/{asset_id}/{size}_{cache_key}.jpg`.
-    /// `cache_key` is a version token from the NAS (`SYNO.Foto.Browse.Item`'s
-    /// `additional.thumbnail.cache_key`): whenever the server-side asset
-    /// changes, the NAS mints a new cache_key, so a stale cache_key can never
-    /// collide with a fresh file on disk - the path itself changes, which is
-    /// what makes this an invalidating cache rather than one that needs
-    /// separate eviction logic.
+    /// The cache path is `{cache_dir}/thumbs/{hex_digest}.jpg`, where
+    /// `hex_digest` is a hash of `(space, asset_id, size, cache_key)`. Hashing
+    /// the composite key rather than interpolating any of its parts (in
+    /// particular the NAS-supplied `cache_key`) directly into the filename
+    /// means the filename is always a fixed-length hex string: no path
+    /// separator, no `..`, no length blowup can ever reach the filesystem,
+    /// even if `cache_key` were ever malformed or unexpectedly large. A
+    /// changed `cache_key` still hashes to a different digest, so this keeps
+    /// the same invalidation property as before: whenever the server-side
+    /// asset changes and the NAS mints a new cache_key, the new call produces
+    /// a different path and can never be served a stale file.
     ///
     /// On a cache hit, this returns entirely from disk with no network
     /// access. On a miss, `live` is locked only long enough to clone the
     /// transport/sid/version triple it needs; the guard is dropped before the
     /// `fetch_thumbnail` `.await`, matching the discipline used by
-    /// `page_source_for`/`crawl_space` elsewhere in this file.
+    /// `page_source_for`/`crawl_space` elsewhere in this file. The fetched
+    /// bytes are written atomically (temp file in the same directory, then
+    /// renamed into place) so a concurrent reader/writer or a symlink planted
+    /// at the target path can never observe a partial write or be written
+    /// through.
     ///
     /// Fails closed with `CoreError::Auth` if no session is held.
     pub async fn thumbnail(
@@ -327,17 +334,8 @@ impl PhotosCore {
         cache_key: String,
         size: ThumbnailSize,
     ) -> Result<ThumbnailData, CoreError> {
-        let size_tag = match size {
-            ThumbnailSize::Sm => "sm",
-            ThumbnailSize::M => "m",
-            ThumbnailSize::Xl => "xl",
-        };
-        let space_tag = match space {
-            Space::Personal => "personal",
-            Space::Shared => "shared",
-        };
-        let dir = std::path::Path::new(&self.cache_dir).join("thumbs").join(space_tag).join(asset_id.to_string());
-        let path = dir.join(format!("{size_tag}_{cache_key}.jpg"));
+        let dir = std::path::Path::new(&self.cache_dir).join("thumbs");
+        let path = dir.join(format!("{}.jpg", cache_digest(&[space_tag(space), &asset_id.to_string(), size_tag(size), &cache_key])));
         if path.exists() {
             let bytes = std::fs::read(&path).map_err(|e| CoreError::Storage { message: e.to_string() })?;
             return Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes });
@@ -355,8 +353,7 @@ impl PhotosCore {
         };
 
         let bytes = synology_api::fetch_thumbnail(&transport, &sid, space, asset_id, &cache_key, size, version).await?;
-        std::fs::create_dir_all(&dir).map_err(|e| CoreError::Storage { message: e.to_string() })?;
-        std::fs::write(&path, &bytes).map_err(|e| CoreError::Storage { message: e.to_string() })?;
+        write_cache_file_atomically(&dir, &path, &bytes)?;
         Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes })
     }
 
@@ -366,7 +363,10 @@ impl PhotosCore {
     ///
     /// Same lock discipline as `thumbnail`: `live` is locked only long enough
     /// to clone the transport/sid/version triple, then dropped before the
-    /// network `.await`.
+    /// network `.await`. The destination filename is a hash of
+    /// `(asset_id, cache_key)` for the same path-safety reason as `thumbnail`
+    /// (the NAS-supplied `cache_key` never appears literally in a path), and
+    /// the bytes are written atomically (temp file, then renamed into place).
     ///
     /// Fails closed with `CoreError::Auth` if no session is held.
     pub async fn download_original(
@@ -387,10 +387,93 @@ impl PhotosCore {
         };
 
         let bytes = synology_api::download_original(&transport, &sid, space, asset_id, &cache_key, version).await?;
-        let tmp = std::env::temp_dir().join(format!("syno-orig-{asset_id}-{cache_key}"));
-        std::fs::write(&tmp, &bytes).map_err(|e| CoreError::Storage { message: e.to_string() })?;
+        let dir = std::env::temp_dir();
+        let tmp = dir.join(format!("syno-orig-{}", cache_digest(&[&asset_id.to_string(), &cache_key])));
+        write_cache_file_atomically(&dir, &tmp, &bytes)?;
         Ok(tmp.to_string_lossy().into())
     }
+}
+
+/// Maps a `ThumbnailSize` to its stable path-tag string. No injection
+/// surface: values come from a closed enum, never from NAS-supplied data.
+fn size_tag(size: ThumbnailSize) -> &'static str {
+    match size {
+        ThumbnailSize::Sm => "sm",
+        ThumbnailSize::M => "m",
+        ThumbnailSize::Xl => "xl",
+    }
+}
+
+/// Maps a `Space` to its stable path-tag string. No injection surface: values
+/// come from a closed enum, never from NAS-supplied data.
+fn space_tag(space: Space) -> &'static str {
+    match space {
+        Space::Personal => "personal",
+        Space::Shared => "shared",
+    }
+}
+
+/// Hashes a composite cache key (any number of string parts, e.g. `space`,
+/// `asset_id`, `size`, `cache_key`) into a fixed-length hex digest suitable
+/// for use as a filename.
+///
+/// This is the sole defense against path traversal in the disk cache: none
+/// of the input parts (in particular the NAS-supplied `cache_key`, which is
+/// otherwise unsanitized) ever appear literally in the resulting path. A `/`,
+/// a `..` segment, or an absurdly long value in any part changes the digest
+/// but can never itself reach the filesystem, because the digest is always
+/// exactly 16 lowercase hex characters. Two composite keys that differ in any
+/// part hash to different digests (barring a hash collision), which
+/// preserves the existing cache invalidation property: a changed `cache_key`
+/// still produces a different cache path and is always treated as a miss.
+///
+/// Uses `std::collections::hash_map::DefaultHasher`, which is fine here: this
+/// is a cache filename, not a cryptographic or adversarial-collision
+/// context, and the parts are delimited (hashed one at a time with a
+/// separator) so distinct part boundaries can't be confused with each other.
+fn cache_digest(parts: &[&str]) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    for part in parts {
+        part.hash(&mut hasher);
+        0u8.hash(&mut hasher); // separator so ("ab","c") != ("a","bc")
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+/// Writes `bytes` to `final_path` atomically: creates `dir` if missing,
+/// writes to a freshly named temp file inside `dir`, then renames it into
+/// place. `rename` within the same directory is atomic on macOS (and POSIX
+/// generally), so any concurrent reader of `final_path` either sees the
+/// complete old file or the complete new file, never a partial write.
+///
+/// This also removes the symlink/TOCTOU risk of writing straight to
+/// `final_path`: the temp file is always a brand-new, uniquely named path (no
+/// pre-existing file or symlink for `create_new` to follow), and `rename`
+/// replaces whatever is at `final_path` wholesale rather than opening and
+/// writing through it, so a symlink planted at `final_path` is atomically
+/// swapped out rather than dereferenced and written into.
+fn write_cache_file_atomically(dir: &std::path::Path, final_path: &std::path::Path, bytes: &[u8]) -> Result<(), CoreError> {
+    std::fs::create_dir_all(dir).map_err(|e| CoreError::Storage { message: e.to_string() })?;
+    let unique = format!(".tmp-{}-{}", std::process::id(), cache_digest(&[&std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos().to_string()]));
+    let tmp_path = dir.join(unique);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|e| CoreError::Storage { message: e.to_string() })?;
+    use std::io::Write;
+    let write_result = file.write_all(bytes).and_then(|_| file.sync_all());
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(CoreError::Storage { message: e.to_string() });
+    }
+    drop(file);
+    std::fs::rename(&tmp_path, final_path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_path);
+        CoreError::Storage { message: e.to_string() }
+    })
 }
 
 /// The `store` mutex briefly holds `None` only while a crawl/reconcile has
@@ -1084,7 +1167,7 @@ mod core_tests {
 
         let data = core.thumbnail(Space::Personal, 101, "CK1".into(), models::ThumbnailSize::Sm).await.expect("thumb ok");
         assert!(data.cached_path.contains("thumbs"));
-        assert!(data.cached_path.ends_with("sm_CK1.jpg"));
+        assert!(data.cached_path.ends_with(".jpg"));
         assert!(std::path::Path::new(&data.cached_path).exists());
         assert_eq!(data.bytes, vec![0xFF, 0xD8, 0xFF]);
         _thumb.assert_async().await;
@@ -1175,6 +1258,64 @@ mod core_tests {
         assert_eq!(new.bytes, vec![0x02]);
         _thumb_ck1.assert_async().await;
         _thumb_ck2.assert_async().await;
+    }
+
+    /// Security fix: a `cache_key` containing path-traversal/path-separator
+    /// bytes (as could arrive from a malformed or malicious NAS response)
+    /// must not escape the cache directory. The filename is a hash of the
+    /// composite key, so the raw `cache_key` never appears literally in the
+    /// path; the resulting file's parent directory must still be exactly
+    /// `{cache_dir}/thumbs`, and the fetch must still succeed (a hit/miss on
+    /// the hashed path, not a filesystem error or an escape).
+    #[tokio::test]
+    async fn thumbnail_cache_key_with_path_traversal_stays_inside_cache_dir() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _info = server.mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"SYNO.Foto.Thumbnail":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
+            .create_async().await;
+        let malicious_key = "../../../../../../tmp/evil";
+        let _thumb = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
+                mockito::Matcher::UrlEncoded("id".into(), "404".into()),
+                mockito::Matcher::UrlEncoded("cache_key".into(), malicious_key.into()),
+            ]))
+            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_body(vec![0x99])
+            .expect(1)
+            .create_async().await;
+        let core = core_at("thumb-traversal");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None };
+        core.login(conn, "u".into(), "p".into(), None).await.unwrap();
+        core.probe_capabilities().await.unwrap();
+
+        let data = core
+            .thumbnail(Space::Personal, 404, malicious_key.into(), models::ThumbnailSize::Sm)
+            .await
+            .expect("thumb ok even with a hostile cache_key");
+        assert_eq!(data.bytes, vec![0x99]);
+
+        let written = std::path::Path::new(&data.cached_path);
+        assert!(written.exists(), "cache file must exist at the returned path");
+        let expected_dir = std::path::Path::new(&core.cache_dir).join("thumbs");
+        assert_eq!(
+            written.parent().unwrap().canonicalize().unwrap(),
+            expected_dir.canonicalize().unwrap(),
+            "cache_key must never be able to steer the file outside {{cache_dir}}/thumbs"
+        );
+        // The raw cache_key must never appear literally in the path: proof
+        // that the filename is derived from a hash, not string interpolation.
+        assert!(!data.cached_path.contains(".."), "path must not contain traversal segments");
+        assert!(
+            !data.cached_path.contains("evil"),
+            "the raw cache_key content must not appear literally in the cache path"
+        );
+        _thumb.assert_async().await;
     }
 
     /// Task 37 TDD: fail-closed when no session is held; no network hit.
