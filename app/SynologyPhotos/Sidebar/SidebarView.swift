@@ -28,6 +28,12 @@ struct SidebarView: View {
                         .tag(item)
                 }
             }
+            Section("Discovery") {
+                ForEach(SidebarSections.discovery, id: \.self) { item in
+                    Label(item.title, systemImage: item.systemImage)
+                        .tag(item)
+                }
+            }
         }
         .listStyle(.sidebar)
         .accessibilityIdentifier("sidebar.list")

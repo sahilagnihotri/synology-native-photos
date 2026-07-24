@@ -116,4 +116,65 @@ struct WindowedDataSourceTests {
         #expect(ds.item(at: 301)?.id == 301)
         #expect(ds.item(at: 349)?.id == 349)
     }
+
+    // MARK: - Discovery collection windowing
+
+    @Test func setCollectionLoadsFromFetchAssetsForNotFetchAssets() async {
+        let fake = FakePhotosCore()
+        let personId = DiscoveryCollection.person(id: 12279)
+        fake.assetsForCollection[personId] = (0..<5).map { asset(Int64($0) + 1000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setCollection(personId)
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.count == 5)
+        #expect(fake.fetchAssetsForCallCount == 1)
+        #expect(fake.lastFetchAssetsForCollection == personId)
+    }
+
+    @Test func collectionWindowMarksReadyOnceAShortPageArrives() async {
+        let fake = FakePhotosCore()
+        let placeId = DiscoveryCollection.place(id: 756)
+        fake.assetsForCollection[placeId] = (0..<5).map { asset(Int64($0) + 2000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setCollection(placeId)
+        #expect(ds.isReady == false, "no page has loaded yet, so readiness is unknown")
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.isReady == true, "a short page (5 rows for a 50-row ask) means this was the last page")
+        #expect(ds.totalCount == 5)
+    }
+
+    @Test func collectionWindowStaysNotReadyOnAFullPage() async {
+        let fake = FakePhotosCore()
+        let tagId = DiscoveryCollection.tag(id: 5)
+        fake.assetsForCollection[tagId] = (0..<50).map { asset(Int64($0) + 3000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setCollection(tagId)
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.isReady == false, "a full page (50 rows for a 50-row ask) means there may be more")
+        #expect(ds.totalCount == 50)
+    }
+
+    @Test func setCollectionResetsResidentFromAPriorSpace() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        let favorites = DiscoveryCollection.favorites
+        fake.assetsForCollection[favorites] = (0..<3).map { asset(Int64($0) + 4000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.refreshCount()
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.item(at: 0)?.id == 0)
+
+        await ds.setCollection(favorites)
+        #expect(ds.totalCount == 0, "switching source must reset totalCount until the collection's own first page loads")
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.map(\.id) == [4000, 4001, 4002], "must fetch from the collection, not the stale space cache")
+    }
+
+    @Test func discoverySourceDefaultsToPersonalSpaceForItemIdentity() async {
+        let fake = FakePhotosCore()
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .shared, pageSize: 50)
+        await ds.setCollection(.favorites)
+        #expect(ds.space == .personal, "every discovery collection is personal-space-only")
+    }
 }

@@ -34,4 +34,22 @@ actor PhotosCoreClient {
     func downloadOriginal(space: Space, unitId: Int64, cacheKey: String) async throws -> String {
         try await core.downloadOriginal(space: space, unitId: unitId, cacheKey: cacheKey)
     }
+
+    // MARK: - Discovery browse
+
+    func fetchPeople(offset: UInt32, limit: UInt32) async throws -> [Person] {
+        try await core.fetchPeople(offset: offset, limit: limit)
+    }
+    func fetchPlaces(offset: UInt32, limit: UInt32) async throws -> [Place] {
+        try await core.fetchPlaces(offset: offset, limit: limit)
+    }
+    func fetchSubjects(offset: UInt32, limit: UInt32) async throws -> [Subject] {
+        try await core.fetchSubjects(offset: offset, limit: limit)
+    }
+    func fetchTags(offset: UInt32, limit: UInt32) async throws -> [Tag] {
+        try await core.fetchTags(offset: offset, limit: limit)
+    }
+    func fetchAssetsFor(collection: DiscoveryCollection, offset: UInt32, limit: UInt32) async throws -> [Asset] {
+        try await core.fetchAssetsFor(collection: collection, offset: offset, limit: limit)
+    }
 }

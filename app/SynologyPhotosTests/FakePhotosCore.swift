@@ -87,6 +87,30 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     var assets: [Space: [Asset]] = [:]
     var albums: [Space: [Album]] = [:]
 
+    // MARK: - Discovery browse
+
+    var peopleResult: Result<[Person], CoreError> = .success([])
+    var placesResult: Result<[Place], CoreError> = .success([])
+    var subjectsResult: Result<[Subject], CoreError> = .success([])
+    var tagsResult: Result<[Tag], CoreError> = .success([])
+    /// Canned assets per collection, windowed the same way `assets` is for
+    /// `fetchAssets`. Keyed by the collection's own equality (DiscoveryCollection
+    /// conforms to Equatable via its generated Hashable/Equatable), so a test
+    /// can script different photos per person/place/tag/favorites.
+    var assetsForCollection: [DiscoveryCollection: [Asset]] = [:]
+    /// Overrides `fetchAssetsFor` entirely when set, taking precedence over
+    /// `assetsForCollection`; lets a test simulate a fetch failure (e.g. the
+    /// Subjects collection with no working filter) without needing a real
+    /// error path through the windowing logic below.
+    var fetchAssetsForResult: Result<[Asset], CoreError>?
+
+    private(set) var fetchPeopleCallCount = 0
+    private(set) var fetchPlacesCallCount = 0
+    private(set) var fetchSubjectsCallCount = 0
+    private(set) var fetchTagsCallCount = 0
+    private(set) var fetchAssetsForCallCount = 0
+    private(set) var lastFetchAssetsForCollection: DiscoveryCollection?
+
     // MARK: - Call tracking
 
     private(set) var loginCallCount = 0
@@ -232,5 +256,46 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         downloadOriginalCallCount += 1
         lastDownloadRequest = (space, unitId, cacheKey)
         return try downloadResult.get()
+    }
+
+    // MARK: - Discovery browse
+
+    func fetchPeople(offset: UInt32, limit: UInt32) async throws -> [Person] {
+        fetchPeopleCallCount += 1
+        return try window(try peopleResult.get(), offset: offset, limit: limit)
+    }
+
+    func fetchPlaces(offset: UInt32, limit: UInt32) async throws -> [Place] {
+        fetchPlacesCallCount += 1
+        return try window(try placesResult.get(), offset: offset, limit: limit)
+    }
+
+    func fetchSubjects(offset: UInt32, limit: UInt32) async throws -> [Subject] {
+        fetchSubjectsCallCount += 1
+        return try window(try subjectsResult.get(), offset: offset, limit: limit)
+    }
+
+    func fetchTags(offset: UInt32, limit: UInt32) async throws -> [Tag] {
+        fetchTagsCallCount += 1
+        return try window(try tagsResult.get(), offset: offset, limit: limit)
+    }
+
+    func fetchAssetsFor(collection: DiscoveryCollection, offset: UInt32, limit: UInt32) async throws -> [Asset] {
+        fetchAssetsForCallCount += 1
+        lastFetchAssetsForCollection = collection
+        if let fetchAssetsForResult {
+            return try window(try fetchAssetsForResult.get(), offset: offset, limit: limit)
+        }
+        return try window(assetsForCollection[collection] ?? [], offset: offset, limit: limit)
+    }
+
+    /// Shared windowing helper matching `fetchAssets`' own offset/limit
+    /// slicing, reused across every discovery-browse list method above so
+    /// each one honors the same paging contract the real core does.
+    private func window<T>(_ all: [T], offset: UInt32, limit: UInt32) throws -> [T] {
+        let start = Int(offset)
+        guard start < all.count else { return [] }
+        let end = min(start + Int(limit), all.count)
+        return Array(all[start..<end])
     }
 }

@@ -8,20 +8,32 @@ import PhotosCore
 /// `.albums` is a placeholder section: albums are Phase 2 work, so this
 /// case exists only so the sidebar can show an empty/coming-soon state
 /// under a real "Albums" header rather than pretending albums exist.
+///
+/// `.people`/`.places`/`.subjects`/`.tags` are discovery-browse sections:
+/// selecting one shows a tile grid of that collection type (cover +
+/// name/count), and selecting a tile drills into the existing photo grid.
+/// `.favorites` skips the tile step entirely and goes straight to a photo
+/// grid, since there is only ever one favorites collection.
 enum SidebarItem: Hashable {
     case library
     case space(Space)
     case albums
+    case people
+    case places
+    case subjects
+    case tags
+    case favorites
 }
 
 /// Static sidebar layout: one Library row, one row per space, one Albums
-/// placeholder. Kept as a plain array rather than something data-driven
-/// since the set of rows is fixed for this phase (no user-created albums
-/// yet); once Phase 2 adds real albums this becomes the seam that grows a
-/// dynamic list under `.albums`.
+/// placeholder, and the discovery-browse sections. Kept as a plain array
+/// rather than something data-driven since the set of rows is fixed for
+/// this phase (no user-created albums yet); once Phase 2 adds real albums
+/// this becomes the seam that grows a dynamic list under `.albums`.
 enum SidebarSections {
     static let libraryAndSpaces: [SidebarItem] = [.library, .space(.personal), .space(.shared)]
     static let albums: [SidebarItem] = [.albums]
+    static let discovery: [SidebarItem] = [.people, .places, .subjects, .tags, .favorites]
 }
 
 extension SidebarItem {
@@ -32,6 +44,11 @@ extension SidebarItem {
         case .space(.personal): return "Personal"
         case .space(.shared): return "Shared"
         case .albums: return "Albums"
+        case .people: return "People"
+        case .places: return "Places"
+        case .subjects: return "Subjects"
+        case .tags: return "Tags"
+        case .favorites: return "Favorites"
         }
     }
 
@@ -43,6 +60,11 @@ extension SidebarItem {
         case .space(.personal): return "person.crop.circle"
         case .space(.shared): return "person.2.circle"
         case .albums: return "rectangle.stack"
+        case .people: return "person.2.crop.square.stack"
+        case .places: return "map"
+        case .subjects: return "square.grid.2x2"
+        case .tags: return "tag"
+        case .favorites: return "heart"
         }
     }
 }

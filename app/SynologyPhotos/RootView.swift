@@ -41,6 +41,7 @@ final class AppEnvironment {
     let tempCache: TempFileCache
     let crawl: CrawlProgressModel
     let spaceSelection: SpaceSelection
+    let discoveryCoverCache: DiscoveryCoverCache
     let host: String
     let accountCacheDir: URL
 
@@ -54,6 +55,7 @@ final class AppEnvironment {
         self.tempCache = TempFileCache(limit: 24)
         self.crawl = CrawlProgressModel(client: c)
         self.spaceSelection = SpaceSelection(current: .personal)
+        self.discoveryCoverCache = DiscoveryCoverCache(client: c)
         self.host = host
         self.accountCacheDir = accountCacheDir
     }
@@ -130,6 +132,24 @@ struct LibraryView: View {
     @State private var sidebarSelection: SidebarItem? = .library
     @State private var zoom = GridZoomModel()
     @State private var deleteComingSoon = DeleteComingSoonModel()
+    /// The tile-grid model for whichever discovery kind is currently
+    /// selected, or `nil` when the sidebar is not on a discovery-tiles
+    /// section. Rebuilt (not cached across sections) every time the section
+    /// changes: discovery collections have no local index, so there is
+    /// nothing stale to protect by keeping the old model around, and a
+    /// fresh model means a fresh `.load()` reflects the NAS's current state
+    /// every time the user revisits a section.
+    @State private var tilesModel: DiscoveryTilesModel?
+    /// Set when a tile has been drilled into (or Favorites selected
+    /// directly): overrides `sidebarSelection`'s own routing for the
+    /// content area so the photo grid can show one specific person/place/
+    /// tag/favorites collection, which `SidebarItem` alone has no room to
+    /// carry (a sidebar row is a fixed kind, not a specific id). Cleared by
+    /// every `onChange(of: sidebarSelection)` transition except the one that
+    /// set it, so navigating to a different sidebar row (including
+    /// re-entering the same tiles section) always drops back out of a
+    /// drilled-in collection first.
+    @State private var drilledInCollection: DiscoveryCollection?
 
     init(env: AppEnvironment) {
         self.env = env
@@ -152,9 +172,26 @@ struct LibraryView: View {
         }
         .onChange(of: sidebarSelection) { _, newValue in
             guard let newValue else { return }
-            let route = newValue.route(currentSpace: env.spaceSelection.current)
-            guard case .grid(let space) = route else { return }
-            Task { await switchSpace(to: space) }
+            drilledInCollection = nil
+            switch newValue.route(currentSpace: env.spaceSelection.current) {
+            case .grid(let space):
+                tilesModel = nil
+                Task { await switchSpace(to: space) }
+            case .albums:
+                tilesModel = nil
+            case .discoveryTiles(let kind):
+                controller.clearSelection()
+                let model = DiscoveryTilesModel(client: env.client, kind: kind)
+                tilesModel = model
+                Task { await model.load() }
+            case .discoveryGrid(let collection):
+                tilesModel = nil
+                Task { await switchCollection(to: collection) }
+            }
+        }
+        .onChange(of: drilledInCollection) { _, newValue in
+            guard let newValue else { return }
+            Task { await switchCollection(to: newValue) }
         }
         .sheet(isPresented: Binding(
             get: { detailIndex != nil },
@@ -200,14 +237,19 @@ struct LibraryView: View {
     private var content: some View {
         VStack(spacing: 8) {
             HStack {
-                Text(currentSpaceRoute.title)
+                Text(headerTitle)
                     .font(.title3)
                     .fontWeight(.semibold)
                 Spacer()
-                if !env.crawl.isComplete {
+                // The crawl status line only ever applies to the space-backed
+                // Library grid: discovery collections have no crawl barrier
+                // at all (they are fetched live), so showing "Importing..."
+                // over a tile grid or a discovery photo grid would be a
+                // meaningless, permanently-stuck status.
+                if case .grid = currentRoute, !env.crawl.isComplete {
                     Text(env.crawl.statusText).accessibilityIdentifier("crawl.status")
                 }
-                if case .grid = sidebarSelection?.route(currentSpace: env.spaceSelection.current) ?? .grid(env.spaceSelection.current) {
+                if isShowingPhotoGrid {
                     if controller.selection.count > 0 {
                         Text("\(controller.selection.count) selected")
                             .foregroundStyle(.secondary)
@@ -233,7 +275,7 @@ struct LibraryView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            switch sidebarSelection?.route(currentSpace: env.spaceSelection.current) ?? .grid(env.spaceSelection.current) {
+            switch currentRoute {
             case .albums:
                 AlbumsComingSoonView()
             case .grid:
@@ -256,14 +298,76 @@ struct LibraryView: View {
                         await controller.applySnapshot()
                     }
                 }
+            case .discoveryTiles:
+                if let tilesModel {
+                    DiscoveryTileGridView(model: tilesModel, cache: env.discoveryCoverCache) { collection in
+                        drilledInCollection = collection
+                    }
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            case .discoveryGrid:
+                switch LibraryContentRoute.route(
+                    isComplete: env.dataSource.isReady,
+                    itemCount: env.dataSource.totalCount
+                ) {
+                case .importing:
+                    ProgressView("Loading...").accessibilityIdentifier("discoverygrid.progressview")
+                case .empty:
+                    DiscoveryGridEmptyView(title: headerTitle)
+                case .grid:
+                    PhotoGridView(controller: controller)
+                case .failed(let message):
+                    CrawlFailedView(message: message) {
+                        if case .discoveryGrid(let collection) = currentRoute {
+                            await switchCollection(to: collection)
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /// Title shown above the grid, matching Photos' own content-area
+    /// heading (e.g. "Library", "Personal", "Shared", "Favorites"). A
+    /// drilled-in tile (People/Places/Tags) shows the tile's own name
+    /// instead of the section's generic title, e.g. "Sahil" rather than
+    /// "People", matching how Photos itself titles a person's page.
+    private var headerTitle: String {
+        if let drilledInCollection, drilledInCollection != .favorites,
+           let tile = tilesModel?.tiles.first(where: { $0.collection == drilledInCollection }) {
+            return tile.displayName.isEmpty ? currentSpaceRoute.title : tile.displayName
+        }
+        return currentSpaceRoute.title
     }
 
     /// Title shown above the grid, matching Photos' own content-area
     /// heading (e.g. "Library", "Personal", "Shared").
     private var currentSpaceRoute: SidebarItem {
         sidebarSelection ?? .library
+    }
+
+    /// The route the content area actually renders: a drilled-in tile
+    /// (or Favorites) takes precedence over the sidebar's own tiles route,
+    /// since `SidebarItem` has no room to carry a specific person/place/tag
+    /// id. `drilledInCollection` is cleared on every sidebar change (see the
+    /// `onChange(of: sidebarSelection)` handler above), so it only ever
+    /// overrides the route for the section it was set from.
+    private var currentRoute: SidebarSelectionRoute {
+        if let drilledInCollection { return .discoveryGrid(drilledInCollection) }
+        return sidebarSelection?.route(currentSpace: env.spaceSelection.current) ?? .grid(env.spaceSelection.current)
+    }
+
+    /// Whether the photo grid (Library/Shared space, or a discovery
+    /// collection drilled into) is the thing currently on screen, as
+    /// opposed to a tile grid or the Albums placeholder. Drives the
+    /// selection-count/zoom-slider header controls, which only make sense
+    /// against an actual photo grid.
+    private var isShowingPhotoGrid: Bool {
+        switch currentRoute {
+        case .grid, .discoveryGrid: return true
+        case .albums, .discoveryTiles: return false
+        }
     }
 
     /// Switches the active space (a no-op if `space` already matches
@@ -285,6 +389,21 @@ struct LibraryView: View {
         await controller.applySnapshot()
     }
 
+    /// Switches the grid to windowing one discovery-browse `collection`
+    /// (a person, place, tag, or favorites), the discovery-browse
+    /// equivalent of `switchSpace(to:)`. Clears selection first for the same
+    /// reason `switchSpace` does: indices from whatever was previously
+    /// loaded (a space, or a different collection) are meaningless against
+    /// the new one. There is no crawl to start (discovery collections are
+    /// fetched live, not indexed), so this only resets the data source and
+    /// loads its first page.
+    private func switchCollection(to collection: DiscoveryCollection) async {
+        controller.clearSelection()
+        await env.dataSource.setCollection(collection)
+        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+        await controller.applySnapshot()
+    }
+
     /// The signed-in account username, read from the current auth phase.
     private func currentUsername() -> String {
         if case .valid(let session) = env.auth.phase { return session.username }
@@ -299,6 +418,32 @@ struct LibraryView: View {
 /// `ProgressView` forever, which is what let a real error 119 hide in plain
 /// sight for a long time. `onRetry` re-runs the same crawl the view already
 /// runs on appear, so retrying is just asking the crawl to try again.
+/// Shown when a discovery collection's photo grid (a person/place/tag
+/// drilled into, or Favorites) genuinely has zero photos. Mirrors
+/// `EmptyLibraryView`'s visual language; unlike that view there is no
+/// "try the other space" hint, since there is no second discovery
+/// collection to suggest.
+struct DiscoveryGridEmptyView: View {
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "photo.on.rectangle.angled")
+                .font(.system(size: 64))
+                .foregroundStyle(.tertiary)
+            Text("No Photos")
+                .font(.title2)
+                .fontWeight(.medium)
+            Text("\(title) has no photos.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("discoverygrid.empty")
+    }
+}
+
 struct CrawlFailedView: View {
     let message: String
     let onRetry: () async -> Void

@@ -9,31 +9,66 @@ struct AssetItemID: Hashable {
     let serverId: Int64
 }
 
+/// What a `WindowedDataSource` is currently windowing: either the local
+/// library index for a `Space` (the original, crawl-backed behavior), or a
+/// discovery-browse `DiscoveryCollection` fetched live from the NAS on
+/// every page (no local index for these in this pass).
+///
+/// Kept as an internal enum rather than two separate data source types so
+/// the grid controller, which only ever calls the small shared surface
+/// (`item(at:)`, `totalCount`, `isReady`, `loadWindow`, `pageSize`), does
+/// not need to know or care which kind of source is backing it. Selecting a
+/// discovery tile therefore reuses the exact same `PhotoGridController` the
+/// Library grid uses, per the brief.
+private enum FetchSource: Equatable {
+    case space(Space)
+    case collection(DiscoveryCollection)
+}
+
 /// Bridges the NSCollectionView grid to the core's windowed reads.
 ///
 /// A 20k-100k library must never be pulled into memory or onto the main
 /// thread as one shot: the grid only ever asks for the rows it can actually
 /// show, and this type is the single place that turns "the grid wants row N"
-/// into a bounded `fetchAssets(space:offset:limit:)` call against the local
-/// index. It keeps a sparse cache of the pages it has already loaded, keyed
-/// by absolute index, so scrolling back over rows already seen is a
-/// dictionary lookup, not a re-fetch.
+/// into a bounded fetch call against either the local index
+/// (`fetchAssets(space:offset:limit:)`) or, for a discovery collection, a
+/// live NAS call (`fetchAssetsFor(collection:offset:limit:)`). It keeps a
+/// sparse cache of the pages it has already loaded, keyed by absolute
+/// index, so scrolling back over rows already seen is a dictionary lookup,
+/// not a re-fetch.
 ///
-/// `isReady` gates on crawl completion: while a space's crawl is still in
-/// progress, `totalCount` reflects however many rows have been indexed so
-/// far, and the grid is expected to treat that as a partial, still-growing
-/// library rather than the final one.
+/// `isReady` gates on crawl completion for a `Space` source: while a
+/// space's crawl is still in progress, `totalCount` reflects however many
+/// rows have been indexed so far, and the grid is expected to treat that as
+/// a partial, still-growing library rather than the final one. A discovery
+/// collection has no crawl barrier at all (it is fetched live, not
+/// indexed), so `isReady` is true as soon as the first page comes back, and
+/// `totalCount` grows the same way the Rust `ApiPageSource` estimates it:
+/// a full page means there may be more, a short page means that was the
+/// last one.
 @MainActor
 @Observable
 final class WindowedDataSource {
     private let client: PhotosCoreClient
-    private(set) var space: Space
+    private var source: FetchSource
     let pageSize: Int
     private(set) var totalCount: Int = 0
     private(set) var isReady: Bool = false
 
+    /// The space rows in the current window belong to, for `AssetItemID`
+    /// purposes. For a `.space` source this is that space; for a
+    /// `.collection` source it is always `.personal`, since every
+    /// discovery-browse collection is personal-space-only (see
+    /// `synology_api::browse::CollectionFilter`'s own scope).
+    var space: Space {
+        switch source {
+        case .space(let s): return s
+        case .collection: return .personal
+        }
+    }
+
     /// Rows already fetched, keyed by their absolute index in the current
-    /// space's ordering. Cleared whenever the space changes.
+    /// source's ordering. Cleared whenever the source changes.
     private var resident: [Int: Asset] = [:]
     /// Page indices (0-based, `pageSize` wide) already requested from the
     /// core, so a page already in flight or already loaded is never
@@ -43,21 +78,30 @@ final class WindowedDataSource {
 
     init(client: PhotosCoreClient, space: Space, pageSize: Int = 200) {
         self.client = client
-        self.space = space
+        self.source = .space(space)
         self.pageSize = pageSize
     }
 
-    /// Refreshes `totalCount` and `isReady` from the core. Cheap local reads
-    /// only; never touches the network.
+    /// Refreshes `totalCount` and `isReady` from the core. For a `.space`
+    /// source this is a cheap local read only, never touching the network.
+    /// For a `.collection` source there is no local count to read (no
+    /// index), so this is a no-op: `totalCount`/`isReady` for a collection
+    /// are instead driven entirely by `loadWindow`'s own page-size
+    /// heuristic, updated as pages arrive.
     func refreshCount() async {
-        do {
-            let count = try await client.assetCount(space: space)
-            totalCount = Int(count)
-            let progress = try await client.crawlProgress(space: space)
-            isReady = progress.complete
-        } catch {
-            totalCount = 0
-            isReady = false
+        switch source {
+        case .space(let space):
+            do {
+                let count = try await client.assetCount(space: space)
+                totalCount = Int(count)
+                let progress = try await client.crawlProgress(space: space)
+                isReady = progress.complete
+            } catch {
+                totalCount = 0
+                isReady = false
+            }
+        case .collection:
+            break
         }
     }
 
@@ -69,7 +113,20 @@ final class WindowedDataSource {
     func loadWindow(offset: Int, limit: Int) async -> [Asset] {
         guard offset >= 0, limit > 0 else { return [] }
         do {
-            let rows = try await client.fetchAssets(space: space, offset: UInt32(offset), limit: UInt32(limit))
+            let rows: [Asset]
+            switch source {
+            case .space(let space):
+                rows = try await client.fetchAssets(space: space, offset: UInt32(offset), limit: UInt32(limit))
+            case .collection(let collection):
+                rows = try await client.fetchAssetsFor(collection: collection, offset: UInt32(offset), limit: UInt32(limit))
+                // No local index/crawl barrier for a discovery collection:
+                // estimate totalCount/isReady the same way the Rust
+                // ApiPageSource does for the initial crawl. A full page
+                // means there may be more rows beyond it; a short page
+                // (fewer rows than asked for) means this was the last one.
+                isReady = rows.count < limit
+                totalCount = max(totalCount, offset + rows.count)
+            }
             for (i, asset) in rows.enumerated() { resident[offset + i] = asset }
             markPagesLoaded(coveringOffset: offset, limit: rows.count)
             return rows
@@ -92,15 +149,34 @@ final class WindowedDataSource {
     }
 
     /// Switches the active space, drops every cached row and page marker
-    /// from the previous space, and re-queries count/readiness for the new
-    /// one. Grid indices are meaningless across a space switch, so nothing
-    /// from the old space is retained.
+    /// from the previous source, and re-queries count/readiness for the new
+    /// one. Grid indices are meaningless across a source switch, so nothing
+    /// from the old source is retained.
     func setSpace(_ newSpace: Space) async {
-        space = newSpace
+        source = .space(newSpace)
+        resetResident()
+        await refreshCount()
+    }
+
+    /// Switches to windowing one discovery-browse `collection` instead of a
+    /// space's library. Same reset discipline as `setSpace`: every cached
+    /// row/page marker from whatever was previously loaded is dropped, since
+    /// indices are meaningless across the switch. `totalCount`/`isReady`
+    /// start at zero/false and are populated by the first `loadWindow` call
+    /// (there is no cheap local count to seed them with up front, unlike
+    /// `setSpace`), so callers are expected to call `loadWindow` right after
+    /// this, the same way `LibraryView` already does after `setSpace`.
+    func setCollection(_ collection: DiscoveryCollection) async {
+        source = .collection(collection)
+        resetResident()
+        totalCount = 0
+        isReady = false
+    }
+
+    private func resetResident() {
         resident.removeAll()
         loadedPages.removeAll()
         pagesInFlight.removeAll()
-        await refreshCount()
     }
 
     // MARK: - Page-aligned on-demand loading
@@ -113,13 +189,13 @@ final class WindowedDataSource {
         pagesInFlight.insert(page)
         let offset = page * pageSize
         let limit = pageSize
-        let requestSpace = space
+        let requestSource = source
         Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.pagesInFlight.remove(page) }
-            // The space may have changed while this fetch was in flight;
-            // discard results that no longer belong to the active space.
-            guard self.space == requestSpace else { return }
+            // The source may have changed while this fetch was in flight;
+            // discard results that no longer belong to the active source.
+            guard self.source == requestSource else { return }
             _ = await self.loadWindow(offset: offset, limit: limit)
         }
     }
