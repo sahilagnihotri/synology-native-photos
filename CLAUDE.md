@@ -38,3 +38,14 @@ A native macOS app (Apple Photos-like: browse, view, edit, delete, albums, searc
 - QuickConnect / DDNS remote-access support.
 - Windows UI (core is designed to allow it).
 - Any iCloud / Mac Photos library integration.
+
+## Debugging against the real NAS (OTP handling)
+
+The user's DSM account has 2FA on, so every raw login needs a fresh OTP that expires in ~30 seconds. Asking for a new OTP on every probe is slow and annoying. Do this instead:
+
+- **Capture the device token once, then reuse it.** DSM supports "trust this device": login with `enable_device_token=yes` returns a device token (surfaced as `Session.device_did`). The Rust `login` already handles this. On the FIRST probe of a session, ask the user for ONE fresh OTP, log in, and SAVE the session (`sid`, `syno_token`, `device_token`) to a session-scoped temp file: `$CLAUDE_JOB_DIR/tmp/syno_session.txt`.
+- **Reuse for the rest of the session.** Subsequent probes reuse the saved `sid`; if it expired, re-login with the saved `device_token` (NOT an OTP), which DSM accepts without 2FA. Verified working: device-token re-login succeeds with no OTP.
+- **Connection facts (verified):** host `fafnir.ladon-pirate.ts.net` (Tailscale MagicDNS, resolves to `100.87.107.5`), port `5001`, `allow_untrusted_tls: true` for quick probes (or pin the leaf cert). Photos are in **Personal space** (`SYNO.Foto.*`); Shared/`FotoTeam` returns error 801 (not enabled).
+- **When to probe vs when to fix in code:** prefer reproducing a bug through the app's REAL path (`PhotosCore.login -> probe_capabilities -> crawl_space -> fetch_assets -> thumbnail`) in a throwaway `core/photoscore/examples/*.rs`, so the error seen matches the app. Delete the throwaway after; never commit it.
+- **Secrets hygiene:** the session temp file is session-only (auto-cleaned with the job), never committed, never in the repo. Credentials the user pastes are for that probe only. Remind the user to rotate the DSM password if it appeared in chat. The device token is revocable in DSM.
+- **Known API gotchas confirmed against this NAS:** state-reading calls (browse/thumbnail/download) require the `X-SYNO-TOKEN` header (SynoToken), not just `_sid`, or DSM returns error 119. Thumbnails/downloads key on `unit_id` (from `additional.thumbnail.unit_id`), NOT the item `id`; wrong id returns an HTML error page. `SYNO.Foto.Thumbnail` max version is 2. Browse list needs `additional=["thumbnail","resolution"]` to get `cache_key`/`unit_id`.
