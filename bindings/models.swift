@@ -851,17 +851,128 @@ public func FfiConverterTypeAsset_lower(_ value: Asset) -> RustBuffer {
 }
 
 
+/**
+ * The server's leaf TLS certificate, captured for trust-on-first-use
+ * approval. `der` is the raw certificate bytes (suitable for storing as
+ * `Connection.pinned_cert_der` once the user approves it); `sha256_hex` is
+ * the fingerprint to show the user; `subject` is a human-readable subject
+ * name (e.g. the certificate's CN) for display alongside the fingerprint.
+ */
+public struct CertInfo {
+    public var der: Data
+    public var sha256Hex: String
+    public var subject: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(der: Data, sha256Hex: String, subject: String) {
+        self.der = der
+        self.sha256Hex = sha256Hex
+        self.subject = subject
+    }
+}
+
+#if compiler(>=6)
+extension CertInfo: Sendable {}
+#endif
+
+
+extension CertInfo: Equatable, Hashable {
+    public static func ==(lhs: CertInfo, rhs: CertInfo) -> Bool {
+        if lhs.der != rhs.der {
+            return false
+        }
+        if lhs.sha256Hex != rhs.sha256Hex {
+            return false
+        }
+        if lhs.subject != rhs.subject {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(der)
+        hasher.combine(sha256Hex)
+        hasher.combine(subject)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCertInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CertInfo {
+        return
+            try CertInfo(
+                der: FfiConverterData.read(from: &buf), 
+                sha256Hex: FfiConverterString.read(from: &buf), 
+                subject: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CertInfo, into buf: inout [UInt8]) {
+        FfiConverterData.write(value.der, into: &buf)
+        FfiConverterString.write(value.sha256Hex, into: &buf)
+        FfiConverterString.write(value.subject, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCertInfo_lift(_ buf: RustBuffer) throws -> CertInfo {
+    return try FfiConverterTypeCertInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCertInfo_lower(_ value: CertInfo) -> RustBuffer {
+    return FfiConverterTypeCertInfo.lower(value)
+}
+
+
 public struct Connection {
     public var host: String
     public var verifyTls: Bool
     public var pinnedCertDer: Data?
+    /**
+     * Last-resort dev escape hatch: when true AND no pinned cert is set,
+     * `build_client` disables all certificate validation
+     * (`danger_accept_invalid_certs`). THIS IS INSECURE: it accepts any
+     * certificate from any server, including a MITM. It exists only for
+     * local development against a NAS whose cert cannot yet be pinned.
+     * Must default to false and must only ever be flipped on by an
+     * explicit, clearly labeled opt-in toggle in the UI, never silently.
+     * The default path (no pin, this false) and the pinned path (a DER in
+     * `pinned_cert_der`) both keep full certificate validation regardless
+     * of this flag.
+     */
+    public var allowUntrustedTls: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(host: String, verifyTls: Bool, pinnedCertDer: Data?) {
+    public init(host: String, verifyTls: Bool, pinnedCertDer: Data?, 
+        /**
+         * Last-resort dev escape hatch: when true AND no pinned cert is set,
+         * `build_client` disables all certificate validation
+         * (`danger_accept_invalid_certs`). THIS IS INSECURE: it accepts any
+         * certificate from any server, including a MITM. It exists only for
+         * local development against a NAS whose cert cannot yet be pinned.
+         * Must default to false and must only ever be flipped on by an
+         * explicit, clearly labeled opt-in toggle in the UI, never silently.
+         * The default path (no pin, this false) and the pinned path (a DER in
+         * `pinned_cert_der`) both keep full certificate validation regardless
+         * of this flag.
+         */allowUntrustedTls: Bool) {
         self.host = host
         self.verifyTls = verifyTls
         self.pinnedCertDer = pinnedCertDer
+        self.allowUntrustedTls = allowUntrustedTls
     }
 }
 
@@ -881,6 +992,9 @@ extension Connection: Equatable, Hashable {
         if lhs.pinnedCertDer != rhs.pinnedCertDer {
             return false
         }
+        if lhs.allowUntrustedTls != rhs.allowUntrustedTls {
+            return false
+        }
         return true
     }
 
@@ -888,6 +1002,7 @@ extension Connection: Equatable, Hashable {
         hasher.combine(host)
         hasher.combine(verifyTls)
         hasher.combine(pinnedCertDer)
+        hasher.combine(allowUntrustedTls)
     }
 }
 
@@ -902,7 +1017,8 @@ public struct FfiConverterTypeConnection: FfiConverterRustBuffer {
             try Connection(
                 host: FfiConverterString.read(from: &buf), 
                 verifyTls: FfiConverterBool.read(from: &buf), 
-                pinnedCertDer: FfiConverterOptionData.read(from: &buf)
+                pinnedCertDer: FfiConverterOptionData.read(from: &buf), 
+                allowUntrustedTls: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -910,6 +1026,7 @@ public struct FfiConverterTypeConnection: FfiConverterRustBuffer {
         FfiConverterString.write(value.host, into: &buf)
         FfiConverterBool.write(value.verifyTls, into: &buf)
         FfiConverterOptionData.write(value.pinnedCertDer, into: &buf)
+        FfiConverterBool.write(value.allowUntrustedTls, into: &buf)
     }
 }
 

@@ -584,19 +584,43 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func fetchAssets(space: Space, offset: UInt32, limit: UInt32) throws  -> [Asset]
     
     /**
+     * Fetches the TLS certificate presented by `host` for trust-on-first-use
+     * approval, without ever trusting it for a real request (see
+     * `synology_api::fetch_server_cert_der` for exactly what is and is not
+     * relaxed during this one-shot probe).
+     *
+     * This is a standalone, session-free call: it can be made before
+     * `login` (indeed, that is the intended flow) to let the UI show the
+     * user the server's fingerprint + subject and get their approval before
+     * ever sending credentials anywhere. Approving means storing the
+     * returned `CertInfo.der` (Keychain or app config) and passing it as
+     * `Connection.pinned_cert_der` on the `Connection` used for `login`.
+     */
+    func fetchCertificate(host: String) async throws  -> CertInfo
+    
+    /**
      * Log in against `connection` with the given credentials.
      *
-     * `otp_code` is forwarded to `synology_api::login` untouched: `None`
-     * omits the param entirely, so an account with 2FA enabled answers
-     * with `CoreError::OtpRequired` (see `synology_api::auth`), which the
-     * Swift UI is expected to catch, prompt for a code, and retry with
-     * `otp_code = Some(code)`.
+     * `otp_code` and `device_token` are forwarded to `synology_api::login`
+     * untouched:
+     * - `otp_code = None` omits the param entirely, so an account with 2FA
+     * enabled answers with `CoreError::OtpRequired` (see
+     * `synology_api::auth`), which the Swift UI is expected to catch,
+     * prompt for a code, and retry with `otp_code = Some(code)`.
+     * - `device_token` should be the value previously returned on
+     * `Session.device_did` from an earlier login on this host+account
+     * (the caller/UI is responsible for persisting it, e.g. Keychain).
+     * Passing it lets a trusted device skip OTP; DSM rejecting a stale
+     * token falls back to the same `CoreError::OtpRequired` as no token
+     * at all (fail-closed, see `synology_api::auth` doc comment).
      *
      * On success, replaces any previously held `Live` state with a fresh
      * transport/session pair (capability probe deferred to first use, so
-     * login itself stays a single round trip).
+     * login itself stays a single round trip). The returned `Session`
+     * carries any device token DSM minted/confirmed in `device_did`; the
+     * caller is expected to persist it for a future `device_token` login.
      */
-    func login(connection: Connection, username: String, password: String, otpCode: String?) async throws  -> Session
+    func login(connection: Connection, username: String, password: String, otpCode: String?, deviceToken: String?) async throws  -> Session
     
     /**
      * Probe `SYNO.API.Info` over the live session and cache the discovered
@@ -882,25 +906,64 @@ open func fetchAssets(space: Space, offset: UInt32, limit: UInt32)throws  -> [As
 }
     
     /**
+     * Fetches the TLS certificate presented by `host` for trust-on-first-use
+     * approval, without ever trusting it for a real request (see
+     * `synology_api::fetch_server_cert_der` for exactly what is and is not
+     * relaxed during this one-shot probe).
+     *
+     * This is a standalone, session-free call: it can be made before
+     * `login` (indeed, that is the intended flow) to let the UI show the
+     * user the server's fingerprint + subject and get their approval before
+     * ever sending credentials anywhere. Approving means storing the
+     * returned `CertInfo.der` (Keychain or app config) and passing it as
+     * `Connection.pinned_cert_der` on the `Connection` used for `login`.
+     */
+open func fetchCertificate(host: String)async throws  -> CertInfo  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_fetch_certificate(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(host)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeCertInfo_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
      * Log in against `connection` with the given credentials.
      *
-     * `otp_code` is forwarded to `synology_api::login` untouched: `None`
-     * omits the param entirely, so an account with 2FA enabled answers
-     * with `CoreError::OtpRequired` (see `synology_api::auth`), which the
-     * Swift UI is expected to catch, prompt for a code, and retry with
-     * `otp_code = Some(code)`.
+     * `otp_code` and `device_token` are forwarded to `synology_api::login`
+     * untouched:
+     * - `otp_code = None` omits the param entirely, so an account with 2FA
+     * enabled answers with `CoreError::OtpRequired` (see
+     * `synology_api::auth`), which the Swift UI is expected to catch,
+     * prompt for a code, and retry with `otp_code = Some(code)`.
+     * - `device_token` should be the value previously returned on
+     * `Session.device_did` from an earlier login on this host+account
+     * (the caller/UI is responsible for persisting it, e.g. Keychain).
+     * Passing it lets a trusted device skip OTP; DSM rejecting a stale
+     * token falls back to the same `CoreError::OtpRequired` as no token
+     * at all (fail-closed, see `synology_api::auth` doc comment).
      *
      * On success, replaces any previously held `Live` state with a fresh
      * transport/session pair (capability probe deferred to first use, so
-     * login itself stays a single round trip).
+     * login itself stays a single round trip). The returned `Session`
+     * carries any device token DSM minted/confirmed in `device_did`; the
+     * caller is expected to persist it for a future `device_token` login.
      */
-open func login(connection: Connection, username: String, password: String, otpCode: String?)async throws  -> Session  {
+open func login(connection: Connection, username: String, password: String, otpCode: String?, deviceToken: String?)async throws  -> Session  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_photoscore_fn_method_photoscore_login(
                     self.uniffiClonePointer(),
-                    FfiConverterTypeConnection_lower(connection),FfiConverterString.lower(username),FfiConverterString.lower(password),FfiConverterOptionString.lower(otpCode)
+                    FfiConverterTypeConnection_lower(connection),FfiConverterString.lower(username),FfiConverterString.lower(password),FfiConverterOptionString.lower(otpCode),FfiConverterOptionString.lower(deviceToken)
                 )
             },
             pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
@@ -1427,7 +1490,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_fetch_assets() != 29559) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_login() != 50951) {
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_certificate() != 19983) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_login() != 52991) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_probe_capabilities() != 23336) {

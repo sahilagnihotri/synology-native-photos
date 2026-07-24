@@ -311,9 +311,14 @@ RustBuffer uniffi_photoscore_fn_method_photoscore_fetch_albums(void*_Nonnull ptr
 RustBuffer uniffi_photoscore_fn_method_photoscore_fetch_assets(void*_Nonnull ptr, RustBuffer space, uint32_t offset, uint32_t limit, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
+uint64_t uniffi_photoscore_fn_method_photoscore_fetch_certificate(void*_Nonnull ptr, RustBuffer host
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
-uint64_t uniffi_photoscore_fn_method_photoscore_login(void*_Nonnull ptr, RustBuffer connection, RustBuffer username, RustBuffer password, RustBuffer otp_code
+uint64_t uniffi_photoscore_fn_method_photoscore_login(void*_Nonnull ptr, RustBuffer connection, RustBuffer username, RustBuffer password, RustBuffer otp_code, RustBuffer device_token
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
@@ -671,6 +676,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_albums(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_ASSETS
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_ASSETS
 uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_assets(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
+uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_certificate(void
     
 );
 #endif
