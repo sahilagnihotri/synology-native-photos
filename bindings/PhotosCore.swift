@@ -406,6 +406,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
+    typealias FfiType = UInt64
+    typealias SwiftType = UInt64
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt64 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterString: FfiConverter {
     typealias SwiftType = String
     typealias FfiType = RustBuffer
@@ -455,8 +471,51 @@ fileprivate struct FfiConverterString: FfiConverter {
  * as `Arc<Self>`, so `store` is held behind a `Mutex` (like `live`) rather
  * than bare, to satisfy `Send + Sync` and to make the cross-thread access
  * pattern explicit rather than accidental.
+ *
+ * Because `Store` is not `Sync`, `&Store` is not `Send` either, so a
+ * `Crawler`/`DeltaReconciler` borrowing it can never be held across an
+ * `.await` inside a future the tokio `async_runtime` binding requires to be
+ * `Send` (uniffi's exported async methods must return a `Send` future).
+ * `crawl_space`/`reconcile_delta` route around this by taking the `Store`
+ * *out* of the mutex by value and moving it onto a dedicated blocking
+ * thread (`spawn_blocking`), where the whole crawl - including its
+ * internal network awaits - runs synchronously via `Handle::block_on`; the
+ * owned `Store` is moved back into the mutex once the blocking task
+ * returns. The mutex guard itself is only ever held for the instant of the
+ * swap, never across any `.await`.
  */
 public protocol PhotosCoreProtocol: AnyObject, Sendable {
+    
+    /**
+     * Local-only asset count for `space`; used by tests and diagnostics.
+     */
+    func assetCount(space: Space) throws  -> UInt64
+    
+    /**
+     * Reads back the persisted crawl progress for `space` with no network
+     * access at all. A plain sync `fn` (per the brief's signature); it
+     * takes the `store` std `Mutex` only for the duration of the read, so
+     * it can never be the source of contention with a concurrent crawl -
+     * it simply waits its turn like any other `Mutex` user.
+     */
+    func crawlProgress(space: Space) throws  -> CrawlProgress
+    
+    /**
+     * Drives a resumable full crawl of `space` to completion (or until
+     * interrupted by an error), reporting `CrawlProgress` to `observer`
+     * after every page via `ObserverSink`.
+     *
+     * Requires a live session: fails closed with `CoreError::Auth` if
+     * `login`/`restore_session` has not populated `Live`. `page_source_for`
+     * takes the `live` std `Mutex` guard only long enough to clone the
+     * transport/sid/version it needs and drops it before returning, well
+     * before any `.await` here runs.
+     *
+     * The crawl itself runs via `run_with_store` (see its doc comment):
+     * the `store` mutex is only ever locked for the instant needed to move
+     * the `Store` out and back in, never across an `.await`.
+     */
+    func crawlSpace(space: Space, observer: FfiCrawlObserver) async throws  -> CrawlProgress
     
     /**
      * Log in against `connection` with the given credentials.
@@ -487,6 +546,12 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * guard is never held across an await point.
      */
     func probeCapabilities() async throws  -> [ApiCapability]
+    
+    /**
+     * Runs delta reconciliation (new/changed/deleted) for `space` against
+     * the live session. Same auth and lock discipline as `crawl_space`.
+     */
+    func reconcileDelta(space: Space) async throws  -> CrawlProgress
     
     /**
      * Rebuild `Live` state from a previously stored `Session` (e.g. loaded
@@ -522,6 +587,18 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
  * as `Arc<Self>`, so `store` is held behind a `Mutex` (like `live`) rather
  * than bare, to satisfy `Send + Sync` and to make the cross-thread access
  * pattern explicit rather than accidental.
+ *
+ * Because `Store` is not `Sync`, `&Store` is not `Send` either, so a
+ * `Crawler`/`DeltaReconciler` borrowing it can never be held across an
+ * `.await` inside a future the tokio `async_runtime` binding requires to be
+ * `Send` (uniffi's exported async methods must return a `Send` future).
+ * `crawl_space`/`reconcile_delta` route around this by taking the `Store`
+ * *out* of the mutex by value and moving it onto a dedicated blocking
+ * thread (`spawn_blocking`), where the whole crawl - including its
+ * internal network awaits - runs synchronously via `Handle::block_on`; the
+ * owned `Store` is moved back into the mutex once the blocking task
+ * returns. The mutex guard itself is only ever held for the instant of the
+ * swap, never across any `.await`.
  */
 open class PhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     fileprivate let pointer: UnsafeMutableRawPointer!
@@ -588,6 +665,64 @@ public convenience init(dbDir: String, cacheDir: String)throws  {
 
     
     /**
+     * Local-only asset count for `space`; used by tests and diagnostics.
+     */
+open func assetCount(space: Space)throws  -> UInt64  {
+    return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_photoscore_fn_method_photoscore_asset_count(self.uniffiClonePointer(),
+        FfiConverterTypeSpace_lower(space),$0
+    )
+})
+}
+    
+    /**
+     * Reads back the persisted crawl progress for `space` with no network
+     * access at all. A plain sync `fn` (per the brief's signature); it
+     * takes the `store` std `Mutex` only for the duration of the read, so
+     * it can never be the source of contention with a concurrent crawl -
+     * it simply waits its turn like any other `Mutex` user.
+     */
+open func crawlProgress(space: Space)throws  -> CrawlProgress  {
+    return try  FfiConverterTypeCrawlProgress_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_photoscore_fn_method_photoscore_crawl_progress(self.uniffiClonePointer(),
+        FfiConverterTypeSpace_lower(space),$0
+    )
+})
+}
+    
+    /**
+     * Drives a resumable full crawl of `space` to completion (or until
+     * interrupted by an error), reporting `CrawlProgress` to `observer`
+     * after every page via `ObserverSink`.
+     *
+     * Requires a live session: fails closed with `CoreError::Auth` if
+     * `login`/`restore_session` has not populated `Live`. `page_source_for`
+     * takes the `live` std `Mutex` guard only long enough to clone the
+     * transport/sid/version it needs and drops it before returning, well
+     * before any `.await` here runs.
+     *
+     * The crawl itself runs via `run_with_store` (see its doc comment):
+     * the `store` mutex is only ever locked for the instant needed to move
+     * the `Store` out and back in, never across an `.await`.
+     */
+open func crawlSpace(space: Space, observer: FfiCrawlObserver)async throws  -> CrawlProgress  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_crawl_space(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeSpace_lower(space),FfiConverterCallbackInterfaceFfiCrawlObserver_lower(observer)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeCrawlProgress_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
      * Log in against `connection` with the given credentials.
      *
      * `otp_code` is forwarded to `synology_api::login` untouched: `None`
@@ -643,6 +778,27 @@ open func probeCapabilities()async throws  -> [ApiCapability]  {
             completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
             freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeApiCapability.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Runs delta reconciliation (new/changed/deleted) for `space` against
+     * the live session. Same auth and lock discipline as `crawl_space`.
+     */
+open func reconcileDelta(space: Space)async throws  -> CrawlProgress  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_reconcile_delta(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeSpace_lower(space)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeCrawlProgress_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -999,10 +1155,22 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_func_core_version() != 53489) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_photoscore_checksum_method_photoscore_asset_count() != 15676) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_crawl_progress() != 63576) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_crawl_space() != 58321) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_photoscore_checksum_method_photoscore_login() != 50951) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_probe_capabilities() != 23336) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_reconcile_delta() != 18507) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 22452) {

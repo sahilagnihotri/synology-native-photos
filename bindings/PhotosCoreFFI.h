@@ -281,6 +281,21 @@ void uniffi_photoscore_fn_free_photoscore(void*_Nonnull ptr, RustCallStatus *_No
 void*_Nonnull uniffi_photoscore_fn_constructor_photoscore_new(RustBuffer db_dir, RustBuffer cache_dir, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_ASSET_COUNT
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_ASSET_COUNT
+uint64_t uniffi_photoscore_fn_method_photoscore_asset_count(void*_Nonnull ptr, RustBuffer space, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_CRAWL_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_CRAWL_PROGRESS
+RustBuffer uniffi_photoscore_fn_method_photoscore_crawl_progress(void*_Nonnull ptr, RustBuffer space, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_CRAWL_SPACE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_CRAWL_SPACE
+uint64_t uniffi_photoscore_fn_method_photoscore_crawl_space(void*_Nonnull ptr, RustBuffer space, uint64_t observer
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
 uint64_t uniffi_photoscore_fn_method_photoscore_login(void*_Nonnull ptr, RustBuffer connection, RustBuffer username, RustBuffer password, RustBuffer otp_code
@@ -289,6 +304,11 @@ uint64_t uniffi_photoscore_fn_method_photoscore_login(void*_Nonnull ptr, RustBuf
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
 uint64_t uniffi_photoscore_fn_method_photoscore_probe_capabilities(void*_Nonnull ptr
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RECONCILE_DELTA
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RECONCILE_DELTA
+uint64_t uniffi_photoscore_fn_method_photoscore_reconcile_delta(void*_Nonnull ptr, RustBuffer space
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_SESSION
@@ -598,6 +618,24 @@ uint16_t uniffi_photoscore_checksum_func_core_version(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_ASSET_COUNT
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_ASSET_COUNT
+uint16_t uniffi_photoscore_checksum_method_photoscore_asset_count(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_CRAWL_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_CRAWL_PROGRESS
+uint16_t uniffi_photoscore_checksum_method_photoscore_crawl_progress(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_CRAWL_SPACE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_CRAWL_SPACE
+uint16_t uniffi_photoscore_checksum_method_photoscore_crawl_space(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOGIN
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOGIN
 uint16_t uniffi_photoscore_checksum_method_photoscore_login(void
@@ -607,6 +645,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_login(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
 uint16_t uniffi_photoscore_checksum_method_photoscore_probe_capabilities(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RECONCILE_DELTA
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RECONCILE_DELTA
+uint16_t uniffi_photoscore_checksum_method_photoscore_reconcile_delta(void
     
 );
 #endif
