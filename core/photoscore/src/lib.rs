@@ -2,7 +2,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use models::{ApiCapability, Connection, CoreError, CrawlProgress, Session, SessionState, Space};
+use models::{
+    Album, ApiCapability, Asset, Connection, CoreError, CrawlProgress, Session, SessionState, Space,
+};
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
 use sync_engine::delta::DeltaReconciler;
@@ -277,6 +279,25 @@ impl PhotosCore {
         let guard = self.store.lock().expect("store mutex poisoned");
         let store = guard.as_ref().ok_or_else(store_busy_err)?;
         store.asset_count(space)
+    }
+
+    /// Windowed local read of assets in `space`, newest-first, for the grid's
+    /// scrolling. No network access at all: this is a plain sync `fn` that
+    /// only ever locks `store` for the duration of the read, so it can never
+    /// block on (or be blocked by) a concurrent crawl for longer than that
+    /// crawl needs to swap the `Store` back in.
+    pub fn fetch_assets(&self, space: Space, offset: u32, limit: u32) -> Result<Vec<Asset>, CoreError> {
+        let guard = self.store.lock().expect("store mutex poisoned");
+        let store = guard.as_ref().ok_or_else(store_busy_err)?;
+        store.fetch_assets(space, offset, limit)
+    }
+
+    /// Local read of every album in `space`, ordered by name. No network
+    /// access; same lock discipline as `fetch_assets`/`asset_count`.
+    pub fn fetch_albums(&self, space: Space) -> Result<Vec<Album>, CoreError> {
+        let guard = self.store.lock().expect("store mutex poisoned");
+        let store = guard.as_ref().ok_or_else(store_busy_err)?;
+        store.fetch_albums(space)
     }
 }
 
@@ -785,6 +806,133 @@ mod core_tests {
         let progress = core.crawl_progress(Space::Personal).expect("progress read ok");
         assert!(!progress.complete);
         assert_eq!(progress.done, 0);
+    }
+
+    /// Task 36 brief's exact TDD test: on a freshly opened, never-logged-in
+    /// core, the three local read methods all succeed (no auth required) and
+    /// report empty/zero rather than erroring.
+    #[test]
+    fn fetch_assets_and_count_are_local_reads() {
+        let dir = std::env::temp_dir().join(format!("photoscore-fetch-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("db")).unwrap();
+        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        let core = PhotosCore::new(dir.join("db").to_string_lossy().into(), dir.join("cache").to_string_lossy().into()).unwrap();
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
+        assert!(core.fetch_assets(Space::Personal, 0, 10).unwrap().is_empty());
+        assert!(core.fetch_albums(Space::Personal).unwrap().is_empty());
+    }
+
+    /// Proves fetch_assets/fetch_albums actually delegate to the Store's real
+    /// windowed queries rather than being stubs: upserts assets/albums across
+    /// both spaces directly via the Store, then checks the core-level reads
+    /// return the right rows, the right order, the right window, and never
+    /// leak across spaces.
+    #[test]
+    fn fetch_assets_and_albums_return_upserted_rows_windowed_and_space_scoped() {
+        let dir = std::env::temp_dir().join(format!("photoscore-fetch-data-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("db")).unwrap();
+        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        let core = PhotosCore::new(dir.join("db").to_string_lossy().into(), dir.join("cache").to_string_lossy().into()).unwrap();
+
+        {
+            let guard = core.store.lock().unwrap();
+            let store = guard.as_ref().unwrap();
+            for id in 1..=5 {
+                store
+                    .upsert_asset(&Asset {
+                        id,
+                        cache_key: format!("ck{id}"),
+                        filename: format!("IMG_{id}.jpg"),
+                        media_kind: models::MediaKind::Photo,
+                        taken_at: Some(id * 10),
+                        added_at: Some(1000),
+                        width: Some(4000),
+                        height: Some(3000),
+                        file_size: Some(2_000_000),
+                        space: Space::Personal,
+                        server_version: Some(1),
+                    })
+                    .unwrap();
+            }
+            store
+                .upsert_asset(&Asset {
+                    id: 99,
+                    cache_key: "ck99".into(),
+                    filename: "shared.jpg".into(),
+                    media_kind: models::MediaKind::Photo,
+                    taken_at: Some(500),
+                    added_at: Some(1000),
+                    width: None,
+                    height: None,
+                    file_size: None,
+                    space: Space::Shared,
+                    server_version: Some(1),
+                })
+                .unwrap();
+            store
+                .upsert_album(&models::Album {
+                    id: 1,
+                    name: "Trip".into(),
+                    item_count: 3,
+                    cover_cache_key: Some("cover1".into()),
+                    space: Space::Personal,
+                })
+                .unwrap();
+            store
+                .upsert_album(&models::Album {
+                    id: 2,
+                    name: "SharedAlbum".into(),
+                    item_count: 1,
+                    cover_cache_key: None,
+                    space: Space::Shared,
+                })
+                .unwrap();
+        }
+
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 5);
+        assert_eq!(core.asset_count(Space::Shared).unwrap(), 1);
+
+        // Newest-first (by taken_at), windowed by offset/limit.
+        let first_page = core.fetch_assets(Space::Personal, 0, 2).unwrap();
+        assert_eq!(first_page.iter().map(|a| a.id).collect::<Vec<_>>(), vec![5, 4]);
+        let second_page = core.fetch_assets(Space::Personal, 2, 2).unwrap();
+        assert_eq!(second_page.iter().map(|a| a.id).collect::<Vec<_>>(), vec![3, 2]);
+
+        // Space isolation: Personal reads never see the Shared asset.
+        assert!(core.fetch_assets(Space::Personal, 0, 100).unwrap().iter().all(|a| a.id != 99));
+        let shared_assets = core.fetch_assets(Space::Shared, 0, 100).unwrap();
+        assert_eq!(shared_assets.len(), 1);
+        assert_eq!(shared_assets[0].id, 99);
+
+        let personal_albums = core.fetch_albums(Space::Personal).unwrap();
+        assert_eq!(personal_albums.len(), 1);
+        assert_eq!(personal_albums[0].name, "Trip");
+        let shared_albums = core.fetch_albums(Space::Shared).unwrap();
+        assert_eq!(shared_albums.len(), 1);
+        assert_eq!(shared_albums[0].name, "SharedAlbum");
+    }
+
+    /// Fail-closed proof: if the Store has been taken out of the mutex (the
+    /// same window a crawl/reconcile briefly holds via `run_with_store`),
+    /// every local read method must return `CoreError::Storage` rather than
+    /// panicking on an `Option::unwrap`.
+    #[test]
+    fn local_reads_fail_closed_when_store_is_busy() {
+        let core = core_at("fetch-busy");
+        let taken = core.store.lock().unwrap().take();
+        assert!(taken.is_some(), "test setup: store must have been Some before taking it");
+
+        let count_err = core.asset_count(Space::Personal).unwrap_err();
+        assert!(matches!(count_err, CoreError::Storage { .. }), "got {count_err:?}");
+
+        let fetch_err = core.fetch_assets(Space::Personal, 0, 10).unwrap_err();
+        assert!(matches!(fetch_err, CoreError::Storage { .. }), "got {fetch_err:?}");
+
+        let albums_err = core.fetch_albums(Space::Personal).unwrap_err();
+        assert!(matches!(albums_err, CoreError::Storage { .. }), "got {albums_err:?}");
+
+        // Put the store back so nothing else in the process is left bricked.
+        *core.store.lock().unwrap() = taken;
     }
 
     #[tokio::test]

@@ -406,6 +406,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -481,8 +497,11 @@ fileprivate struct FfiConverterString: FfiConverter {
  * thread (`spawn_blocking`), where the whole crawl - including its
  * internal network awaits - runs synchronously via `Handle::block_on`; the
  * owned `Store` is moved back into the mutex once the blocking task
- * returns. The mutex guard itself is only ever held for the instant of the
- * swap, never across any `.await`.
+ * returns, even if the crawl itself panicked partway through (the panic is
+ * caught on the blocking thread and turned into an ordinary error, see
+ * `run_with_store`), so a single bad crawl can never leave the core
+ * permanently unusable. The mutex guard itself is only ever held for the
+ * instant of the swap, never across any `.await`.
  */
 public protocol PhotosCoreProtocol: AnyObject, Sendable {
     
@@ -516,6 +535,21 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * the `Store` out and back in, never across an `.await`.
      */
     func crawlSpace(space: Space, observer: FfiCrawlObserver) async throws  -> CrawlProgress
+    
+    /**
+     * Local read of every album in `space`, ordered by name. No network
+     * access; same lock discipline as `fetch_assets`/`asset_count`.
+     */
+    func fetchAlbums(space: Space) throws  -> [Album]
+    
+    /**
+     * Windowed local read of assets in `space`, newest-first, for the grid's
+     * scrolling. No network access at all: this is a plain sync `fn` that
+     * only ever locks `store` for the duration of the read, so it can never
+     * block on (or be blocked by) a concurrent crawl for longer than that
+     * crawl needs to swap the `Store` back in.
+     */
+    func fetchAssets(space: Space, offset: UInt32, limit: UInt32) throws  -> [Asset]
     
     /**
      * Log in against `connection` with the given credentials.
@@ -597,8 +631,11 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
  * thread (`spawn_blocking`), where the whole crawl - including its
  * internal network awaits - runs synchronously via `Handle::block_on`; the
  * owned `Store` is moved back into the mutex once the blocking task
- * returns. The mutex guard itself is only ever held for the instant of the
- * swap, never across any `.await`.
+ * returns, even if the crawl itself panicked partway through (the panic is
+ * caught on the blocking thread and turned into an ordinary error, see
+ * `run_with_store`), so a single bad crawl can never leave the core
+ * permanently unusable. The mutex guard itself is only ever held for the
+ * instant of the swap, never across any `.await`.
  */
 open class PhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     fileprivate let pointer: UnsafeMutableRawPointer!
@@ -720,6 +757,35 @@ open func crawlSpace(space: Space, observer: FfiCrawlObserver)async throws  -> C
             liftFunc: FfiConverterTypeCrawlProgress_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
+}
+    
+    /**
+     * Local read of every album in `space`, ordered by name. No network
+     * access; same lock discipline as `fetch_assets`/`asset_count`.
+     */
+open func fetchAlbums(space: Space)throws  -> [Album]  {
+    return try  FfiConverterSequenceTypeAlbum.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_photoscore_fn_method_photoscore_fetch_albums(self.uniffiClonePointer(),
+        FfiConverterTypeSpace_lower(space),$0
+    )
+})
+}
+    
+    /**
+     * Windowed local read of assets in `space`, newest-first, for the grid's
+     * scrolling. No network access at all: this is a plain sync `fn` that
+     * only ever locks `store` for the duration of the read, so it can never
+     * block on (or be blocked by) a concurrent crawl for longer than that
+     * crawl needs to swap the `Store` back in.
+     */
+open func fetchAssets(space: Space, offset: UInt32, limit: UInt32)throws  -> [Asset]  {
+    return try  FfiConverterSequenceTypeAsset.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_photoscore_fn_method_photoscore_fetch_assets(self.uniffiClonePointer(),
+        FfiConverterTypeSpace_lower(space),
+        FfiConverterUInt32.lower(offset),
+        FfiConverterUInt32.lower(limit),$0
+    )
+})
 }
     
     /**
@@ -1059,6 +1125,31 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeAlbum: FfiConverterRustBuffer {
+    typealias SwiftType = [Album]
+
+    public static func write(_ value: [Album], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAlbum.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Album] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Album]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAlbum.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeApiCapability: FfiConverterRustBuffer {
     typealias SwiftType = [ApiCapability]
 
@@ -1076,6 +1167,31 @@ fileprivate struct FfiConverterSequenceTypeApiCapability: FfiConverterRustBuffer
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeApiCapability.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeAsset: FfiConverterRustBuffer {
+    typealias SwiftType = [Asset]
+
+    public static func write(_ value: [Asset], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAsset.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Asset] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Asset]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAsset.read(from: &buf))
         }
         return seq
     }
@@ -1162,6 +1278,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_crawl_space() != 58321) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_albums() != 8838) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_assets() != 29559) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_login() != 50951) {
