@@ -45,6 +45,33 @@ struct CrawlProgressModelTests {
         #expect(model.isComplete == false)
     }
 
+    /// The failure message shown to the user comes from `CoreError.userMessage`
+    /// (already scrubbed of anything sensitive), never a raw internal error,
+    /// so the UI can surface it directly.
+    @Test func failedCrawlRecordsUserFacingMessage() async {
+        let fake = FakePhotosCore()
+        fake.crawlSpaceResult = .failure(.Network(message: "offline"))
+        let model = CrawlProgressModel(client: PhotosCoreClient(core: fake))
+        await model.startCrawl(space: .personal)
+        #expect(model.failure == CoreError.Network(message: "offline").userMessage)
+    }
+
+    /// A retry (another `startCrawl`) that succeeds must clear the previous
+    /// failure: the failed state is never sticky once the crawl recovers.
+    @Test func successfulRetryClearsPriorFailure() async {
+        let fake = FakePhotosCore()
+        fake.crawlSpaceResult = .failure(.Network(message: "offline"))
+        let model = CrawlProgressModel(client: PhotosCoreClient(core: fake))
+        await model.startCrawl(space: .personal)
+        #expect(model.failure != nil)
+
+        fake.crawlSpaceResult = nil
+        fake.crawlFinal[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        await model.startCrawl(space: .personal)
+        #expect(model.failure == nil)
+        #expect(model.isComplete == true)
+    }
+
     /// `refresh` picks up the core's current barrier state (e.g. a crawl
     /// that already finished in an earlier session) without needing to
     /// re-run `startCrawl`.

@@ -13,6 +13,12 @@ final class CrawlProgressModel {
     var total: UInt64 = 0
     var isComplete: Bool = false
 
+    /// Set when the most recent `startCrawl`/`refresh` call failed. Orthogonal
+    /// to `isComplete`: a failure never flips the barrier, it only gives the
+    /// UI something to show instead of spinning forever on a dead crawl.
+    /// Cleared at the start of the next attempt.
+    var failure: String?
+
     init(client: PhotosCoreClient) { self.client = client }
 
     /// User-facing status text. Never claims readiness unless `isComplete`
@@ -43,9 +49,11 @@ final class CrawlProgressModel {
 
     /// Runs the initial crawl for `space`, applying every progress tick as
     /// it arrives and the final result once the crawl finishes. A failed
-    /// crawl leaves `isComplete` false: the barrier only ever flips to true
-    /// when the core itself reports completion, never on the client side.
+    /// crawl leaves `isComplete` false and records a user-facing `failure`
+    /// message instead: the barrier only ever flips to true when the core
+    /// itself reports completion, never on the client side.
     func startCrawl(space: Space) async {
+        failure = nil
         let observer = Observer { [weak self] progress in
             Task { @MainActor in self?.apply(progress) }
         }
@@ -54,6 +62,7 @@ final class CrawlProgressModel {
             apply(final)
         } catch {
             isComplete = false
+            failure = Self.message(for: error)
         }
     }
 
@@ -66,8 +75,20 @@ final class CrawlProgressModel {
         do {
             let progress = try await client.crawlProgress(space: space)
             apply(progress)
+            failure = nil
         } catch {
             isComplete = false
+            failure = Self.message(for: error)
         }
+    }
+
+    /// User-facing message for a thrown error. Uses `CoreError.userMessage`
+    /// when the error crossed the FFI boundary as one (already scrubbed of
+    /// anything sensitive, see `CoreError+Swift.swift`); falls back to a
+    /// generic message for anything else so nothing internal ever reaches
+    /// the screen.
+    private static func message(for error: Error) -> String {
+        if let coreError = error as? CoreError { return coreError.userMessage }
+        return "Could not load your library."
     }
 }

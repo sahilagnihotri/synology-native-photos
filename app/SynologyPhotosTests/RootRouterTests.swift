@@ -17,13 +17,15 @@ struct RootRouterTests {
 }
 
 /// Exercises the decision behind what the library area shows once the crawl
-/// barrier is (or is not) complete: the importing spinner while incomplete,
+/// barrier is (or is not) complete: the importing spinner while incomplete
+/// and healthy, the failed state while incomplete with a recorded failure,
 /// the empty placeholder for a completed-but-empty space, and the grid once
 /// there is at least one item. This is what stops a completed empty library
 /// from either looking stuck on "Importing..." or rendering as a blank void
-/// indistinguishable from one.
+/// indistinguishable from one, and what stops a genuinely failed crawl from
+/// looking identical to one still in progress.
 struct LibraryContentRouteTests {
-    @Test func incompleteAlwaysShowsImportingRegardlessOfCount() {
+    @Test func incompleteWithNoFailureShowsImportingRegardlessOfCount() {
         #expect(LibraryContentRoute.route(isComplete: false, itemCount: 0) == .importing)
         #expect(LibraryContentRoute.route(isComplete: false, itemCount: 500) == .importing)
     }
@@ -35,6 +37,18 @@ struct LibraryContentRouteTests {
     @Test func completeWithItemsShowsGrid() {
         #expect(LibraryContentRoute.route(isComplete: true, itemCount: 1) == .grid)
         #expect(LibraryContentRoute.route(isComplete: true, itemCount: 40_000) == .grid)
+    }
+
+    @Test func incompleteWithFailureShowsFailedRegardlessOfCount() {
+        #expect(LibraryContentRoute.route(isComplete: false, itemCount: 0, failure: "Network problem.") == .failed(message: "Network problem."))
+        #expect(LibraryContentRoute.route(isComplete: false, itemCount: 500, failure: "Network problem.") == .failed(message: "Network problem."))
+    }
+
+    /// A failure recorded from an earlier attempt must not resurface once the
+    /// barrier has actually flipped: completion is authoritative and wins.
+    @Test func completeIgnoresStaleFailure() {
+        #expect(LibraryContentRoute.route(isComplete: true, itemCount: 0, failure: "stale") == .empty)
+        #expect(LibraryContentRoute.route(isComplete: true, itemCount: 5, failure: "stale") == .grid)
     }
 }
 

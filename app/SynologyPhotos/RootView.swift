@@ -74,14 +74,16 @@ struct RootView: View {
     }
 }
 
-/// The three things the completed-or-not library area can show at any one
-/// time. Purely a function of the crawl barrier plus the current item
-/// count, kept as a standalone type (mirroring `RootRouter` above) so the
-/// decision is testable without a live `AppEnvironment` or any AppKit view.
+/// The four things the completed-or-not library area can show at any one
+/// time. Purely a function of the crawl barrier plus the current item count
+/// plus any recorded crawl failure, kept as a standalone type (mirroring
+/// `RootRouter` above) so the decision is testable without a live
+/// `AppEnvironment` or any AppKit view.
 enum LibraryContentRoute: Equatable {
     case importing
     case empty
     case grid
+    case failed(message: String)
 }
 
 extension LibraryContentRoute {
@@ -91,8 +93,17 @@ extension LibraryContentRoute {
     /// count also grows. Once complete, an empty library and a nonempty one
     /// are distinguished purely by `itemCount`, so the importing spinner
     /// never lingers after the barrier flips.
-    static func route(isComplete: Bool, itemCount: Int) -> LibraryContentRoute {
-        guard isComplete else { return .importing }
+    ///
+    /// `failure` takes precedence over the importing spinner while
+    /// incomplete: a crawl that has thrown is no longer "in progress" even
+    /// though the barrier never got to flip, so it must not look identical
+    /// to a healthy crawl still in flight. It has no bearing once `isComplete`
+    /// is true, since a completed crawl already has an authoritative answer.
+    static func route(isComplete: Bool, itemCount: Int, failure: String? = nil) -> LibraryContentRoute {
+        guard isComplete else {
+            if let failure { return .failed(message: failure) }
+            return .importing
+        }
         return itemCount > 0 ? .grid : .empty
     }
 }
@@ -155,7 +166,8 @@ struct LibraryView: View {
             .padding(.horizontal, 12)
             switch LibraryContentRoute.route(
                 isComplete: env.crawl.isComplete,
-                itemCount: env.dataSource.totalCount
+                itemCount: env.dataSource.totalCount,
+                failure: env.crawl.failure
             ) {
             case .importing:
                 ProgressView(env.crawl.statusText).accessibilityIdentifier("crawl.progressview")
@@ -163,6 +175,13 @@ struct LibraryView: View {
                 EmptyLibraryView(space: env.spaceSelection.current)
             case .grid:
                 PhotoGridView(controller: controller)
+            case .failed(let message):
+                CrawlFailedView(message: message) {
+                    await env.crawl.startCrawl(space: env.spaceSelection.current)
+                    await env.dataSource.refreshCount()
+                    await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+                    await controller.applySnapshot()
+                }
             }
         }
         .task {
@@ -186,6 +205,37 @@ struct LibraryView: View {
     private func currentUsername() -> String {
         if case .valid(let session) = env.auth.phase { return session.username }
         return ""
+    }
+}
+
+/// Shown in place of the importing spinner once the crawl has actually
+/// thrown, rather than merely being in progress. Without this, a failed
+/// crawl (auth expiry, a dropped connection, an API change) looked
+/// identical to a healthy one still running: both rendered the same
+/// `ProgressView` forever, which is what let a real error 119 hide in plain
+/// sight for a long time. `onRetry` re-runs the same crawl the view already
+/// runs on appear, so retrying is just asking the crawl to try again.
+struct CrawlFailedView: View {
+    let message: String
+    let onRetry: () async -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 64))
+                .foregroundStyle(.tertiary)
+            Text("Could Not Load Library")
+                .font(.title2)
+                .fontWeight(.medium)
+            Text(message)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Try Again") { Task { await onRetry() } }
+                .accessibilityIdentifier("crawl.tryagain")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("library.failed")
     }
 }
 
