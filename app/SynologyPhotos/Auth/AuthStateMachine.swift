@@ -73,10 +73,8 @@ final class AuthStateMachine {
             switch error {
             case .OtpRequired:
                 phase = .needsOtp(username: username)
-            case .Auth(let message):
-                phase = .invalid(message: message)
             default:
-                phase = .invalid(message: error.localizedDescription)
+                phase = .invalid(message: error.userMessage)
             }
         } catch {
             phase = .invalid(message: error.localizedDescription)
@@ -111,14 +109,13 @@ final class AuthStateMachine {
                 phase = .invalid(message: "Stored session is no longer valid.")
             }
         } catch let error as CoreError {
-            switch error {
-            case .Network, .UnexpectedResponse:
+            if error.isRetryable {
                 // Transient/server trouble: don't discard the stored session
                 // outright, let the user retry rather than forcing a full
                 // re-login for what may just be a dropped connection.
                 phase = .expired
-            default:
-                phase = .invalid(message: error.localizedDescription)
+            } else {
+                phase = .invalid(message: error.userMessage)
             }
         } catch {
             phase = .expired

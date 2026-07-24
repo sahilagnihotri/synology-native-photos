@@ -33,7 +33,7 @@ struct AuthStateMachineTests {
             Issue.record("expected invalid, got \(sm.phase)")
             return
         }
-        #expect(message == "no such account")
+        #expect(message == "Sign in failed. no such account")
     }
 
     @Test func otpRetryWithCodeSucceeds() async {
