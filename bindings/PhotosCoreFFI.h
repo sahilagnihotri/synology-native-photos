@@ -281,6 +281,21 @@ void uniffi_photoscore_fn_free_photoscore(void*_Nonnull ptr, RustCallStatus *_No
 void*_Nonnull uniffi_photoscore_fn_constructor_photoscore_new(RustBuffer db_dir, RustBuffer cache_dir, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
+uint64_t uniffi_photoscore_fn_method_photoscore_login(void*_Nonnull ptr, RustBuffer connection, RustBuffer username, RustBuffer password, RustBuffer otp_code
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_SESSION
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_SESSION
+uint64_t uniffi_photoscore_fn_method_photoscore_restore_session(void*_Nonnull ptr, RustBuffer connection, RustBuffer session
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_SIGN_OUT
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_SIGN_OUT
+uint64_t uniffi_photoscore_fn_method_photoscore_sign_out(void*_Nonnull ptr
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_INIT_CALLBACK_VTABLE_FFICRAWLOBSERVER
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_INIT_CALLBACK_VTABLE_FFICRAWLOBSERVER
 void uniffi_photoscore_fn_init_callback_vtable_fficrawlobserver(const UniffiVTableCallbackInterfaceFfiCrawlObserver* _Nonnull vtable
@@ -575,6 +590,24 @@ void ffi_photoscore_rust_future_complete_void(uint64_t handle, RustCallStatus *_
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_FUNC_CORE_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_FUNC_CORE_VERSION
 uint16_t uniffi_photoscore_checksum_func_core_version(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOGIN
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOGIN
+uint16_t uniffi_photoscore_checksum_method_photoscore_login(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_SESSION
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_SESSION
+uint16_t uniffi_photoscore_checksum_method_photoscore_restore_session(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_SIGN_OUT
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_SIGN_OUT
+uint16_t uniffi_photoscore_checksum_method_photoscore_sign_out(void
     
 );
 #endif

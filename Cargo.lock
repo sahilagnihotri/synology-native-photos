@@ -926,6 +926,7 @@ dependencies = [
 name = "photoscore"
 version = "0.1.0"
 dependencies = [
+ "mockito",
  "models",
  "persistence",
  "sync-engine",

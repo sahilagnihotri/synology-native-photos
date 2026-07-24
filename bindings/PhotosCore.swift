@@ -458,6 +458,46 @@ fileprivate struct FfiConverterString: FfiConverter {
  */
 public protocol PhotosCoreProtocol: AnyObject, Sendable {
     
+    /**
+     * Log in against `connection` with the given credentials.
+     *
+     * `otp_code` is forwarded to `synology_api::login` untouched: `None`
+     * omits the param entirely, so an account with 2FA enabled answers
+     * with `CoreError::OtpRequired` (see `synology_api::auth`), which the
+     * Swift UI is expected to catch, prompt for a code, and retry with
+     * `otp_code = Some(code)`.
+     *
+     * On success, replaces any previously held `Live` state with a fresh
+     * transport/session pair (capability probe deferred to first use, so
+     * login itself stays a single round trip).
+     */
+    func login(connection: Connection, username: String, password: String, otpCode: String?) async throws  -> Session
+    
+    /**
+     * Rebuild `Live` state from a previously stored `Session` (e.g. loaded
+     * from the Keychain) without re-running the login handshake.
+     *
+     * Validates the session with a cheap authed capability probe
+     * (`SYNO.API.Info`): a probe failure that maps to `CoreError::Auth` or
+     * `CoreError::OtpRequired` means the stored session is no longer
+     * accepted by DSM, so this reports `SessionState::Expired` rather than
+     * an error the caller has to handle as failure - the UI can react by
+     * sending the user back through `login`. Any other probe error (e.g.
+     * network failure) is fail-closed and propagated as-is.
+     */
+    func restoreSession(connection: Connection, session: Session) async throws  -> SessionState
+    
+    /**
+     * Sign out: best-effort server-side logout, then unconditionally drop
+     * `Live` and clear the per-account thumbnail cache dir contents.
+     *
+     * Idempotent by construction: if no session is held, `taken` is `None`,
+     * the server logout call is skipped, and clearing an already-empty (or
+     * absent) cache dir is a no-op, so calling `sign_out` with nothing to
+     * sign out of always succeeds.
+     */
+    func signOut() async throws 
+    
 }
 /**
  * The single UniFFI-exported facade. Swift holds one instance per app run.
@@ -531,6 +571,91 @@ public convenience init(dbDir: String, cacheDir: String)throws  {
 
     
 
+    
+    /**
+     * Log in against `connection` with the given credentials.
+     *
+     * `otp_code` is forwarded to `synology_api::login` untouched: `None`
+     * omits the param entirely, so an account with 2FA enabled answers
+     * with `CoreError::OtpRequired` (see `synology_api::auth`), which the
+     * Swift UI is expected to catch, prompt for a code, and retry with
+     * `otp_code = Some(code)`.
+     *
+     * On success, replaces any previously held `Live` state with a fresh
+     * transport/session pair (capability probe deferred to first use, so
+     * login itself stays a single round trip).
+     */
+open func login(connection: Connection, username: String, password: String, otpCode: String?)async throws  -> Session  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_login(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeConnection_lower(connection),FfiConverterString.lower(username),FfiConverterString.lower(password),FfiConverterOptionString.lower(otpCode)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeSession_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Rebuild `Live` state from a previously stored `Session` (e.g. loaded
+     * from the Keychain) without re-running the login handshake.
+     *
+     * Validates the session with a cheap authed capability probe
+     * (`SYNO.API.Info`): a probe failure that maps to `CoreError::Auth` or
+     * `CoreError::OtpRequired` means the stored session is no longer
+     * accepted by DSM, so this reports `SessionState::Expired` rather than
+     * an error the caller has to handle as failure - the UI can react by
+     * sending the user back through `login`. Any other probe error (e.g.
+     * network failure) is fail-closed and propagated as-is.
+     */
+open func restoreSession(connection: Connection, session: Session)async throws  -> SessionState  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_restore_session(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeConnection_lower(connection),FfiConverterTypeSession_lower(session)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeSessionState_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Sign out: best-effort server-side logout, then unconditionally drop
+     * `Live` and clear the per-account thumbnail cache dir contents.
+     *
+     * Idempotent by construction: if no session is held, `taken` is `None`,
+     * the server logout call is skipped, and clearing an already-empty (or
+     * absent) cache dir is a no-op, so calling `sign_out` with nothing to
+     * sign out of always succeeds.
+     */
+open func signOut()async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_sign_out(
+                    self.uniffiClonePointer()
+                    
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_void,
+            completeFunc: ffi_photoscore_rust_future_complete_void,
+            freeFunc: ffi_photoscore_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
     
 
 }
@@ -705,6 +830,76 @@ public func FfiConverterCallbackInterfaceFfiCrawlObserver_lift(_ handle: UInt64)
 public func FfiConverterCallbackInterfaceFfiCrawlObserver_lower(_ v: FfiCrawlObserver) -> UInt64 {
     return FfiConverterCallbackInterfaceFfiCrawlObserver.lower(v)
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
+    typealias SwiftType = String?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
+private let UNIFFI_RUST_FUTURE_POLL_MAYBE_READY: Int8 = 1
+
+fileprivate let uniffiContinuationHandleMap = UniffiHandleMap<UnsafeContinuation<Int8, Never>>()
+
+fileprivate func uniffiRustCallAsync<F, T>(
+    rustFutureFunc: () -> UInt64,
+    pollFunc: (UInt64, @escaping UniffiRustFutureContinuationCallback, UInt64) -> (),
+    completeFunc: (UInt64, UnsafeMutablePointer<RustCallStatus>) -> F,
+    freeFunc: (UInt64) -> (),
+    liftFunc: (F) throws -> T,
+    errorHandler: ((RustBuffer) throws -> Swift.Error)?
+) async throws -> T {
+    // Make sure to call the ensure init function since future creation doesn't have a
+    // RustCallStatus param, so doesn't use makeRustCall()
+    uniffiEnsurePhotoscoreInitialized()
+    let rustFuture = rustFutureFunc()
+    defer {
+        freeFunc(rustFuture)
+    }
+    var pollResult: Int8;
+    repeat {
+        pollResult = await withUnsafeContinuation {
+            pollFunc(
+                rustFuture,
+                uniffiFutureContinuationCallback,
+                uniffiContinuationHandleMap.insert(obj: $0)
+            )
+        }
+    } while pollResult != UNIFFI_RUST_FUTURE_POLL_READY
+
+    return try liftFunc(makeRustCall(
+        { completeFunc(rustFuture, $0) },
+        errorHandler: errorHandler
+    ))
+}
+
+// Callback handlers for an async calls.  These are invoked by Rust when the future is ready.  They
+// lift the return value or error and resume the suspended function.
+fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: Int8) {
+    if let continuation = try? uniffiContinuationHandleMap.remove(handle: handle) {
+        continuation.resume(returning: pollResult)
+    } else {
+        print("uniffiFutureContinuationCallback invalid handle")
+    }
+}
 /**
  * Trivial cross-boundary smoke function. Returns the core crate version.
  * Proves Swift can call into Rust over UniFFI before the full PhotosCore lands.
@@ -732,6 +927,15 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_photoscore_checksum_func_core_version() != 53489) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_login() != 50951) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 22452) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_sign_out() != 54821) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_constructor_photoscore_new() != 54313) {
