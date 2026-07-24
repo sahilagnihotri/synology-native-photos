@@ -78,17 +78,6 @@
                ReferencedContainer = "container:SynologyPhotos.xcodeproj">
             </BuildableReference>
          </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "709E6DD897BE5E0C0C217D93"
-               BuildableName = "SynologyPhotosUITests.xctest"
-               BlueprintName = "SynologyPhotosUITests"
-               ReferencedContainer = "container:SynologyPhotos.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>
