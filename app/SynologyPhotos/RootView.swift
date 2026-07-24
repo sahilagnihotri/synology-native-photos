@@ -113,7 +113,7 @@ extension LibraryContentRoute {
 ///
 /// Grid item selection opens `DetailViewerHost` in a sheet: `detailIndex`
 /// is populated from `PhotoGridController.onSelect`/`onOpenDetail`, which
-/// the controller invokes with the asset for the relevant index (nil clears
+/// the controller invokes with the relevant absolute grid index (nil clears
 /// the sheet on deselect). This is the wiring `DetailQuickLookView`'s own
 /// task (51) explicitly deferred to here, since extended with Return/Space
 /// keyboard opens and Left/Right paging.
@@ -317,6 +317,3 @@ struct CrawlFailedView: View {
     }
 }
 
-// `Asset.id` (an `Int64`) already uniquely identifies a row within its own
-// space; that's enough for SwiftUI's `sheet(item:)` to key off directly.
-extension Asset: @retroactive Identifiable {}
