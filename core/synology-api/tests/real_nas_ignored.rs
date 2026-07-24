@@ -31,7 +31,7 @@ async fn real_nas_login_probe_list_logout() {
     println!("discovered {} capabilities", caps.len());
     let version = synology_api::pin_version(&caps, "SYNO.Foto.Browse.Item", 1)
         .expect("Browse.Item must be available");
-    let assets = list_items(&transport, &session.sid, Space::Personal, 0, 25, version).await
+    let assets = list_items(&transport, &session.sid, Space::Personal, 0, 25, version, session.syno_token.as_deref()).await
         .expect("listing first page should succeed");
     println!("first page returned {} assets", assets.len());
     if let Some(first) = assets.first() {

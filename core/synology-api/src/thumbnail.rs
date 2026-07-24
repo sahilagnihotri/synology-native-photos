@@ -41,7 +41,12 @@ pub fn size_param(size: ThumbnailSize) -> &'static str {
 /// `SYNO.Foto.Thumbnail` / `SYNO.FotoTeam.Thumbnail`, `method=get`. Returns
 /// the raw image bytes on success. Space-aware: the API name is resolved
 /// via `namespace::thumbnail_api`. On-disk caching of the returned bytes is
-/// a Swift-side concern, not this crate's — this function only fetches.
+/// a Swift-side concern, not this crate's; this function only fetches.
+///
+/// `syno_token` is `Session.syno_token` from login, sent as the
+/// `X-SYNO-TOKEN` header when present (DSM's CSRF check on top of `_sid`;
+/// without it a token-auth session gets rejected with synology error 119).
+/// Pass `None` to omit the header entirely.
 pub async fn fetch_thumbnail(
     transport: &Transport,
     sid: &str,
@@ -50,6 +55,7 @@ pub async fn fetch_thumbnail(
     cache_key: &str,
     size: ThumbnailSize,
     version: u32,
+    syno_token: Option<&str>,
 ) -> Result<Vec<u8>, CoreError> {
     transport.throttle().await;
     let query: Vec<(&str, String)> = vec![
@@ -62,10 +68,11 @@ pub async fn fetch_thumbnail(
         ("size", size_param(size).to_string()),
         ("_sid", sid.to_string()),
     ];
-    let response = transport
-        .client()
-        .get(transport.entry_url())
-        .query(&query)
+    let mut request = transport.client().get(transport.entry_url()).query(&query);
+    if let Some(token) = syno_token {
+        request = request.header("X-SYNO-TOKEN", token);
+    }
+    let response = request
         .send()
         .await
         .map_err(|e| CoreError::Network { message: format!("thumbnail request failed: {e}") })?;

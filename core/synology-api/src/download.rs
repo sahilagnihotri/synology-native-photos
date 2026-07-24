@@ -52,7 +52,12 @@ use models::{CoreError, Space};
 /// the API name is resolved via `namespace::download_api`. READ-ONLY: never
 /// deletes or mutates anything on the NAS. Writing the returned bytes to a
 /// temp file (and cleaning it up) is a Swift-side concern, not this
-/// function's — this only fetches.
+/// function's; this only fetches.
+///
+/// `syno_token` is `Session.syno_token` from login, sent as the
+/// `X-SYNO-TOKEN` header when present (DSM's CSRF check on top of `_sid`;
+/// without it a token-auth session gets rejected with synology error 119).
+/// Pass `None` to omit the header entirely.
 pub async fn download_original(
     transport: &Transport,
     sid: &str,
@@ -60,6 +65,7 @@ pub async fn download_original(
     unit_id: i64,
     cache_key: &str,
     version: u32,
+    syno_token: Option<&str>,
 ) -> Result<Vec<u8>, CoreError> {
     transport.throttle().await;
     let query: Vec<(&str, String)> = vec![
@@ -70,10 +76,11 @@ pub async fn download_original(
         ("cache_key", cache_key.to_string()),
         ("_sid", sid.to_string()),
     ];
-    let response = transport
-        .client()
-        .get(transport.entry_url())
-        .query(&query)
+    let mut request = transport.client().get(transport.entry_url()).query(&query);
+    if let Some(token) = syno_token {
+        request = request.header("X-SYNO-TOKEN", token);
+    }
+    let response = request
         .send()
         .await
         .map_err(|e| CoreError::Network { message: format!("download request failed: {e}") })?;

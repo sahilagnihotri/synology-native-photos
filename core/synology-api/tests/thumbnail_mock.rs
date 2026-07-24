@@ -34,7 +34,7 @@ async fn fetch_thumbnail_returns_binary_bytes() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let bytes = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2)
+    let bytes = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2, None)
         .await
         .expect("thumb ok");
     assert_eq!(bytes, jpeg_magic);
@@ -52,7 +52,7 @@ async fn fetch_thumbnail_json_error_maps_to_core_error() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let err = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2)
+    let err = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2, None)
         .await
         .unwrap_err();
     assert!(matches!(err, models::CoreError::Auth { .. }), "got {err:?}");
@@ -71,8 +71,50 @@ async fn fetch_thumbnail_shared_uses_fototeam_namespace() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let bytes = fetch_thumbnail(&t, "SID", Space::Shared, 202, "CK202", ThumbnailSize::M, 2)
+    let bytes = fetch_thumbnail(&t, "SID", Space::Shared, 202, "CK202", ThumbnailSize::M, 2, None)
         .await
         .expect("thumb ok");
     assert_eq!(bytes, jpeg_magic);
+}
+
+#[tokio::test]
+async fn fetch_thumbnail_sends_syno_token_header_when_present() {
+    let mut server = mockito::Server::new_async().await;
+    let jpeg_magic = vec![0xFF, 0xD8, 0xFF, 0xE0];
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_header("X-SYNO-TOKEN", "TOK123")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "image/jpeg")
+        .with_body(jpeg_magic.clone())
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let bytes = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2, Some("TOK123"))
+        .await
+        .expect("thumb ok with token header");
+    assert_eq!(bytes, jpeg_magic);
+    _m.assert_async().await;
+}
+
+#[tokio::test]
+async fn fetch_thumbnail_omits_syno_token_header_when_absent() {
+    let mut server = mockito::Server::new_async().await;
+    let jpeg_magic = vec![0xFF, 0xD8, 0xFF, 0xE0];
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_header("X-SYNO-TOKEN", Matcher::Missing)
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "image/jpeg")
+        .with_body(jpeg_magic.clone())
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let bytes = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2, None)
+        .await
+        .expect("thumb ok without token header");
+    assert_eq!(bytes, jpeg_magic);
+    _m.assert_async().await;
 }

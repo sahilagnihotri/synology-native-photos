@@ -34,12 +34,22 @@ struct ApiPageSource {
     transport: Transport,
     sid: String,
     version: u32,
+    syno_token: Option<String>,
 }
 
 #[async_trait::async_trait]
 impl PageSource for ApiPageSource {
     async fn list_items(&self, space: Space, offset: u32, limit: u32) -> Result<AssetPage, CoreError> {
-        let assets = synology_api::list_items(&self.transport, &self.sid, space, offset, limit, self.version).await?;
+        let assets = synology_api::list_items(
+            &self.transport,
+            &self.sid,
+            space,
+            offset,
+            limit,
+            self.version,
+            self.syno_token.as_deref(),
+        )
+        .await?;
         // The Browse.Item list does not return a grand total on every DSM build; when
         // absent we treat a short page as the end. Report the running count as total so
         // the barrier still flips on the final short page (offset >= total holds).
@@ -366,7 +376,7 @@ impl PhotosCore {
             return Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes });
         }
 
-        let (transport, sid, version) = {
+        let (transport, sid, version, syno_token) = {
             let guard = self.live.lock().expect("live mutex poisoned");
             let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
             let api = match space {
@@ -374,10 +384,20 @@ impl PhotosCore {
                 Space::Shared => "SYNO.FotoTeam.Thumbnail",
             };
             let version = synology_api::pin_version(&live.capabilities, api, 2).unwrap_or(2);
-            (Transport::new(&live.connection)?, live.session.sid.clone(), version)
+            (Transport::new(&live.connection)?, live.session.sid.clone(), version, live.session.syno_token.clone())
         };
 
-        let bytes = synology_api::fetch_thumbnail(&transport, &sid, space, asset_id, &cache_key, size, version).await?;
+        let bytes = synology_api::fetch_thumbnail(
+            &transport,
+            &sid,
+            space,
+            asset_id,
+            &cache_key,
+            size,
+            version,
+            syno_token.as_deref(),
+        )
+        .await?;
         write_cache_file_atomically(&dir, &path, &bytes)?;
         Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes })
     }
@@ -400,7 +420,7 @@ impl PhotosCore {
         asset_id: i64,
         cache_key: String,
     ) -> Result<String, CoreError> {
-        let (transport, sid, version) = {
+        let (transport, sid, version, syno_token) = {
             let guard = self.live.lock().expect("live mutex poisoned");
             let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
             let api = match space {
@@ -408,10 +428,19 @@ impl PhotosCore {
                 Space::Shared => "SYNO.FotoTeam.Download",
             };
             let version = synology_api::pin_version(&live.capabilities, api, 2).unwrap_or(2);
-            (Transport::new(&live.connection)?, live.session.sid.clone(), version)
+            (Transport::new(&live.connection)?, live.session.sid.clone(), version, live.session.syno_token.clone())
         };
 
-        let bytes = synology_api::download_original(&transport, &sid, space, asset_id, &cache_key, version).await?;
+        let bytes = synology_api::download_original(
+            &transport,
+            &sid,
+            space,
+            asset_id,
+            &cache_key,
+            version,
+            syno_token.as_deref(),
+        )
+        .await?;
         let dir = std::env::temp_dir();
         let tmp = dir.join(format!("syno-orig-{}", cache_digest(&[&asset_id.to_string(), &cache_key])));
         write_cache_file_atomically(&dir, &tmp, &bytes)?;
@@ -526,6 +555,7 @@ impl PhotosCore {
             transport: Transport::new(&live.connection)?,
             sid: live.session.sid.clone(),
             version,
+            syno_token: live.session.syno_token.clone(),
         })
     }
 

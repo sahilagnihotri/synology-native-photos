@@ -177,13 +177,23 @@ fn decode_one<T: serde::de::DeserializeOwned>(
 /// Issue a GET against the shared entry.cgi dispatcher and return the raw
 /// response body for `decode_envelope` to parse. Shared by `list_items` and
 /// `list_albums` so both go through the same throttle/error-mapping path.
-async fn get_body(transport: &Transport, query: &[(&str, String)]) -> Result<String, CoreError> {
+///
+/// Sends `X-SYNO-TOKEN: <token>` when `syno_token` is `Some` (DSM's CSRF
+/// token check on top of `_sid`; without it a session with token auth
+/// active answers `_sid`-bearing calls with synology error 119). The header
+/// is omitted entirely when `syno_token` is `None`, never sent empty.
+async fn get_body(
+    transport: &Transport,
+    query: &[(&str, String)],
+    syno_token: Option<&str>,
+) -> Result<String, CoreError> {
     transport.throttle().await;
     let query_refs: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let response = transport
-        .client()
-        .get(transport.entry_url())
-        .query(&query_refs)
+    let mut request = transport.client().get(transport.entry_url()).query(&query_refs);
+    if let Some(token) = syno_token {
+        request = request.header("X-SYNO-TOKEN", token);
+    }
+    let response = request
         .send()
         .await
         .map_err(|e| CoreError::Network { message: format!("browse request failed: {e}") })?;
@@ -210,6 +220,10 @@ async fn get_body(transport: &Transport, query: &[(&str, String)]) -> Result<Str
 /// with a total count so a bad batch is visible without breaking browsing.
 /// An item missing only optional fields (`filename`, `time`, `filesize`,
 /// dimensions, ...) still produces a usable `Asset` with defaults.
+///
+/// `syno_token` is `Session.syno_token` from login, forwarded as the
+/// `X-SYNO-TOKEN` header (see `get_body`); pass `None` when the session has
+/// no token, in which case the header is simply omitted.
 pub async fn list_items(
     transport: &Transport,
     sid: &str,
@@ -217,6 +231,7 @@ pub async fn list_items(
     offset: u32,
     limit: u32,
     version: u32,
+    syno_token: Option<&str>,
 ) -> Result<Vec<Asset>, CoreError> {
     let query: Vec<(&str, String)> = vec![
         ("api", browse_item_api(space).to_string()),
@@ -227,7 +242,7 @@ pub async fn list_items(
         ("additional", "[\"thumbnail\",\"resolution\"]".to_string()),
         ("_sid", sid.to_string()),
     ];
-    let body = get_body(transport, &query).await?;
+    let body = get_body(transport, &query, syno_token).await?;
     let parsed: ItemList = decode_envelope(&body)?;
     let total = parsed.list.len();
     let mut skipped = 0usize;
@@ -289,6 +304,9 @@ pub async fn list_items(
 /// renamed `id`, the minimum viable identity for an `Album`) is skipped and
 /// logged via `tracing::warn!` rather than failing the whole page. A
 /// missing `name` still produces a usable `Album` (falls back to the id).
+///
+/// `syno_token` is forwarded the same way as `list_items`: see that
+/// function's doc comment.
 pub async fn list_albums(
     transport: &Transport,
     sid: &str,
@@ -296,6 +314,7 @@ pub async fn list_albums(
     offset: u32,
     limit: u32,
     version: u32,
+    syno_token: Option<&str>,
 ) -> Result<Vec<Album>, CoreError> {
     let query: Vec<(&str, String)> = vec![
         ("api", browse_album_api(space).to_string()),
@@ -306,7 +325,7 @@ pub async fn list_albums(
         ("additional", "[\"thumbnail\"]".to_string()),
         ("_sid", sid.to_string()),
     ];
-    let body = get_body(transport, &query).await?;
+    let body = get_body(transport, &query, syno_token).await?;
     let parsed: AlbumList = decode_envelope(&body)?;
     let total = parsed.list.len();
     let albums: Vec<Album> = parsed

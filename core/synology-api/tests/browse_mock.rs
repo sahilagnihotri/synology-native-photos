@@ -27,7 +27,7 @@ async fn list_items_personal_parses_assets_and_ignores_unknown_fields() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1).await.expect("list ok");
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok");
     assert_eq!(assets.len(), 2);
     let a = &assets[0];
     assert_eq!(a.id, 101);
@@ -56,7 +56,7 @@ async fn list_items_shared_uses_fototeam_namespace() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = list_items(&t, "SID", Space::Shared, 0, 100, 1).await.expect("list ok");
+    let assets = list_items(&t, "SID", Space::Shared, 0, 100, 1, None).await.expect("list ok");
     assert!(assets.is_empty());
 }
 
@@ -75,7 +75,7 @@ async fn unknown_media_type_decodes_as_unknown_not_error() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1).await.expect("list ok");
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok");
     assert_eq!(assets[0].media_kind, MediaKind::Unknown);
 }
 
@@ -96,7 +96,7 @@ async fn extra_unknown_top_level_item_fields_still_decode() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1).await.expect("list ok");
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok");
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0].id, 55);
     assert_eq!(assets[0].cache_key, "CK55");
@@ -117,7 +117,7 @@ async fn list_items_sends_offset_and_limit() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = list_items(&t, "SID", Space::Personal, 40, 20, 1).await.expect("list ok");
+    let assets = list_items(&t, "SID", Space::Personal, 40, 20, 1, None).await.expect("list ok");
     assert!(assets.is_empty());
 }
 
@@ -136,7 +136,7 @@ async fn list_albums_parses_albums() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let albums = list_albums(&t, "SID", Space::Personal, 0, 100, 1).await.expect("albums ok");
+    let albums = list_albums(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("albums ok");
     assert_eq!(albums.len(), 1);
     assert_eq!(albums[0].id, 5);
     assert_eq!(albums[0].name, "Trip");
@@ -166,7 +166,7 @@ async fn one_malformed_item_is_skipped_others_still_decode() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1).await.expect("list ok despite bad items");
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok despite bad items");
     // Only the two well-formed items with both id and cache_key survive;
     // the item with no `id` field at all and the item missing cache_key
     // are both skipped without failing the whole call.
@@ -193,7 +193,7 @@ async fn item_missing_optional_filename_still_produces_usable_asset() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1)
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None)
         .await
         .expect("list ok even though filename and time are absent");
     assert_eq!(assets.len(), 1);
@@ -222,7 +222,7 @@ async fn one_malformed_album_is_skipped_others_still_decode() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let albums = list_albums(&t, "SID", Space::Personal, 0, 100, 1).await.expect("albums ok despite bad entry");
+    let albums = list_albums(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("albums ok despite bad entry");
     // The album with no `id` is skipped; both albums with an id survive,
     // including the one missing the optional `name`.
     assert_eq!(albums.len(), 2);
@@ -246,6 +246,44 @@ async fn list_albums_sends_offset_and_limit() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let albums = list_albums(&t, "SID", Space::Personal, 10, 5, 1).await.expect("albums ok");
+    let albums = list_albums(&t, "SID", Space::Personal, 10, 5, 1, None).await.expect("albums ok");
     assert!(albums.is_empty());
+}
+
+#[tokio::test]
+async fn list_items_sends_syno_token_header_when_present() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_header("X-SYNO-TOKEN", "TOK123")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(r#"{"success":true,"data":{"list":[]}}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, Some("TOK123"))
+        .await
+        .expect("list ok with token header");
+    assert!(assets.is_empty());
+    _m.assert_async().await;
+}
+
+#[tokio::test]
+async fn list_items_omits_syno_token_header_when_absent() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_header("X-SYNO-TOKEN", Matcher::Missing)
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(r#"{"success":true,"data":{"list":[]}}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None)
+        .await
+        .expect("list ok without token header");
+    assert!(assets.is_empty());
+    _m.assert_async().await;
 }
