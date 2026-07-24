@@ -1,8 +1,12 @@
-import SwiftUI
+import Observation
 import PhotosCore
 
 /// Personal/Shared selection. Switching re-queries the data source by space
 /// (Personal => SYNO.Foto.*, Shared => SYNO.FotoTeam.* on the core side).
+///
+/// The segmented control that used to drive this directly has been replaced
+/// by the sidebar (`SidebarView`); this type is unchanged and is now driven
+/// from `LibraryView.switchSpace(to:)` instead.
 @MainActor
 @Observable
 final class SpaceSelection {
@@ -18,38 +22,5 @@ final class SpaceSelection {
         guard space != current else { return }
         current = space
         await dataSource.setSpace(space)
-    }
-}
-
-/// Segmented Personal/Shared control. Selecting a segment drives
-/// `SpaceSelection.toggle(to:on:)`, which re-queries `dataSource` for the new
-/// space, then calls `onChange` so the caller (typically the grid) can
-/// refresh what it displays once the switch has settled.
-struct SpaceToggleView: View {
-    @State private var selection: SpaceSelection
-    private let dataSource: WindowedDataSource
-    private let onChange: () async -> Void
-
-    init(selection: SpaceSelection, dataSource: WindowedDataSource, onChange: @escaping () async -> Void) {
-        _selection = State(initialValue: selection)
-        self.dataSource = dataSource
-        self.onChange = onChange
-    }
-
-    var body: some View {
-        Picker("Space", selection: Binding(
-            get: { selection.current },
-            set: { newValue in
-                Task {
-                    await selection.toggle(to: newValue, on: dataSource)
-                    await onChange()
-                }
-            }
-        )) {
-            Text("Personal").tag(Space.personal)
-            Text("Shared").tag(Space.shared)
-        }
-        .pickerStyle(.segmented)
-        .accessibilityIdentifier("space.toggle")
     }
 }

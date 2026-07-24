@@ -108,17 +108,25 @@ extension LibraryContentRoute {
     }
 }
 
-/// Library scene: space toggle + importing progress + grid + detail.
+/// Library scene: sidebar + content split, importing progress + grid +
+/// detail.
 ///
 /// Grid item selection opens `DetailQuickLookView` in a sheet: `selected`
 /// is populated from `PhotoGridController.onSelect`, which the controller
 /// invokes with the asset for a newly selected index path (nil clears the
 /// sheet on deselect). This is the wiring `DetailQuickLookView`'s own task
 /// (51) explicitly deferred to here.
+///
+/// The top segmented Personal/Shared toggle is replaced by a Photos-style
+/// sidebar (`SidebarView`): the sidebar's "Library" row plus per-space rows
+/// drive the same `SpaceSelection`/`WindowedDataSource` wiring the old
+/// toggle used, so switching spaces still re-queries and re-crawls exactly
+/// as before, only the control that triggers it has moved.
 struct LibraryView: View {
     let env: AppEnvironment
     @State private var controller: PhotoGridController
     @State private var selected: Asset?
+    @State private var sidebarSelection: SidebarItem? = .library
 
     init(env: AppEnvironment) {
         self.env = env
@@ -127,24 +135,41 @@ struct LibraryView: View {
     }
 
     var body: some View {
+        NavigationSplitView {
+            SidebarView(selection: $sidebarSelection)
+        } detail: {
+            content
+        }
+        .task {
+            controller.onSelect = { asset in selected = asset }
+            await env.crawl.startCrawl(space: env.spaceSelection.current)
+            await env.dataSource.refreshCount()
+            await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+            await controller.applySnapshot()
+        }
+        .onChange(of: sidebarSelection) { _, newValue in
+            guard let newValue else { return }
+            let route = newValue.route(currentSpace: env.spaceSelection.current)
+            guard case .grid(let space) = route else { return }
+            Task { await switchSpace(to: space) }
+        }
+        .sheet(item: $selected) { asset in
+            DetailQuickLookView(
+                asset: asset,
+                space: env.dataSource.space,
+                client: env.client,
+                cache: env.tempCache)
+            .frame(minWidth: 640, minHeight: 480)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         VStack(spacing: 8) {
             HStack {
-                SpaceToggleView(selection: env.spaceSelection, dataSource: env.dataSource) {
-                    // `setSpace` (already run by the toggle before this
-                    // closure fires) only re-queries the local index for the
-                    // newly selected space; it never crawls. A space visited
-                    // for the first time therefore has an empty local index
-                    // until something crawls it, which would otherwise look
-                    // identical to a genuinely empty space. Running the
-                    // crawl here (a no-op per `Crawler::crawl_space` if the
-                    // space's barrier is already set) is what makes
-                    // switching to a not-yet-crawled space actually populate
-                    // it instead of showing a false empty state.
-                    await env.crawl.startCrawl(space: env.spaceSelection.current)
-                    await env.dataSource.refreshCount()
-                    await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
-                    await controller.applySnapshot()
-                }
+                Text(currentSpaceRoute.title)
+                    .font(.title3)
+                    .fontWeight(.semibold)
                 Spacer()
                 if !env.crawl.isComplete {
                     Text(env.crawl.statusText).accessibilityIdentifier("crawl.status")
@@ -164,41 +189,51 @@ struct LibraryView: View {
                 .accessibilityIdentifier("session.signout")
             }
             .padding(.horizontal, 12)
-            switch LibraryContentRoute.route(
-                isComplete: env.crawl.isComplete,
-                itemCount: env.dataSource.totalCount,
-                failure: env.crawl.failure
-            ) {
-            case .importing:
-                ProgressView(env.crawl.statusText).accessibilityIdentifier("crawl.progressview")
-            case .empty:
-                EmptyLibraryView(space: env.spaceSelection.current)
+            .padding(.top, 8)
+            switch sidebarSelection?.route(currentSpace: env.spaceSelection.current) ?? .grid(env.spaceSelection.current) {
+            case .albums:
+                AlbumsComingSoonView()
             case .grid:
-                PhotoGridView(controller: controller)
-            case .failed(let message):
-                CrawlFailedView(message: message) {
-                    await env.crawl.startCrawl(space: env.spaceSelection.current)
-                    await env.dataSource.refreshCount()
-                    await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
-                    await controller.applySnapshot()
+                switch LibraryContentRoute.route(
+                    isComplete: env.crawl.isComplete,
+                    itemCount: env.dataSource.totalCount,
+                    failure: env.crawl.failure
+                ) {
+                case .importing:
+                    ProgressView(env.crawl.statusText).accessibilityIdentifier("crawl.progressview")
+                case .empty:
+                    EmptyLibraryView(space: env.spaceSelection.current)
+                case .grid:
+                    PhotoGridView(controller: controller)
+                case .failed(let message):
+                    CrawlFailedView(message: message) {
+                        await env.crawl.startCrawl(space: env.spaceSelection.current)
+                        await env.dataSource.refreshCount()
+                        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+                        await controller.applySnapshot()
+                    }
                 }
             }
         }
-        .task {
-            controller.onSelect = { asset in selected = asset }
-            await env.crawl.startCrawl(space: env.spaceSelection.current)
-            await env.dataSource.refreshCount()
-            await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
-            await controller.applySnapshot()
-        }
-        .sheet(item: $selected) { asset in
-            DetailQuickLookView(
-                asset: asset,
-                space: env.dataSource.space,
-                client: env.client,
-                cache: env.tempCache)
-            .frame(minWidth: 640, minHeight: 480)
-        }
+    }
+
+    /// Title shown above the grid, matching Photos' own content-area
+    /// heading (e.g. "Library", "Personal", "Shared").
+    private var currentSpaceRoute: SidebarItem {
+        sidebarSelection ?? .library
+    }
+
+    /// Switches the active space (a no-op if `space` already matches
+    /// `env.spaceSelection.current`) and re-runs the same
+    /// crawl/refresh/load/snapshot sequence the initial `.task` runs, so a
+    /// space visited for the first time gets crawled instead of showing a
+    /// false empty state.
+    private func switchSpace(to space: Space) async {
+        await env.spaceSelection.toggle(to: space, on: env.dataSource)
+        await env.crawl.startCrawl(space: env.spaceSelection.current)
+        await env.dataSource.refreshCount()
+        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+        await controller.applySnapshot()
     }
 
     /// The signed-in account username, read from the current auth phase.
