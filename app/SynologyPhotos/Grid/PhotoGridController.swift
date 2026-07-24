@@ -16,6 +16,10 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     private let cache: ThumbnailCache
     let collectionView = NSCollectionView()
     private var diffable: NSCollectionViewDiffableDataSource<Int, AssetItemID>?
+    /// Small, fixed inter-item gap, matching Photos' tight justified grid.
+    /// Item size itself is variable (driven by `applyZoom`); the gap stays
+    /// constant across zoom levels.
+    private static let interItemGap: CGFloat = 4
 
     /// Set when `applySnapshot()` is called before `viewDidLoad()` has set up
     /// `diffable` (e.g. the SwiftUI `.task` in `LibraryView` calls it right
@@ -36,8 +40,21 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// responsible for what selecting a photo actually opens.
     var onSelect: ((Asset?) -> Void)?
 
-    /// A single fixed section. The grid does not (yet) group by day/month,
-    /// so there is exactly one section for the whole space.
+    /// A single fixed section. The grid does not (yet) group by day/month.
+    ///
+    /// TODO(date sections): rows are already sorted taken_at DESC by the
+    /// core (see core/persistence/src/assets.rs), so grouping the currently
+    /// loaded window into day buckets is cheap on its own. The blocker is
+    /// the windowed/sparse loading model this grid relies on: an unloaded
+    /// row is a placeholder identifier with no taken_at yet, so its section
+    /// membership is unknown until its page loads, which would mean moving
+    /// a row from an "unresolved" pseudo-section into a real date section
+    /// once it loads, on top of the existing placeholder-to-real identity
+    /// swap applySnapshot() already does. That is a second axis of churn on
+    /// a 20k-100k item diffable snapshot, on the same code path the flicker
+    /// fix just stabilized, so it did not ship in this pass. Logged here
+    /// (also tracked in TODO.md) rather than faked with headers that would
+    /// be wrong until every page finishes loading.
     private static let section = 0
 
     init(dataSource: WindowedDataSource, cache: ThumbnailCache) {
@@ -53,9 +70,9 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     override func loadView() {
         let scroll = NSScrollView()
         let layout = NSCollectionViewFlowLayout()
-        layout.itemSize = NSSize(width: 160, height: 160)
-        layout.minimumInteritemSpacing = 4
-        layout.minimumLineSpacing = 4
+        layout.itemSize = NSSize(width: GridZoomModel.defaultItemSize, height: GridZoomModel.defaultItemSize)
+        layout.minimumInteritemSpacing = Self.interItemGap
+        layout.minimumLineSpacing = Self.interItemGap
         collectionView.collectionViewLayout = layout
         collectionView.isSelectable = true
         collectionView.prefetchDataSource = self
@@ -65,6 +82,18 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         scroll.documentView = collectionView
         scroll.hasVerticalScroller = true
         self.view = scroll
+    }
+
+    /// Applies a new square item size to the flow layout, invalidating it so
+    /// the grid re-lays-out immediately (Photos-style: dragging the zoom
+    /// slider resizes thumbnails live, no reload needed since identity and
+    /// image content are unaffected by size).
+    func applyZoom(itemSize: CGFloat) {
+        guard let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
+        let clamped = GridZoomModel.clamp(itemSize)
+        guard layout.itemSize.width != clamped else { return }
+        layout.itemSize = NSSize(width: clamped, height: clamped)
+        layout.invalidateLayout()
     }
 
     override func viewDidLoad() {

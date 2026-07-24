@@ -127,6 +127,7 @@ struct LibraryView: View {
     @State private var controller: PhotoGridController
     @State private var selected: Asset?
     @State private var sidebarSelection: SidebarItem? = .library
+    @State private var zoom = GridZoomModel()
 
     init(env: AppEnvironment) {
         self.env = env
@@ -173,6 +174,11 @@ struct LibraryView: View {
                 Spacer()
                 if !env.crawl.isComplete {
                     Text(env.crawl.statusText).accessibilityIdentifier("crawl.status")
+                }
+                if case .grid = sidebarSelection?.route(currentSpace: env.spaceSelection.current) ?? .grid(env.spaceSelection.current) {
+                    ZoomSliderView(zoom: zoom) { size in
+                        controller.applyZoom(itemSize: size)
+                    }
                 }
                 Button("Sign Out") {
                     Task {
