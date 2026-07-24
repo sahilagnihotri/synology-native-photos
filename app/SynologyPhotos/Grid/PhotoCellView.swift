@@ -26,6 +26,13 @@ final class PhotoCellView: NSCollectionViewItem {
     /// can never win a race against a newer one.
     private var loadTask: Task<Void, Never>?
 
+    /// The image currently painted into the cell, if any. Internal (not
+    /// private) purely so tests can observe whether a stale, late-arriving
+    /// thumbnail load was actually dropped by the reuse guard rather than
+    /// painted; production code never reads this, it only ever writes
+    /// `thumbView.image`.
+    var displayedImage: NSImage? { thumbView.image }
+
     override func loadView() {
         let container = NSView()
         thumbView.imageScaling = .scaleProportionallyUpOrDown
