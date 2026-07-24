@@ -1,6 +1,22 @@
 import AppKit
 import PhotosCore
 
+/// `NSCollectionView` subclass whose only job is forwarding `keyDown` to
+/// `keyHandler`. The collection view (not its view controller) is the
+/// actual first responder for key events once it has focus, so the
+/// keyboard map lives here rather than in a `PhotoGridController` override
+/// that AppKit would never call. Unrecognized keys fall through to
+/// `super.keyDown(with:)` so normal responder-chain behavior (e.g. type-
+/// ahead, if ever enabled) is not broken by this subclass existing.
+final class KeyHandlingCollectionView: NSCollectionView {
+    var keyHandler: ((NSEvent) -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        if keyHandler?(event) == true { return }
+        super.keyDown(with: event)
+    }
+}
+
 /// Hosts the fast photo grid: an `NSCollectionView` with cell reuse, backed
 /// by a diffable data source keyed on `AssetItemID` rather than raw index.
 ///
@@ -14,7 +30,7 @@ import PhotosCore
 final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, NSCollectionViewDelegate {
     private let dataSource: WindowedDataSource
     private let cache: ThumbnailCache
-    let collectionView = NSCollectionView()
+    let collectionView = KeyHandlingCollectionView()
     private var diffable: NSCollectionViewDiffableDataSource<Int, AssetItemID>?
     /// Small, fixed inter-item gap, matching Photos' tight justified grid.
     /// Item size itself is variable (driven by `applyZoom`); the gap stays
@@ -33,12 +49,47 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// a stale snapshot captured at the deferred call site.
     private var pendingSnapshotNeeded = false
 
-    /// Invoked with the asset behind a newly selected cell, or `nil` on
-    /// deselect. Left as an injectable closure (rather than a hard
-    /// dependency on a detail view type) so this controller stays
-    /// AppKit/grid-only; the caller (the app's library screen) is
-    /// responsible for what selecting a photo actually opens.
-    var onSelect: ((Asset?) -> Void)?
+    /// Invoked with the absolute grid index behind a newly (plain-)
+    /// selected cell, or `nil` on deselect. Index rather than `Asset`
+    /// directly, so the caller (the detail viewer) can page by index
+    /// without a linear scan back over the data source to recover it. Left
+    /// as an injectable closure (rather than a hard dependency on a detail
+    /// view type) so this controller stays AppKit/grid-only; the caller
+    /// (the app's library screen) is responsible for what selecting a
+    /// photo actually opens.
+    var onSelect: ((Int?) -> Void)?
+
+    /// The clean, AppKit-independent selection model: click/shift/cmd/
+    /// select-all transitions all flow through this, and it is what future
+    /// delete/album actions (and the toolbar's selection count) read.
+    /// `NSCollectionView` still owns the actual mouse hit-testing and
+    /// multi-select modifier handling (it already gets that right), this
+    /// controller only mirrors whatever AppKit just selected into `selection`
+    /// by inspecting the modifier flags active at delegate-callback time, so
+    /// there is exactly one source of truth for "what is selected" that both
+    /// the grid's own highlight and the rest of the app can read.
+    let selection = PhotoSelectionModel()
+
+    /// Invoked when Return/Enter opens detail on the current single
+    /// selection. Kept separate from `onSelect` because the keyboard path
+    /// has no selection-changed event to hang off of, it has to be asked
+    /// for explicitly.
+    var onOpenDetail: ((Int) -> Void)?
+
+    /// Invoked on Space, toggling QuickLook for the current selection. The
+    /// caller owns the actual show/hide toggle state; this just reports
+    /// which index Space was pressed against.
+    var onToggleQuickLook: ((Int) -> Void)?
+
+    /// Invoked on Delete/Cmd-Delete with the current selection count.
+    /// Never performs a real delete itself (Phase 2, not built): the
+    /// caller is expected to show the honest "coming soon" affordance.
+    var onDeleteRequested: ((Int) -> Void)?
+
+    /// Invoked on Escape when there is nothing to clear at the grid level
+    /// beyond the selection itself (detail already handles its own Escape
+    /// to close). Lets the caller know the grid consumed the key.
+    var onClearSelection: (() -> Void)?
 
     /// A single fixed section. The grid does not (yet) group by day/month.
     ///
@@ -75,13 +126,90 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         layout.minimumLineSpacing = Self.interItemGap
         collectionView.collectionViewLayout = layout
         collectionView.isSelectable = true
+        collectionView.allowsMultipleSelection = true
         collectionView.prefetchDataSource = self
         collectionView.delegate = self
         collectionView.register(PhotoCellView.self, forItemWithIdentifier: PhotoCellView.reuseIdentifier)
         collectionView.setAccessibilityIdentifier("grid.collection")
+        collectionView.keyHandler = { [weak self] event in
+            self?.handleKey(event) ?? false
+        }
         scroll.documentView = collectionView
         scroll.hasVerticalScroller = true
         self.view = scroll
+    }
+
+    /// Handles one key event per the Apple Photos keyboard map (see the
+    /// design spec). Returns `true` when the event was consumed (so
+    /// `KeyHandlingCollectionView` does not also forward it to
+    /// `super.keyDown`), `false` to let AppKit's default handling run.
+    ///
+    /// The "current" item for Left/Right/Up/Down/Space/Return is the
+    /// selection's anchor when there is one, falling back to the first
+    /// selected index, and to index 0 if nothing is selected yet (so the
+    /// very first arrow-key press on a fresh grid starts navigation at the
+    /// top rather than doing nothing).
+    @discardableResult
+    func handleKey(_ event: NSEvent) -> Bool {
+        guard let action = GridKeyMapper.action(for: event) else { return false }
+        let count = dataSource.totalCount
+
+        switch action {
+        case .selectAll:
+            selection.selectAll(count: count)
+            syncSelectionHighlight()
+            return true
+
+        case .clearSelectionOrClose:
+            selection.clear()
+            syncSelectionHighlight()
+            onClearSelection?()
+            return true
+
+        case .delete:
+            onDeleteRequested?(selection.count)
+            return true
+
+        case .toggleQuickLook:
+            guard let index = currentIndex() else { return true }
+            onToggleQuickLook?(index)
+            return true
+
+        case .openDetail:
+            guard let index = currentIndex() else { return true }
+            onOpenDetail?(index)
+            return true
+
+        case .previous, .next, .up, .down:
+            guard let current = currentIndex() else { return false }
+            let perRow = GridNavigation.itemsPerRow(
+                availableWidth: collectionView.bounds.width,
+                itemSize: itemSize,
+                gap: Self.interItemGap)
+            guard let target = GridNavigation.target(for: action, from: current, itemsPerRow: perRow, count: count) else {
+                return true
+            }
+            selection.click(target)
+            syncSelectionHighlight()
+            collectionView.scrollToItems(at: [IndexPath(item: target, section: Self.section)], scrollPosition: .nearestHorizontalEdge)
+            onSelect?(target)
+            return true
+        }
+    }
+
+    /// The index arrow-key navigation should move from: the selection
+    /// anchor if there is one, else the first selected index, else `nil`
+    /// (no selection to navigate from yet; callers should let the grid's
+    /// own default first-item behavior, if any, take over).
+    private func currentIndex() -> Int? {
+        selection.anchor ?? selection.sortedIndices.first
+    }
+
+    /// The flow layout's current square item size, read back for the
+    /// itemsPerRow calculation so keyboard row navigation always matches
+    /// whatever zoom level is actually on screen.
+    private var itemSize: CGFloat {
+        (collectionView.collectionViewLayout as? NSCollectionViewFlowLayout)?.itemSize.width ?? GridZoomModel.defaultItemSize
     }
 
     /// Applies a new square item size to the flow layout, invalidating it so
@@ -263,23 +391,49 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         }
     }
 
-    /// `NSCollectionViewDelegate`: reports the asset behind the first newly
-    /// selected index path to `onSelect`. A row that has not loaded yet
-    /// (`dataSource.item(at:)` returns `nil`, e.g. a placeholder identifier
-    /// from a still-in-flight page) reports nothing rather than opening
-    /// detail on incomplete data; the selection itself is still recorded by
-    /// the collection view, so the cell shows as selected either way.
+    /// `NSCollectionViewDelegate`: mirrors AppKit's own hit-testing/modifier
+    /// handling into `selection` (see the property's doc comment for why),
+    /// then reports the index behind a plain click to `onSelect`: a plain
+    /// click is the one gesture that should open detail navigation
+    /// (`onSelect` drives the QuickLook sheet), shift-range and cmd-toggle
+    /// only build up a multi-select for a future bulk action and must not
+    /// also pop a single-item detail sheet.
     func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
         guard let indexPath = indexPaths.first else { return }
-        onSelect?(dataSource.item(at: indexPath.item))
+        let index = indexPath.item
+        let flags = NSApp.currentEvent?.modifierFlags ?? []
+        if flags.contains(.shift) {
+            selection.shiftClick(index)
+        } else if flags.contains(.command) {
+            selection.toggle(index)
+        } else {
+            selection.click(index)
+            onSelect?(index)
+        }
     }
 
-    /// `NSCollectionViewDelegate`: clears the detail view when the grid's
-    /// selection is cleared (e.g. the user dismisses the sheet, which
-    /// deselects the underlying cell).
+    /// `NSCollectionViewDelegate`: mirrors deselection into `selection`
+    /// (a cmd-click on an already-selected cell deselects it through this
+    /// path; every index AppKit reports here was selected, so removing it
+    /// from `selection` is always a toggle-out) and clears the detail view
+    /// once nothing at all remains selected (e.g. the user dismisses the
+    /// sheet, which deselects the underlying cell).
     func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+        for indexPath in indexPaths where selection.isSelected(indexPath.item) {
+            selection.toggle(indexPath.item)
+        }
         if collectionView.selectionIndexPaths.isEmpty {
             onSelect?(nil)
         }
+    }
+
+    /// Applies `selection.selected` to the real `NSCollectionView`
+    /// selection. Needed whenever `selection` changes from something other
+    /// than AppKit's own mouse handling (Cmd-A, keyboard range moves): those
+    /// paths mutate `selection` directly and must push the result back into
+    /// AppKit so the accent-ring highlight matches.
+    func syncSelectionHighlight() {
+        let indexPaths = Set(selection.selected.map { IndexPath(item: $0, section: Self.section) })
+        collectionView.selectionIndexPaths = indexPaths
     }
 }

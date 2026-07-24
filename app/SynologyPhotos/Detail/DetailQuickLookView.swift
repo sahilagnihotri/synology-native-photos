@@ -210,3 +210,107 @@ struct DetailQuickLookView: NSViewRepresentable {
         }
     }
 }
+
+/// Photos-style chrome around `DetailQuickLookView`: the photo centered on
+/// a dimmed backdrop, Left/Right paging to the previous/next asset, Escape
+/// closes. `currentIndex` is a binding rather than owned state so the
+/// caller (the sheet's presenter) can read where paging left off, e.g. to
+/// keep the grid's own selection in sync.
+///
+/// Takes `assetCount` plus an `assetAt` lookup rather than a materialized
+/// `[Asset]` array: the detail viewer can be opened against the same
+/// 20k-100k-item space the grid windows over, and paging through it must
+/// not force every asset into memory just to know how far Right can go.
+/// `assetAt` returning `nil` for the current index (a page not loaded yet)
+/// renders nothing for that frame rather than crashing; `WindowedDataSource`
+/// schedules the load as a side effect of being asked, so a follow-up
+/// re-render once it resolves is expected to show the photo.
+///
+/// Minimal chrome by design (per the spec: "chrome minimal"): no toolbar of
+/// its own, just the image and the paging affordance built into the key
+/// handling.
+struct DetailViewerHost: View {
+    let assetCount: Int
+    let assetAt: (Int) -> Asset?
+    let space: Space
+    let client: PhotosCoreClient
+    let cache: TempFileCache
+    @Binding var currentIndex: Int
+    let onClose: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.9).ignoresSafeArea()
+            if let asset = assetAt(currentIndex) {
+                DetailQuickLookView(
+                    asset: asset,
+                    space: space,
+                    client: client,
+                    cache: cache)
+                .padding(24)
+            }
+        }
+        .background(KeyCatcher { event in
+            handleKey(event)
+        })
+        .accessibilityIdentifier("detail.viewer")
+    }
+
+    private func handleKey(_ event: NSEvent) -> Bool {
+        switch event.keyCode {
+        case KeyCode.escape:
+            onClose()
+            return true
+        case KeyCode.leftArrow:
+            if let target = DetailPagingModel.index(before: currentIndex) {
+                currentIndex = target
+            }
+            return true
+        case KeyCode.rightArrow:
+            if let target = DetailPagingModel.index(after: currentIndex, count: assetCount) {
+                currentIndex = target
+            }
+            return true
+        case KeyCode.space:
+            onClose()
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+/// Invisible `NSView` whose only purpose is becoming first responder so
+/// `onKey` sees the detail viewer's Escape/arrow/space presses. SwiftUI has
+/// no built-in "capture this specific key regardless of focus" primitive
+/// for an `NSViewRepresentable`-hosted view like `QLPreviewView`, which
+/// wants keyboard focus for its own playback controls; this sits behind it
+/// in the z-order and asks for first responder once inserted, so key
+/// events reach it via the normal responder chain when the preview itself
+/// does not consume them.
+private struct KeyCatcher: NSViewRepresentable {
+    let onKey: (NSEvent) -> Bool
+
+    func makeNSView(context: Context) -> KeyCatcherView {
+        let view = KeyCatcherView()
+        view.onKey = onKey
+        return view
+    }
+
+    func updateNSView(_ nsView: KeyCatcherView, context: Context) {
+        nsView.onKey = onKey
+        DispatchQueue.main.async {
+            if nsView.window?.firstResponder !== nsView {
+                nsView.window?.makeFirstResponder(nsView)
+            }
+        }
+    }
+}
+
+private final class KeyCatcherView: NSView {
+    var onKey: ((NSEvent) -> Bool)?
+    override var acceptsFirstResponder: Bool { true }
+    override func keyDown(with event: NSEvent) {
+        if onKey?(event) != true { super.keyDown(with: event) }
+    }
+}

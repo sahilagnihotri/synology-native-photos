@@ -15,6 +15,12 @@ final class PhotoCellView: NSCollectionViewItem {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("PhotoCellView")
 
     private let thumbView = NSImageView()
+    /// Thin accent-colored ring drawn only while selected, matching
+    /// Photos' own selection treatment (a rounded highlight border rather
+    /// than a filled overlay, so the thumbnail itself stays fully visible).
+    private let selectionRing = CALayer()
+    private static let ringInset: CGFloat = 3
+    private static let cornerRadius: CGFloat = 6
 
     /// The asset id this cell is currently configured to show, or -1 when
     /// idle (freshly created or just reset by `prepareForReuse`). A pending
@@ -44,18 +50,45 @@ final class PhotoCellView: NSCollectionViewItem {
 
     override func loadView() {
         let container = NSView()
+        container.wantsLayer = true
         thumbView.imageScaling = .scaleProportionallyUpOrDown
         thumbView.translatesAutoresizingMaskIntoConstraints = false
         thumbView.wantsLayer = true
         thumbView.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+        thumbView.layer?.cornerRadius = Self.cornerRadius
+        thumbView.layer?.masksToBounds = true
         container.addSubview(thumbView)
         NSLayoutConstraint.activate([
-            thumbView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            thumbView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            thumbView.topAnchor.constraint(equalTo: container.topAnchor),
-            thumbView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            thumbView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.ringInset),
+            thumbView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.ringInset),
+            thumbView.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.ringInset),
+            thumbView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Self.ringInset),
         ])
+
+        selectionRing.borderWidth = 3
+        selectionRing.cornerRadius = Self.cornerRadius
+        selectionRing.isHidden = true
+        container.layer?.addSublayer(selectionRing)
+
         self.view = container
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        selectionRing.frame = view.bounds
+    }
+
+    /// Draws (or hides) the accent-colored selection ring. Reads
+    /// `NSColor.controlAccentColor` fresh on every call rather than caching
+    /// it once, since it must track the user's system accent color and the
+    /// current light/dark appearance, both of which can change while the
+    /// app is running.
+    override var isSelected: Bool {
+        didSet {
+            selectionRing.isHidden = !isSelected
+            selectionRing.borderColor = NSColor.controlAccentColor.cgColor
+            selectionRing.frame = view.bounds
+        }
     }
 
     /// Called by `NSCollectionView` right before this item is handed back
@@ -71,6 +104,7 @@ final class PhotoCellView: NSCollectionViewItem {
         thumbView.image = nil
         representedAssetId = -1
         displayedKey = nil
+        selectionRing.isHidden = true
     }
 
     /// Binds this cell to `asset` and kicks off its thumbnail load.

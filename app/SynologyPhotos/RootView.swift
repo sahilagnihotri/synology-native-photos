@@ -111,11 +111,12 @@ extension LibraryContentRoute {
 /// Library scene: sidebar + content split, importing progress + grid +
 /// detail.
 ///
-/// Grid item selection opens `DetailQuickLookView` in a sheet: `selected`
-/// is populated from `PhotoGridController.onSelect`, which the controller
-/// invokes with the asset for a newly selected index path (nil clears the
-/// sheet on deselect). This is the wiring `DetailQuickLookView`'s own task
-/// (51) explicitly deferred to here.
+/// Grid item selection opens `DetailViewerHost` in a sheet: `detailIndex`
+/// is populated from `PhotoGridController.onSelect`/`onOpenDetail`, which
+/// the controller invokes with the asset for the relevant index (nil clears
+/// the sheet on deselect). This is the wiring `DetailQuickLookView`'s own
+/// task (51) explicitly deferred to here, since extended with Return/Space
+/// keyboard opens and Left/Right paging.
 ///
 /// The top segmented Personal/Shared toggle is replaced by a Photos-style
 /// sidebar (`SidebarView`): the sidebar's "Library" row plus per-space rows
@@ -125,9 +126,10 @@ extension LibraryContentRoute {
 struct LibraryView: View {
     let env: AppEnvironment
     @State private var controller: PhotoGridController
-    @State private var selected: Asset?
+    @State private var detailIndex: Int?
     @State private var sidebarSelection: SidebarItem? = .library
     @State private var zoom = GridZoomModel()
+    @State private var deleteComingSoon = DeleteComingSoonModel()
 
     init(env: AppEnvironment) {
         self.env = env
@@ -142,7 +144,7 @@ struct LibraryView: View {
             content
         }
         .task {
-            controller.onSelect = { asset in selected = asset }
+            wireGridCallbacks()
             await env.crawl.startCrawl(space: env.spaceSelection.current)
             await env.dataSource.refreshCount()
             await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
@@ -154,13 +156,43 @@ struct LibraryView: View {
             guard case .grid(let space) = route else { return }
             Task { await switchSpace(to: space) }
         }
-        .sheet(item: $selected) { asset in
-            DetailQuickLookView(
-                asset: asset,
+        .sheet(isPresented: Binding(
+            get: { detailIndex != nil },
+            set: { isPresented in if !isPresented { detailIndex = nil } }
+        )) {
+            DetailViewerHost(
+                assetCount: env.dataSource.totalCount,
+                assetAt: { env.dataSource.item(at: $0) },
                 space: env.dataSource.space,
                 client: env.client,
-                cache: env.tempCache)
+                cache: env.tempCache,
+                currentIndex: Binding(
+                    get: { detailIndex ?? 0 },
+                    set: { detailIndex = $0 }
+                ),
+                onClose: { detailIndex = nil }
+            )
             .frame(minWidth: 640, minHeight: 480)
+        }
+        .deleteComingSoonAlert(deleteComingSoon)
+    }
+
+    /// Wires the grid controller's keyboard/selection callbacks to this
+    /// view's state. Extracted from `.task` so it reads as one step rather
+    /// than being interleaved with the crawl/load sequence around it. All
+    /// four callbacks receive an absolute grid index directly from the
+    /// controller (no re-derivation from an asset needed), which is what
+    /// keeps this wiring O(1) per keypress/click regardless of library
+    /// size.
+    private func wireGridCallbacks() {
+        controller.onSelect = { index in detailIndex = index }
+        controller.onOpenDetail = { index in detailIndex = index }
+        controller.onToggleQuickLook = { index in
+            detailIndex = (detailIndex != nil) ? nil : index
+        }
+        controller.onClearSelection = { detailIndex = nil }
+        controller.onDeleteRequested = { count in
+            deleteComingSoon.requestDelete(selectedCount: count)
         }
     }
 
@@ -176,6 +208,11 @@ struct LibraryView: View {
                     Text(env.crawl.statusText).accessibilityIdentifier("crawl.status")
                 }
                 if case .grid = sidebarSelection?.route(currentSpace: env.spaceSelection.current) ?? .grid(env.spaceSelection.current) {
+                    if controller.selection.count > 0 {
+                        Text("\(controller.selection.count) selected")
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("selection.count")
+                    }
                     ZoomSliderView(zoom: zoom) { size in
                         controller.applyZoom(itemSize: size)
                     }
