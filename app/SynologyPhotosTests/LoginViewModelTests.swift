@@ -6,41 +6,63 @@ import PhotosCore
 @MainActor
 struct LoginViewModelTests {
     /// Uses a fresh `UserDefaults` suite per test so `LoginPreferencesStore`
-    /// reads/writes never leak between tests or depend on ordering.
-    private func freshDefaults() -> UserDefaults {
+    /// reads/writes never leak between tests, into `.standard` (the real
+    /// app's defaults), or depend on ordering. Every test that reaches
+    /// `submit()` (which unconditionally saves prefill) must go through
+    /// `makeModel` so this suite is the one that gets written to, and must
+    /// tear it down with `removePersistentDomain` when done.
+    private func freshDefaults() -> (suiteName: String, defaults: UserDefaults) {
         let suite = "com.synologynativephotos.tests.\(UUID().uuidString)"
-        return UserDefaults(suiteName: suite)!
+        return (suite, UserDefaults(suiteName: suite)!)
     }
 
-    private func makeModel(fake: FakePhotosCore, defaults: UserDefaults? = nil) -> LoginFormModel {
+    /// Removes every key from the given suite's persistent domain. Call in
+    /// a `defer` right after `freshDefaults()` so a fresh suite never
+    /// outlives its test.
+    private func teardown(_ suiteName: String) {
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+    }
+
+    /// `defaults` has no default value on purpose: every call site must
+    /// pass an isolated suite (from `freshDefaults()`) rather than
+    /// silently falling back to `.standard`, which is exactly the bug
+    /// this file guards against.
+    private func makeModel(fake: FakePhotosCore, defaults: UserDefaults) -> LoginFormModel {
         let auth = AuthStateMachine(client: fake)
-        let prefs = defaults.map { LoginPreferencesStore.load(defaults: $0) } ?? .empty
-        return LoginFormModel(auth: auth, client: fake, prefs: prefs)
+        return LoginFormModel(auth: auth, client: fake, defaults: defaults, prefs: .empty)
     }
 
     @Test func syncShowsOtpFieldOnNeedsOtp() {
-        let m = makeModel(fake: FakePhotosCore())
+        let (suiteName, defaults) = freshDefaults()
+        defer { teardown(suiteName) }
+        let m = makeModel(fake: FakePhotosCore(), defaults: defaults)
         m.sync(with: .needsOtp(username: "photo"))
         #expect(m.showOtp == true)
         #expect(m.errorText?.localizedCaseInsensitiveContains("code") == true)
     }
 
     @Test func syncShowsErrorOnInvalid() {
-        let m = makeModel(fake: FakePhotosCore())
+        let (suiteName, defaults) = freshDefaults()
+        defer { teardown(suiteName) }
+        let m = makeModel(fake: FakePhotosCore(), defaults: defaults)
         m.sync(with: .invalid(message: "bad password"))
         #expect(m.errorText == "bad password")
         #expect(m.showOtp == false)
     }
 
     @Test func syncClearsErrorOnValid() {
-        let m = makeModel(fake: FakePhotosCore())
+        let (suiteName, defaults) = freshDefaults()
+        defer { teardown(suiteName) }
+        let m = makeModel(fake: FakePhotosCore(), defaults: defaults)
         m.errorText = "stale"
         m.sync(with: .valid(Session(sid: "S", synoToken: nil, username: "photo", deviceDid: nil)))
         #expect(m.errorText == nil)
     }
 
     @Test func defaultsAreRememberMeOnInsecureOff() {
-        let m = makeModel(fake: FakePhotosCore())
+        let (suiteName, defaults) = freshDefaults()
+        defer { teardown(suiteName) }
+        let m = makeModel(fake: FakePhotosCore(), defaults: defaults)
         #expect(m.rememberMe == true)
         #expect(m.allowUntrustedTls == false)
     }
@@ -52,14 +74,18 @@ struct LoginViewModelTests {
     /// pin for the login that follows.
     @Test func submitFetchesCertShowsFingerprintApprovePinsAndLogsIn() async throws {
         let host = "https://tofu-test.local:5001"
-        defer { try? KeychainCertPin.clear(host: host) }
+        let (suiteName, defaults) = freshDefaults()
+        defer {
+            try? KeychainCertPin.clear(host: host)
+            teardown(suiteName)
+        }
 
         let fake = FakePhotosCore()
         fake.fetchCertificateResult = .success(
             CertInfo(der: Data([1, 2, 3, 4]), sha256Hex: "AB:CD:EF", subject: "CN=tofu-test.local"))
         fake.loginResult = .success(Session(sid: "S1", synoToken: nil, username: "photo", deviceDid: nil))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = "photo"; m.password = "pw"
 
         // First submit: no pin stored yet, so it must stop at the
@@ -99,14 +125,18 @@ struct LoginViewModelTests {
     @Test func loginTargetsTypedHostNeverTheCertSubject() async throws {
         let typedHost = "https://fafnir.ladon-pirate.ts.net:5001"
         let subjectHost = "CN=agnihotri.synology.me"
-        defer { try? KeychainCertPin.clear(host: typedHost) }
+        let (suiteName, defaults) = freshDefaults()
+        defer {
+            try? KeychainCertPin.clear(host: typedHost)
+            teardown(suiteName)
+        }
 
         let fake = FakePhotosCore()
         fake.fetchCertificateResult = .success(
             CertInfo(der: Data([5, 5, 5, 5]), sha256Hex: "55:55", subject: subjectHost))
         fake.loginResult = .success(Session(sid: "TS1", synoToken: nil, username: "photo", deviceDid: nil))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = typedHost; m.username = "photo"; m.password = "pw"
 
         await m.submit()
@@ -146,12 +176,16 @@ struct LoginViewModelTests {
     @Test func submitSkipsApprovalWhenPinAlreadyStored() async throws {
         let host = "https://tofu-existing.local:5001"
         try KeychainCertPin.save(der: Data([9, 9, 9]), host: host)
-        defer { try? KeychainCertPin.clear(host: host) }
+        let (suiteName, defaults) = freshDefaults()
+        defer {
+            try? KeychainCertPin.clear(host: host)
+            teardown(suiteName)
+        }
 
         let fake = FakePhotosCore()
         fake.loginResult = .success(Session(sid: "S2", synoToken: nil, username: "photo", deviceDid: nil))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = "photo"; m.password = "pw"
 
         await m.submit()
@@ -163,10 +197,13 @@ struct LoginViewModelTests {
 
     @Test func certFetchFailureShowsErrorWithoutAttemptingLogin() async {
         let host = "https://tofu-unreachable.local:5001"
+        let (suiteName, defaults) = freshDefaults()
+        defer { teardown(suiteName) }
+
         let fake = FakePhotosCore()
         fake.fetchCertificateResult = .failure(.Network(message: "could not connect"))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = "photo"; m.password = "pw"
 
         await m.submit()
@@ -180,12 +217,16 @@ struct LoginViewModelTests {
     @Test func insecureToggleSetsAllowUntrustedTlsOnConnection() async throws {
         let host = "https://insecure-test.local:5001"
         try KeychainCertPin.save(der: Data([1]), host: host) // skip the approval prompt for this test
-        defer { try? KeychainCertPin.clear(host: host) }
+        let (suiteName, defaults) = freshDefaults()
+        defer {
+            try? KeychainCertPin.clear(host: host)
+            teardown(suiteName)
+        }
 
         let fake = FakePhotosCore()
         fake.loginResult = .success(Session(sid: "S3", synoToken: nil, username: "photo", deviceDid: nil))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = "photo"; m.password = "pw"
         m.allowUntrustedTls = true
 
@@ -197,12 +238,16 @@ struct LoginViewModelTests {
     @Test func insecureToggleDefaultsOffOnConnection() async throws {
         let host = "https://secure-test.local:5001"
         try KeychainCertPin.save(der: Data([1]), host: host)
-        defer { try? KeychainCertPin.clear(host: host) }
+        let (suiteName, defaults) = freshDefaults()
+        defer {
+            try? KeychainCertPin.clear(host: host)
+            teardown(suiteName)
+        }
 
         let fake = FakePhotosCore()
         fake.loginResult = .success(Session(sid: "S4", synoToken: nil, username: "photo", deviceDid: nil))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = "photo"; m.password = "pw"
 
         await m.submit()
@@ -216,15 +261,17 @@ struct LoginViewModelTests {
         let host = "https://remember-on.local:5001"
         let username = "rememberonuser"
         try KeychainCertPin.save(der: Data([1]), host: host)
+        let (suiteName, defaults) = freshDefaults()
         defer {
             try? KeychainCertPin.clear(host: host)
             try? KeychainSID.clear(host: host, username: username)
+            teardown(suiteName)
         }
 
         let fake = FakePhotosCore()
         fake.loginResult = .success(Session(sid: "S5", synoToken: "TOK5", username: username, deviceDid: nil))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = username; m.password = "pw"
         m.rememberMe = true
 
@@ -248,15 +295,17 @@ struct LoginViewModelTests {
         let host = "https://remember-off.local:5001"
         let username = "rememberoffuser"
         try KeychainCertPin.save(der: Data([1]), host: host)
+        let (suiteName, defaults) = freshDefaults()
         defer {
             try? KeychainCertPin.clear(host: host)
             try? KeychainSID.clear(host: host, username: username)
+            teardown(suiteName)
         }
 
         let fake = FakePhotosCore()
         fake.loginResult = .success(Session(sid: "S6", synoToken: nil, username: username, deviceDid: nil))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = username; m.password = "pw"
         m.rememberMe = false
 
@@ -276,15 +325,17 @@ struct LoginViewModelTests {
         let username = "clearprioruser"
         try KeychainSID.save(Session(sid: "OLD", synoToken: nil, username: username, deviceDid: nil), host: host)
         try KeychainCertPin.save(der: Data([1]), host: host)
+        let (suiteName, defaults) = freshDefaults()
         defer {
             try? KeychainCertPin.clear(host: host)
             try? KeychainSID.clear(host: host, username: username)
+            teardown(suiteName)
         }
 
         let fake = FakePhotosCore()
         fake.loginResult = .success(Session(sid: "NEW", synoToken: nil, username: username, deviceDid: nil))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = username; m.password = "pw"
         m.rememberMe = false
 
@@ -298,9 +349,11 @@ struct LoginViewModelTests {
     @Test func rememberMeOffKeepsCertPin() async throws {
         let host = "https://remember-off-keeps-pin.local:5001"
         let username = "keeppinuser"
+        let (suiteName, defaults) = freshDefaults()
         defer {
             try? KeychainCertPin.clear(host: host)
             try? KeychainSID.clear(host: host, username: username)
+            teardown(suiteName)
         }
 
         let fake = FakePhotosCore()
@@ -308,7 +361,7 @@ struct LoginViewModelTests {
             CertInfo(der: Data([7, 7, 7]), sha256Hex: "77:77", subject: "CN=remember-off-keeps-pin.local"))
         fake.loginResult = .success(Session(sid: "S7", synoToken: nil, username: username, deviceDid: nil))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = username; m.password = "pw"
         m.rememberMe = false
 
@@ -327,17 +380,19 @@ struct LoginViewModelTests {
         let host = "https://devicetoken-store.local:5001"
         let username = "devicetokenuser"
         try KeychainCertPin.save(der: Data([1]), host: host)
+        let (suiteName, defaults) = freshDefaults()
         defer {
             try? KeychainCertPin.clear(host: host)
             try? KeychainSID.clear(host: host, username: username)
             try? KeychainDeviceToken.clear(host: host, username: username)
+            teardown(suiteName)
         }
 
         let fake = FakePhotosCore()
         fake.loginResult = .success(
             Session(sid: "S8", synoToken: nil, username: username, deviceDid: "DEVICE-TOKEN-XYZ"))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = username; m.password = "pw"
         m.showOtp = true; m.otpCode = "123456"
 
@@ -354,10 +409,12 @@ struct LoginViewModelTests {
         let username = "devicetokenresend"
         try KeychainCertPin.save(der: Data([1]), host: host)
         try KeychainDeviceToken.save("STORED-TOKEN-1", host: host, username: username)
+        let (suiteName, defaults) = freshDefaults()
         defer {
             try? KeychainCertPin.clear(host: host)
             try? KeychainSID.clear(host: host, username: username)
             try? KeychainDeviceToken.clear(host: host, username: username)
+            teardown(suiteName)
         }
 
         let fake = FakePhotosCore()
@@ -370,7 +427,7 @@ struct LoginViewModelTests {
         fake.deviceTokenLoginResult = .success(
             Session(sid: "S9", synoToken: nil, username: username, deviceDid: "STORED-TOKEN-1"))
 
-        let m = makeModel(fake: fake)
+        let m = makeModel(fake: fake, defaults: defaults)
         m.host = host; m.username = username; m.password = "pw"
         // Deliberately no OTP typed in and `showOtp` left false: the
         // stored device token alone must be enough.
@@ -384,5 +441,53 @@ struct LoginViewModelTests {
             return
         }
         #expect(session.sid == "S9")
+    }
+
+    // MARK: - UserDefaults isolation (regression)
+
+    /// Regression test for the real bug: `submit()` used to save prefill
+    /// unconditionally to `UserDefaults.standard` regardless of which
+    /// suite the model was built with, so running the test suite in the
+    /// app host process left fixture values like this test's host and
+    /// username sitting in the REAL app's defaults, pre-filling the login
+    /// screen on next launch even with Remember Me on. Submitting through
+    /// an isolated suite must never touch `.standard` at all.
+    @Test func submitNeverLeaksPrefillIntoStandardDefaults() async throws {
+        let host = "https://leak-check.local:5001"
+        let username = "leakcheckuser"
+        try KeychainCertPin.save(der: Data([1]), host: host)
+        let (suiteName, defaults) = freshDefaults()
+        defer {
+            try? KeychainCertPin.clear(host: host)
+            try? KeychainSID.clear(host: host, username: username)
+            teardown(suiteName)
+        }
+
+        // Baseline: nothing under these keys in `.standard` before we start.
+        let hostKey = "se.agnihotri.synologyphotos.login.host"
+        let usernameKey = "se.agnihotri.synologyphotos.login.username"
+        let standardHostBefore = UserDefaults.standard.string(forKey: hostKey)
+        let standardUsernameBefore = UserDefaults.standard.string(forKey: usernameKey)
+
+        let fake = FakePhotosCore()
+        fake.loginResult = .success(Session(sid: "SLEAK", synoToken: nil, username: username, deviceDid: nil))
+
+        let m = makeModel(fake: fake, defaults: defaults)
+        m.host = host; m.username = username; m.password = "pw"
+
+        await m.submit()
+
+        // The isolated suite got the write.
+        let saved = LoginPreferencesStore.load(defaults: defaults)
+        #expect(saved.host == host)
+        #expect(saved.username == username)
+
+        // `.standard` is untouched: still whatever it was before this
+        // test ran (nil on a clean machine), and specifically never this
+        // test's fixture values.
+        #expect(UserDefaults.standard.string(forKey: hostKey) == standardHostBefore)
+        #expect(UserDefaults.standard.string(forKey: usernameKey) == standardUsernameBefore)
+        #expect(UserDefaults.standard.string(forKey: hostKey) != host)
+        #expect(UserDefaults.standard.string(forKey: usernameKey) != username)
     }
 }

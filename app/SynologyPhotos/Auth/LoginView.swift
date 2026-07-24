@@ -21,6 +21,11 @@ final class LoginFormModel {
     let auth: AuthStateMachine
     let cert: CertApprovalViewModel
 
+    // Where prefill gets saved on every submit. The app leaves this at
+    // `.standard`; tests inject an isolated suite so they never touch the
+    // real app's saved login prefill.
+    private let defaults: UserDefaults
+
     var host: String
     var username: String
     var password: String = ""
@@ -31,9 +36,16 @@ final class LoginFormModel {
     var rememberMe: Bool
     var allowUntrustedTls: Bool
 
-    init(auth: AuthStateMachine, client: PhotosCoreProtocol, prefs: LoginPreferences = LoginPreferencesStore.load()) {
+    init(
+        auth: AuthStateMachine,
+        client: PhotosCoreProtocol,
+        defaults: UserDefaults = .standard,
+        prefs: LoginPreferences? = nil
+    ) {
         self.auth = auth
         self.cert = CertApprovalViewModel(client: client)
+        self.defaults = defaults
+        let prefs = prefs ?? LoginPreferencesStore.load(defaults: defaults)
         self.host = prefs.host.isEmpty ? "https://" : prefs.host
         self.username = prefs.username
         self.rememberMe = prefs.rememberMe
@@ -53,7 +65,8 @@ final class LoginFormModel {
         isBusy = true
         defer { isBusy = false }
         LoginPreferencesStore.save(
-            LoginPreferences(host: host, username: username, rememberMe: rememberMe, allowUntrustedTls: allowUntrustedTls))
+            LoginPreferences(host: host, username: username, rememberMe: rememberMe, allowUntrustedTls: allowUntrustedTls),
+            defaults: defaults)
 
         await cert.checkHost(host)
         if case .needsApproval = cert.phase {
