@@ -272,6 +272,12 @@ struct LibraryView: View {
     /// space visited for the first time gets crawled instead of showing a
     /// false empty state.
     private func switchSpace(to space: Space) async {
+        // Clear any selection carried over from the previous space before
+        // loading the new one: indices from a larger space are meaningless
+        // (and potentially out of range) against a smaller space's grid, and
+        // a stale selection would leave a highlighted row plus a keyboard
+        // action targeting a row that no longer exists.
+        controller.clearSelection()
         await env.spaceSelection.toggle(to: space, on: env.dataSource)
         await env.crawl.startCrawl(space: env.spaceSelection.current)
         await env.dataSource.refreshCount()

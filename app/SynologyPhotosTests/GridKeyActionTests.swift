@@ -106,4 +106,26 @@ struct GridNavigationTests {
         #expect(GridNavigation.target(for: .selectAll, from: 0, itemsPerRow: 4, count: 20) == nil)
         #expect(GridNavigation.target(for: .delete, from: 0, itemsPerRow: 4, count: 20) == nil)
     }
+
+    // MARK: clampedCurrent (stale-selection guard)
+
+    @Test func clampedCurrentPassesAnInRangeIndex() {
+        #expect(GridNavigation.clampedCurrent(450, count: 500) == 450)
+        #expect(GridNavigation.clampedCurrent(0, count: 1) == 0)
+    }
+
+    @Test func clampedCurrentRejectsAStaleIndexAfterSwitchingToASmallerSpace() {
+        // The reviewer's dead-end scenario: item 450 selected in a 500-item
+        // space, then a switch to a 10-item space. Opening detail/QuickLook
+        // must NOT act on the stale index.
+        #expect(GridNavigation.clampedCurrent(450, count: 10) == nil)
+    }
+
+    @Test func clampedCurrentRejectsNilNegativeAndEmpty() {
+        #expect(GridNavigation.clampedCurrent(nil, count: 20) == nil)
+        #expect(GridNavigation.clampedCurrent(-1, count: 20) == nil)
+        #expect(GridNavigation.clampedCurrent(5, count: 0) == nil)
+        // The count is an exclusive upper bound.
+        #expect(GridNavigation.clampedCurrent(20, count: 20) == nil)
+    }
 }

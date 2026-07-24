@@ -19,6 +19,18 @@ enum GridNavigation {
         return max(perRow, 1)
     }
 
+    /// The current focus index to act on (open detail, QuickLook, arrow
+    /// navigation origin), clamped to the applied snapshot's `count`, or
+    /// `nil` when there is nothing valid to act on. A `candidate` from a
+    /// selection made in a larger space can outlive a switch to a smaller
+    /// one; returning it unclamped would open the detail viewer on a stale,
+    /// out-of-range row. Bounding against the applied count (never the data
+    /// source's total) keeps every keyboard path safe.
+    static func clampedCurrent(_ candidate: Int?, count: Int) -> Int? {
+        guard count > 0, let index = candidate, index >= 0, index < count else { return nil }
+        return index
+    }
+
     /// The index Left/Right/Up/Down should move focus to, or `nil` if the
     /// move would go out of range (`0..<count`), in which case the caller
     /// should leave the current selection untouched.

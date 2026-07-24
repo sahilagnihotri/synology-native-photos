@@ -221,8 +221,21 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// anchor if there is one, else the first selected index, else `nil`
     /// (no selection to navigate from yet, in which case `handleKey`
     /// starts fresh at index 0).
+    /// Clears the current selection and its on-screen highlight. Called on a
+    /// space switch so indices from the previous space cannot linger and
+    /// target rows that no longer exist in the new space.
+    func clearSelection() {
+        selection.clear()
+        syncSelectionHighlight()
+    }
+
     private func currentIndex() -> Int? {
-        selection.anchor ?? selection.sortedIndices.first
+        // Clamp against the applied snapshot (not dataSource.totalCount) so a
+        // selection carried over from a larger space cannot open the detail
+        // viewer on a stale, out-of-range row. All keyboard paths (arrow nav,
+        // QuickLook, open detail) funnel through here. See GridNavigation.
+        let candidate = selection.anchor ?? selection.sortedIndices.first
+        return GridNavigation.clampedCurrent(candidate, count: snapshotItemCount())
     }
 
     /// The flow layout's current square item size, read back for the
