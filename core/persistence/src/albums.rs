@@ -1,8 +1,18 @@
-//! Album upsert and per-space fetch.
+//! Album upsert and per-space fetch (local index only; nothing crawls
+//! albums into this table yet, so this is currently exercised only by
+//! tests, kept ready for a future album-crawl pass).
 //!
 //! Mirrors the asset pattern in `assets.rs`: idempotent upsert keyed on
 //! `(space, server_id)`, ordered fetch scoped to a single space.
-
+//!
+//! The local `albums` table has no columns for `cover_unit_id`/`is_shared`/
+//! `is_smart` (added to `models::Album` for the live NAS-backed albums
+//! browse feature, which reads directly from `synology_api::list_albums`,
+//! never through this local index). `upsert_album` silently drops those
+//! three fields and `fetch_albums` always reconstructs them as `None`/
+//! `false`/`false`; this is safe today because nothing populates them via
+//! this path, and a future album-crawl pass is the natural place to extend
+//! the schema alongside actually writing real values into it.
 use crate::assets::{int_to_space, now_secs, space_to_int};
 use crate::schema::map_sql;
 use crate::Store;
@@ -53,6 +63,9 @@ impl Store {
                     name: r.get(1)?,
                     item_count: r.get::<_, i64>(2)? as u32,
                     cover_cache_key: r.get(3)?,
+                    cover_unit_id: None,
+                    is_shared: false,
+                    is_smart: false,
                     space: int_to_space(r.get::<_, i64>(4)?),
                 })
             })
@@ -76,6 +89,9 @@ mod tests {
             name: name.to_string(),
             item_count: 5,
             cover_cache_key: Some(format!("cover{id}")),
+            cover_unit_id: None,
+            is_shared: false,
+            is_smart: false,
             space,
         }
     }
@@ -133,6 +149,9 @@ mod tests {
             name: "Round Trip".to_string(),
             item_count: 123,
             cover_cache_key: Some("cover-round-trip".to_string()),
+            cover_unit_id: None,
+            is_shared: false,
+            is_smart: false,
             space: Space::Shared,
         };
         store.upsert_album(&original).unwrap();

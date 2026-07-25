@@ -331,10 +331,29 @@ impl PhotosCore {
 
     /// Local read of every album in `space`, ordered by name. No network
     /// access; same lock discipline as `fetch_assets`/`asset_count`.
-    pub fn fetch_albums(&self, space: Space) -> Result<Vec<Album>, CoreError> {
+    ///
+    /// Not currently wired to anything crawling albums into the local
+    /// index (nothing populates the `albums` table yet), so this always
+    /// returns whatever was upserted by a prior test/tool run, typically
+    /// empty. The user-visible Albums sidebar reads the live NAS-backed
+    /// `fetch_albums` below instead, matching the discovery-browse
+    /// collections (no local index for those either).
+    pub fn fetch_local_albums(&self, space: Space) -> Result<Vec<Album>, CoreError> {
         let guard = self.store.lock().expect("store mutex poisoned");
         let store = guard.as_ref().ok_or_else(store_busy_err)?;
         store.fetch_albums(space)
+    }
+
+    /// Lists albums (`SYNO.Foto.Browse.Album`), a live network call every
+    /// time: same discipline as `fetch_people`/`fetch_tags`/etc, there is no
+    /// local index for the live NAS album list in this pass. Personal space
+    /// only, matching every other discovery-browse lister in this facade.
+    /// Requires a live session; fails closed with `CoreError::Auth`
+    /// otherwise.
+    pub async fn fetch_albums(&self, offset: u32, limit: u32) -> Result<Vec<Album>, CoreError> {
+        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Album")?;
+        synology_api::list_albums(&transport, &sid, Space::Personal, offset, limit, version, syno_token.as_deref())
+            .await
     }
 
     /// Lists People (`SYNO.Foto.Browse.Person`), a live network call every
@@ -372,11 +391,11 @@ impl PhotosCore {
     }
 
     /// Fetches the photos belonging to one discovery-browse `collection`
-    /// (a person, place, tag, or the user's favorites), windowed the same
-    /// way `fetch_assets` windows the library grid. Unlike `fetch_assets`,
-    /// this always hits the NAS directly (no local index for discovery
-    /// collections yet), but keeps the same unit_id/token invariants every
-    /// other browse call in this crate relies on.
+    /// (a person, place, tag, an album, or the user's favorites), windowed
+    /// the same way `fetch_assets` windows the library grid. Unlike
+    /// `fetch_assets`, this always hits the NAS directly (no local index
+    /// for discovery collections yet), but keeps the same unit_id/token
+    /// invariants every other browse call in this crate relies on.
     ///
     /// Requires a live session; fails closed with `CoreError::Auth`
     /// otherwise. Personal space only, matching
@@ -393,6 +412,7 @@ impl PhotosCore {
             DiscoveryCollection::Place { id } => CollectionFilter::Place(id),
             DiscoveryCollection::Tag { id } => CollectionFilter::Tag(id),
             DiscoveryCollection::Favorites => CollectionFilter::Favorites,
+            DiscoveryCollection::Album { id } => CollectionFilter::Album(id),
         };
         synology_api::list_items_filtered(&transport, &sid, filter, offset, limit, version, syno_token.as_deref())
             .await
@@ -1147,10 +1167,10 @@ mod core_tests {
         let core = PhotosCore::new(dir.join("db").to_string_lossy().into(), dir.join("cache").to_string_lossy().into()).unwrap();
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
         assert!(core.fetch_assets(Space::Personal, 0, 10).unwrap().is_empty());
-        assert!(core.fetch_albums(Space::Personal).unwrap().is_empty());
+        assert!(core.fetch_local_albums(Space::Personal).unwrap().is_empty());
     }
 
-    /// Proves fetch_assets/fetch_albums actually delegate to the Store's real
+    /// Proves fetch_assets/fetch_local_albums actually delegate to the Store's real
     /// windowed queries rather than being stubs: upserts assets/albums across
     /// both spaces directly via the Store, then checks the core-level reads
     /// return the right rows, the right order, the right window, and never
@@ -1205,6 +1225,9 @@ mod core_tests {
                     name: "Trip".into(),
                     item_count: 3,
                     cover_cache_key: Some("cover1".into()),
+                    cover_unit_id: None,
+                    is_shared: false,
+                    is_smart: false,
                     space: Space::Personal,
                 })
                 .unwrap();
@@ -1214,6 +1237,9 @@ mod core_tests {
                     name: "SharedAlbum".into(),
                     item_count: 1,
                     cover_cache_key: None,
+                    cover_unit_id: None,
+                    is_shared: false,
+                    is_smart: false,
                     space: Space::Shared,
                 })
                 .unwrap();
@@ -1234,10 +1260,10 @@ mod core_tests {
         assert_eq!(shared_assets.len(), 1);
         assert_eq!(shared_assets[0].id, 99);
 
-        let personal_albums = core.fetch_albums(Space::Personal).unwrap();
+        let personal_albums = core.fetch_local_albums(Space::Personal).unwrap();
         assert_eq!(personal_albums.len(), 1);
         assert_eq!(personal_albums[0].name, "Trip");
-        let shared_albums = core.fetch_albums(Space::Shared).unwrap();
+        let shared_albums = core.fetch_local_albums(Space::Shared).unwrap();
         assert_eq!(shared_albums.len(), 1);
         assert_eq!(shared_albums[0].name, "SharedAlbum");
     }
@@ -1258,7 +1284,7 @@ mod core_tests {
         let fetch_err = core.fetch_assets(Space::Personal, 0, 10).unwrap_err();
         assert!(matches!(fetch_err, CoreError::Storage { .. }), "got {fetch_err:?}");
 
-        let albums_err = core.fetch_albums(Space::Personal).unwrap_err();
+        let albums_err = core.fetch_local_albums(Space::Personal).unwrap_err();
         assert!(matches!(albums_err, CoreError::Storage { .. }), "got {albums_err:?}");
 
         // Put the store back so nothing else in the process is left bricked.

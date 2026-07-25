@@ -56,7 +56,7 @@ use serde::Deserialize;
 
 /// A discovery-browse collection to filter `Browse.Item` by, plus the
 /// query param name each one uses on the real NAS (see the discovery-browse
-/// plan doc for the probe that confirmed every name below). All three are
+/// plan doc for the probe that confirmed every name below). All ids are
 /// sent as a bare integer, NOT an array/bracket form and NOT quoted: DSM
 /// rejects `geocoding_id=[756]` (error 120, reason "type") but accepts
 /// `geocoding_id=756`, and the same bare-int shape was confirmed for
@@ -70,6 +70,16 @@ use serde::Deserialize;
 /// (verified against the real NAS; there is no separate Favorite list API
 /// to call instead).
 ///
+/// `Album` sends `album_id=<id>`. VERIFIED against the real NAS: unlike
+/// `condition_album_id`/`normal_album_id` (both tried first and found to be
+/// silently ignored -- passing either alongside a made-up id still returned
+/// the full, unfiltered library), `album_id` is genuinely validated by DSM:
+/// a made-up id consistently answers with synology error 609 (no such
+/// album) across `SYNO.Foto.Browse.Item` versions 1-7, which is the
+/// signature of a real, checked filter rather than an ignored/unknown
+/// param. Works for both normal and smart (condition) albums, since both
+/// share the one `SYNO.Foto.Browse.Album` list surface.
+///
 /// Deliberately has no `Subject`/`Concept` variant: no working filter
 /// param or dedicated item-list API was found for `SYNO.Foto.Browse.Concept`
 /// on the real NAS (every candidate name tried was either explicitly
@@ -81,6 +91,7 @@ pub enum CollectionFilter {
     Place(i64),
     Tag(i64),
     Favorites,
+    Album(i64),
 }
 
 impl CollectionFilter {
@@ -90,6 +101,7 @@ impl CollectionFilter {
             CollectionFilter::Place(id) => ("geocoding_id", id.to_string()),
             CollectionFilter::Tag(id) => ("general_tag_id", id.to_string()),
             CollectionFilter::Favorites => ("favorite", "true".to_string()),
+            CollectionFilter::Album(id) => ("album_id", id.to_string()),
         }
     }
 }
@@ -204,7 +216,25 @@ struct RawAlbum {
     #[serde(default)]
     item_count: u32,
     #[serde(default)]
-    additional: Option<ItemAdditional>,
+    additional: Option<AlbumAdditional>,
+    // ASSUMPTION (unverified against a real non-empty album; the probed
+    // account has zero albums of either kind): DSM's community-documented
+    // convention nests smart-album rule data under `condition` and shared-
+    // album info under `sharing_info`. Presence of either object (regardless
+    // of its own inner shape, which was never observed) is treated as the
+    // marker for `is_smart`/`is_shared`; absence defaults both to `false`
+    // rather than failing decode, so an unrecognized/renamed marker just
+    // degrades to "normal, unshared" instead of breaking the whole list.
+    #[serde(default)]
+    condition: Option<serde_json::Value>,
+    #[serde(default)]
+    sharing_info: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct AlbumAdditional {
+    #[serde(default)]
+    thumbnail: Option<Thumb>,
 }
 
 /// Decode a single raw list element into `T`, logging and returning `None`
@@ -402,14 +432,31 @@ async fn list_items_inner(
 /// `SYNO.Foto.Browse.Album` / `SYNO.FotoTeam.Browse.Album`, `method=list`.
 /// Space-aware the same way as `list_items`: API name resolved via
 /// `namespace`, and every returned `Album.space` is set to the requested
-/// `space`. Requests `additional=["thumbnail"]` so each album carries a
-/// cover `cache_key` when DSM has one to offer.
+/// `space`. This is the unified list covering both normal (user-created)
+/// and smart/condition albums; DSM has no separate list method per type on
+/// this surface (`SYNO.Foto.Browse.NormalAlbum`/`ConditionAlbum` exist but
+/// were confirmed, against the real NAS, to expose only single-item `get`/
+/// mutation methods, not their own `list`; both return an empty `list` on
+/// this account, consistent with the unified `Browse.Album` being the real
+/// source of truth for listing).
+///
+/// Requests `additional=["thumbnail"]` so each album carries a cover
+/// `cache_key`/`unit_id` when DSM has one to offer. VERIFIED against the
+/// real NAS: `sharing_info` and `provider_count` are also accepted
+/// `additional` keys on this API (a `passphrase`/`condition` key in
+/// `additional` is rejected outright with error 120, reason "condition"),
+/// but the probed account has zero albums of either kind, so what either
+/// key actually populates in a non-empty response was never captured; only
+/// `thumbnail` is requested here until that is confirmed against real data.
 ///
 /// Decoding is per-element and tolerant, same as `list_items`: an element
 /// that fails to deserialize into `RawAlbum` (most commonly a missing/
 /// renamed `id`, the minimum viable identity for an `Album`) is skipped and
 /// logged via `tracing::warn!` rather than failing the whole page. A
 /// missing `name` still produces a usable `Album` (falls back to the id).
+/// `is_smart`/`is_shared` are best-effort (see `RawAlbum`'s doc comment):
+/// absence of their marker fields defaults both to `false` rather than
+/// failing decode.
 ///
 /// `syno_token` is forwarded the same way as `list_items`: see that
 /// function's doc comment.
@@ -439,12 +486,17 @@ pub async fn list_albums(
         .iter()
         .filter_map(|raw| {
             let album: RawAlbum = decode_one(raw, "browse album")?;
-            let cover_cache_key = album.additional.and_then(|a| a.thumbnail).map(|t| t.cache_key);
+            let thumb = album.additional.and_then(|a| a.thumbnail);
+            let cover_cache_key = thumb.as_ref().map(|t| t.cache_key.clone());
+            let cover_unit_id = thumb.and_then(|t| t.unit_id);
             Some(Album {
                 id: album.id,
                 name: album.name.unwrap_or_else(|| album.id.to_string()),
                 item_count: album.item_count,
                 cover_cache_key,
+                cover_unit_id,
+                is_shared: album.sharing_info.is_some(),
+                is_smart: album.condition.is_some(),
                 space,
             })
         })

@@ -188,7 +188,7 @@ async fn list_albums_parses_albums() {
         .with_status(200)
         .with_body(
             r#"{"success":true,"data":{"list":[
-            {"id":5,"name":"Trip","item_count":42,"additional":{"thumbnail":{"cache_key":"COVER5"}}}
+            {"id":5,"name":"Trip","item_count":42,"additional":{"thumbnail":{"cache_key":"COVER5","unit_id":55805}}}
         ]}}"#,
         )
         .create_async()
@@ -200,7 +200,43 @@ async fn list_albums_parses_albums() {
     assert_eq!(albums[0].name, "Trip");
     assert_eq!(albums[0].item_count, 42);
     assert_eq!(albums[0].cover_cache_key.as_deref(), Some("COVER5"));
+    assert_eq!(albums[0].cover_unit_id, Some(55805));
     assert_eq!(albums[0].space, Space::Personal);
+    // Neither a condition nor a sharing_info marker was present, so this
+    // must decode as a normal, unshared album, not fail or default true.
+    assert!(!albums[0].is_smart);
+    assert!(!albums[0].is_shared);
+}
+
+/// A smart (condition) album carries a `condition` object; a shared album
+/// carries a `sharing_info` object. Presence alone (regardless of either
+/// object's own inner shape, unverified against real non-empty data) is
+/// what this crate treats as the marker, per `RawAlbum`'s doc comment.
+#[tokio::test]
+async fn list_albums_detects_smart_and_shared_markers() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Album".into()))
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":9,"name":"Sunsets","item_count":12,
+             "condition":{"time":{"start":0}},
+             "sharing_info":{"enabled":true,"role":"viewer"}}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let albums = list_albums(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("albums ok");
+    assert_eq!(albums.len(), 1);
+    assert!(albums[0].is_smart, "a condition object must mark the album as smart");
+    assert!(albums[0].is_shared, "a sharing_info object must mark the album as shared");
+    // No thumbnail additional at all: cover fields must default cleanly,
+    // not fail decode.
+    assert_eq!(albums[0].cover_cache_key, None);
+    assert_eq!(albums[0].cover_unit_id, None);
 }
 
 #[tokio::test]

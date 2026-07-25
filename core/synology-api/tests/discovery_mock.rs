@@ -100,6 +100,36 @@ async fn list_items_filtered_by_favorites_sends_favorite_true() {
     m.assert_async().await;
 }
 
+/// VERIFIED against the real NAS: `album_id` is a genuinely checked filter
+/// (a made-up id answers with synology error 609, not a silently-ignored
+/// param), sent as a bare int, same shape as every other CollectionFilter
+/// variant. Covers both normal and smart albums, since both share the one
+/// `Browse.Album` list surface.
+#[tokio::test]
+async fn list_items_filtered_by_album_sends_bare_int_album_id() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Item".into()),
+            Matcher::UrlEncoded("album_id".into(), "42".into()),
+        ]))
+        .with_status(200)
+        .with_body(r#"{"success":true,"data":{"list":[
+            {"id":73501,"filename":"IMG_1664.JPG","type":"photo",
+             "additional":{"thumbnail":{"cache_key":"CK1","unit_id":55847}}}
+        ]}}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items_filtered(&t, "SID", CollectionFilter::Album(42), 0, 100, 1, None)
+        .await
+        .expect("filtered list ok");
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0].id, 73501);
+    m.assert_async().await;
+}
+
 #[tokio::test]
 async fn list_items_filtered_always_targets_personal_space() {
     // Verified only against SYNO.Foto.Browse.Item; the filter always

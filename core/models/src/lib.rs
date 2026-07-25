@@ -17,16 +17,18 @@ pub enum ThumbnailSize { Sm, M, Xl }
 pub enum SessionState { Valid, Expired, Invalid }
 
 /// A discovery-browse collection to fetch photos for: one of People,
-/// Places, Tags, or the user's Favorites. Personal space only (see
-/// `synology_api::browse::CollectionFilter`, which this maps onto
-/// one-for-one); there is deliberately no `Subject` variant because no
-/// working item filter was found for Concept/Subjects on the real NAS.
+/// Places, Tags, the user's Favorites, or one Album (normal or smart).
+/// Personal space only (see `synology_api::browse::CollectionFilter`, which
+/// this maps onto one-for-one); there is deliberately no `Subject` variant
+/// because no working item filter was found for Concept/Subjects on the
+/// real NAS.
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiscoveryCollection {
     Person { id: i64 },
     Place { id: i64 },
     Tag { id: i64 },
     Favorites,
+    Album { id: i64 },
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -77,12 +79,31 @@ pub struct Asset {
     pub server_version: Option<i64>,
 }
 
+/// One row from `SYNO.Foto.Browse.Album`: either a user-created normal album
+/// or a rule-based smart (condition) album; the two share this one list
+/// surface on the real NAS (see `synology_api::browse::list_albums`'s doc
+/// comment for the confirmed request/response shape).
+///
+/// `cover_unit_id` is the id the thumbnail endpoint keys on for the album's
+/// cover photo, mirrored from `additional.thumbnail.unit_id` the same way
+/// `Asset.unit_id` is (VERIFIED elsewhere in this crate that thumbnail
+/// endpoints key on unit_id, not an item id); `None` when the album has no
+/// cover yet (e.g. an empty album). `is_smart`/`is_shared` are best-effort:
+/// the real NAS account probed for this feature has zero albums of either
+/// kind, so the exact JSON marker for "this is a condition album" / "this
+/// album is shared" could not be captured from a live non-empty response.
+/// Both default to `false` when the marker is absent rather than failing
+/// decode, so an unrecognized/renamed marker degrades to "normal, unshared"
+/// rather than breaking the list.
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct Album {
     pub id: i64,
     pub name: String,
     pub item_count: u32,
     pub cover_cache_key: Option<String>,
+    pub cover_unit_id: Option<i64>,
+    pub is_shared: bool,
+    pub is_smart: bool,
     pub space: Space,
 }
 
@@ -329,8 +350,39 @@ mod tests {
         let place = DiscoveryCollection::Place { id: 756 };
         let tag = DiscoveryCollection::Tag { id: 5 };
         let favorites = DiscoveryCollection::Favorites;
+        let album = DiscoveryCollection::Album { id: 42 };
         assert_eq!(person, DiscoveryCollection::Person { id: 12279 });
         assert_ne!(person, place);
         assert_ne!(tag, favorites);
+        assert_eq!(album, DiscoveryCollection::Album { id: 42 });
+        assert_ne!(album, favorites);
+    }
+
+    #[test]
+    fn album_holds_smart_and_shared_flags() {
+        let normal = Album {
+            id: 5,
+            name: "Trip".to_string(),
+            item_count: 42,
+            cover_cache_key: Some("COVER5".to_string()),
+            cover_unit_id: Some(55805),
+            is_shared: false,
+            is_smart: false,
+            space: Space::Personal,
+        };
+        assert!(!normal.is_smart);
+        assert!(!normal.is_shared);
+        let smart = Album {
+            id: 9,
+            name: "Sunsets".to_string(),
+            item_count: 12,
+            cover_cache_key: None,
+            cover_unit_id: None,
+            is_shared: true,
+            is_smart: true,
+            space: Space::Personal,
+        };
+        assert!(smart.is_smart);
+        assert!(smart.is_shared);
     }
 }
