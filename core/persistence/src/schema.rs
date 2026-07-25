@@ -91,6 +91,19 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Small per-space key/value store for app-owned identifiers that must survive
+-- restarts, such as the id of the app-created "Recently Deleted" album (so the
+-- delete feature owns that album by a stored id, never by a name match that
+-- could hijack a user's own same-named album). Created via CREATE TABLE IF NOT
+-- EXISTS so it lands on both fresh and existing databases without needing a
+-- versioned ALTER migration step.
+CREATE TABLE IF NOT EXISTS app_state (
+    space INTEGER NOT NULL,
+    key   TEXT    NOT NULL,
+    value TEXT    NOT NULL,
+    PRIMARY KEY (space, key)
+);
 "#;
 
 /// One versioned migration step. `version` must be unique and steps run in
