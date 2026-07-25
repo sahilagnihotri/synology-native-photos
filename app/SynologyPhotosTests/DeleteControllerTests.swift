@@ -2,13 +2,16 @@ import Testing
 import PhotosCore
 @testable import SynologyPhotos
 
-/// Exercises the hybrid safe-delete contract on `DeleteController`, the piece
-/// that guarantees a confirm is always shown before any mutation and that the
-/// raw destructive verb is reachable only through its own dedicated confirm.
+/// Exercises the everyday delete contract on `DeleteController`: a confirm is
+/// always shown before any mutation, and confirming calls the REAL delete
+/// (`deleteAssets`) with exactly the selected ids. Permanent deletion no
+/// longer lives here at all (it moved to `RecentlyDeletedModel`, keyed by
+/// recycle path), so there is nothing on this controller that can bypass the
+/// recycle bin.
 ///
 /// Every assertion is against `FakePhotosCore`'s recording counters, so these
-/// prove the exact core calls (and, crucially, the absence of calls) each step
-/// makes, independent of any SwiftUI presentation.
+/// prove the exact core calls (and, crucially, the absence of calls) each
+/// step makes, independent of any SwiftUI presentation.
 @MainActor
 struct DeleteControllerTests {
     private func makeController() -> (DeleteController, FakePhotosCore) {
@@ -17,145 +20,82 @@ struct DeleteControllerTests {
         return (controller, fake)
     }
 
-    // MARK: - Everyday delete-to-trash
-
     @Test func requestDeletePresentsConfirmBeforeAnyCoreCall() {
         let (controller, fake) = makeController()
         controller.requestDelete(ids: [1, 2, 3])
-        #expect(controller.isShowingTrashConfirm)
-        #expect(controller.pendingTrashCount == 3)
-        // The confirm must be up with nothing yet touched on the core.
-        #expect(fake.deleteToTrashCallCount == 0)
-        #expect(fake.permanentlyDeleteCallCount == 0)
+        #expect(controller.isShowingDeleteConfirm)
+        #expect(controller.pendingDeleteCount == 3)
+        // The confirm must be up with nothing yet deleted.
+        #expect(fake.deleteAssetsCallCount == 0)
     }
 
     @Test func requestDeleteWithEmptySelectionShowsNoConfirm() {
         let (controller, fake) = makeController()
         controller.requestDelete(ids: [])
-        #expect(!controller.isShowingTrashConfirm)
-        #expect(fake.deleteToTrashCallCount == 0)
+        #expect(!controller.isShowingDeleteConfirm)
+        #expect(fake.deleteAssetsCallCount == 0)
     }
 
-    @Test func cancelDeleteMakesZeroCoreCalls() async {
+    @Test func cancelDeleteMakesZeroCoreCalls() {
         let (controller, fake) = makeController()
         controller.requestDelete(ids: [7, 8])
         controller.cancelDelete()
-        #expect(!controller.isShowingTrashConfirm)
-        #expect(controller.pendingTrashCount == 0)
-        #expect(fake.deleteToTrashCallCount == 0)
-        #expect(fake.permanentlyDeleteCallCount == 0)
+        #expect(!controller.isShowingDeleteConfirm)
+        #expect(controller.pendingDeleteCount == 0)
+        #expect(fake.deleteAssetsCallCount == 0)
     }
 
-    @Test func confirmDeleteCallsDeleteToTrashWithExactlyTheSelectedIds() async {
+    @Test func confirmDeleteCallsDeleteAssetsWithExactlyTheSelectedIds() async {
         let (controller, fake) = makeController()
         controller.requestDelete(ids: [10, 20, 30])
 
         var didRefresh = false
         await controller.confirmDelete(space: .personal) { didRefresh = true }
 
-        #expect(fake.deleteToTrashCallCount == 1)
-        #expect(fake.lastDeleteToTrashIds == [10, 20, 30])
-        #expect(fake.lastDeleteToTrashSpace == .personal)
-        // Everyday delete NEVER touches the raw destructive verb.
-        #expect(fake.permanentlyDeleteCallCount == 0)
-        // Refresh runs only after a successful move, and the confirm clears.
+        #expect(fake.deleteAssetsCallCount == 1)
+        #expect(fake.lastDeleteAssetsIds == [10, 20, 30])
+        #expect(fake.lastDeleteAssetsSpace == .personal)
+        // Refresh runs only after a successful delete, and the confirm clears.
         #expect(didRefresh)
-        #expect(!controller.isShowingTrashConfirm)
-        #expect(controller.pendingTrashCount == 0)
+        #expect(!controller.isShowingDeleteConfirm)
+        #expect(controller.pendingDeleteCount == 0)
     }
 
     @Test func confirmDeleteFailureSurfacesErrorAndSkipsRefresh() async {
         let (controller, fake) = makeController()
-        fake.deleteToTrashResult = .failure(.Network(message: "dropped"))
+        fake.deleteAssetsResult = .failure(.Network(message: "dropped"))
         controller.requestDelete(ids: [1])
 
         var didRefresh = false
         await controller.confirmDelete(space: .personal) { didRefresh = true }
 
-        #expect(fake.deleteToTrashCallCount == 1)
+        #expect(fake.deleteAssetsCallCount == 1)
         #expect(!didRefresh)
         #expect(controller.errorMessage != nil)
     }
 
-    // MARK: - Restore
-
-    @Test func restoreCallsRestoreFromTrashWithTheSelectedIds() async {
+    /// The full-photo detail viewer wires its Delete button / key to the SAME
+    /// controller with the shown asset's id (see `LibraryView.detailViewer`'s
+    /// `onDelete`). This proves that path: a single-asset request raises the
+    /// confirm and, on confirm, deletes exactly that asset, never touching the
+    /// core before the confirm.
+    @Test func detailViewerDeleteRunsTheSameConfirmedDeleteFlowForTheShownAsset() async {
         let (controller, fake) = makeController()
+        let shown = asset(4242)
 
-        var didRefresh = false
-        await controller.restore(space: .personal, ids: [4, 5]) { didRefresh = true }
+        // Mirror the detail viewer's onDelete closure exactly.
+        controller.requestDelete(ids: [shown.id])
+        #expect(controller.isShowingDeleteConfirm)
+        #expect(controller.pendingDeleteCount == 1)
+        #expect(fake.deleteAssetsCallCount == 0)
 
-        #expect(fake.restoreFromTrashCallCount == 1)
-        #expect(fake.lastRestoreFromTrashIds == [4, 5])
-        #expect(fake.lastRestoreFromTrashSpace == .personal)
-        #expect(didRefresh)
-        // Restore is not a destructive path.
-        #expect(fake.permanentlyDeleteCallCount == 0)
-        #expect(fake.deleteToTrashCallCount == 0)
-    }
+        var didClose = false
+        await controller.confirmDelete(space: .personal) { didClose = true }
 
-    @Test func restoreWithEmptySelectionMakesNoCall() async {
-        let (controller, fake) = makeController()
-        await controller.restore(space: .personal, ids: []) {}
-        #expect(fake.restoreFromTrashCallCount == 0)
-    }
-
-    // MARK: - Permanent delete (gated, always confirmed)
-
-    @Test func requestPermanentDeletePresentsItsOwnConfirmBeforeAnyCoreCall() {
-        let (controller, fake) = makeController()
-        controller.requestPermanentDelete(ids: [1, 2])
-        #expect(controller.isShowingPermanentConfirm)
-        #expect(controller.pendingPermanentCount == 2)
-        #expect(fake.permanentlyDeleteCallCount == 0)
-    }
-
-    @Test func cancelPermanentDeleteMakesZeroCoreCalls() {
-        let (controller, fake) = makeController()
-        controller.requestPermanentDelete(ids: [9])
-        controller.cancelPermanentDelete()
-        #expect(!controller.isShowingPermanentConfirm)
-        #expect(controller.pendingPermanentCount == 0)
-        #expect(fake.permanentlyDeleteCallCount == 0)
-    }
-
-    @Test func permanentlyDeleteIsCalledOnlyOnConfirm() async {
-        let (controller, fake) = makeController()
-        controller.requestPermanentDelete(ids: [100, 200])
-        // Still nothing deleted at the confirm stage.
-        #expect(fake.permanentlyDeleteCallCount == 0)
-
-        var didRefresh = false
-        await controller.confirmPermanentDelete(space: .personal) { didRefresh = true }
-
-        #expect(fake.permanentlyDeleteCallCount == 1)
-        #expect(fake.lastPermanentlyDeleteIds == [100, 200])
-        #expect(fake.lastPermanentlyDeleteSpace == .personal)
-        #expect(didRefresh)
-        #expect(!controller.isShowingPermanentConfirm)
-    }
-
-    /// The permanent-delete confirm must never be suppressed by any prior
-    /// interaction: cancelling once (or confirming once) does not arm a
-    /// "don't ask again" path. Every request raises the confirm afresh.
-    @Test func permanentDeleteConfirmIsShownEveryTime() async {
-        let (controller, fake) = makeController()
-
-        controller.requestPermanentDelete(ids: [1])
-        #expect(controller.isShowingPermanentConfirm)
-        controller.cancelPermanentDelete()
-        #expect(!controller.isShowingPermanentConfirm)
-
-        // Second time: still raises the confirm, still no call before confirm.
-        controller.requestPermanentDelete(ids: [2])
-        #expect(controller.isShowingPermanentConfirm)
-        #expect(fake.permanentlyDeleteCallCount == 0)
-        await controller.confirmPermanentDelete(space: .personal) {}
-        #expect(fake.permanentlyDeleteCallCount == 1)
-
-        // Third time after a real delete: the confirm is raised yet again.
-        controller.requestPermanentDelete(ids: [3])
-        #expect(controller.isShowingPermanentConfirm)
+        #expect(fake.deleteAssetsCallCount == 1)
+        #expect(fake.lastDeleteAssetsIds == [4242])
+        #expect(didClose)
+        #expect(!controller.isShowingDeleteConfirm)
     }
 
     /// End-to-end guard on the "exactly the selected ids" claim: a grid
