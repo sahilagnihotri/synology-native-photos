@@ -18,6 +18,22 @@ struct RootRouter {
     }
 }
 
+/// Pure debounce gate for the activation auto-sync, kept out of the SwiftUI
+/// view so the "do not reconcile on every trivial focus change" rule is
+/// unit-testable without a scene. A sync is allowed when none has run yet, or
+/// once at least `minimumInterval` seconds have passed since the last one.
+enum AutoSyncGate {
+    /// Minimum gap between activation-triggered syncs. Chosen so quickly
+    /// clicking away and back (Cmd-Tab, a notification, a Spotlight peek)
+    /// does not fire a reconcile every time the window regains focus.
+    static let minimumInterval: TimeInterval = 20
+
+    static func shouldSync(lastSyncAt: Date?, now: Date, minimumInterval: TimeInterval = minimumInterval) -> Bool {
+        guard let lastSyncAt else { return true }
+        return now.timeIntervalSince(lastSyncAt) >= minimumInterval
+    }
+}
+
 /// Owns the app's long-lived objects for one run: the core bridge, the auth
 /// state machine, the windowed grid data source, the two-tier thumbnail
 /// cache, the QuickLook temp-file cache, crawl progress, and the
@@ -130,8 +146,16 @@ extension LibraryContentRoute {
 /// as before, only the control that triggers it has moved.
 struct LibraryView: View {
     let env: AppEnvironment
+    /// Drives the activation auto-sync: transitioning to `.active` reconciles
+    /// the current space so changes made elsewhere show up without a manual
+    /// Refresh (see `autoSyncOnActivation`).
+    @Environment(\.scenePhase) private var scenePhase
     @State private var controller: PhotoGridController
     @State private var detailIndex: Int?
+    /// When the last space reconcile ran (manual Refresh or activation
+    /// auto-sync), so `AutoSyncGate` can debounce activation syncs. Nil until
+    /// the first one runs.
+    @State private var lastAutoSyncAt: Date?
     @State private var sidebarSelection: SidebarItem? = .library
     @State private var zoom = GridZoomModel()
     @State private var deleteController: DeleteController
@@ -262,6 +286,14 @@ struct LibraryView: View {
             // was up; nothing else reclaims it on the same window otherwise.
             if newValue == nil { restoreGridFocus() }
         }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            // Only on a real transition INTO active (not an active->active
+            // report), so re-focusing the window auto-syncs while ordinary
+            // in-app changes do not. The debounce and route/crawl guards live
+            // in `autoSyncOnActivation`.
+            guard newPhase == .active, oldPhase != .active else { return }
+            Task { await autoSyncOnActivation() }
+        }
         // The everyday delete confirm, shared verbatim by the grid and the
         // full-photo detail viewer. The space is read from the data source
         // (the current library/collection/search source). On a confirmed
@@ -293,10 +325,10 @@ struct LibraryView: View {
             ),
             onClose: { detailIndex = nil },
             // Delete from full-photo view runs the SAME DeleteController flow
-            // the grid uses: raise the confirm for just this asset; the shared
-            // `.deleteConfirm` modifier closes the viewer and refreshes on a
-            // confirmed success.
-            onDelete: { asset in deleteController.requestDelete(ids: [asset.id]) }
+            // the grid uses: raise the confirm for just this asset (with its
+            // filename, so Cmd-Z can undo it); the shared `.deleteConfirm`
+            // modifier closes the viewer and refreshes on a confirmed success.
+            onDelete: { asset in deleteController.requestDelete(ids: [asset.id], filenames: [asset.filename]) }
         )
     }
 
@@ -335,6 +367,9 @@ struct LibraryView: View {
         // recycle bin has its own view with its own actions and is never this
         // photo grid, so there is no in-trash special case here anymore.
         controller.onDeleteRequested = { _ in requestDeleteSelected() }
+        // Cmd-Z undoes the most recent delete, restoring those photos from
+        // the recycle bin. A safe no-op when there is nothing to undo.
+        controller.onUndoDelete = { Task { await undoLastDelete() } }
     }
 
     @ViewBuilder
@@ -596,18 +631,51 @@ struct LibraryView: View {
     /// the current space so NAS-side changes made elsewhere (and this app's
     /// own deletes/restores) show up, then reloads the grid. Reuses the crawl
     /// model's reconcile entry point rather than a fresh full crawl.
+    ///
+    /// Stamps `lastAutoSyncAt` so the activation auto-sync debounces against a
+    /// manual Refresh too: pressing Refresh then immediately clicking away and
+    /// back should not fire a second, redundant reconcile.
     private func refreshLibrary() async {
+        lastAutoSyncAt = Date()
         await env.crawl.reconcile(space: env.spaceSelection.current)
         await refreshCurrentGrid()
+    }
+
+    /// Auto-sync when the app becomes active: reconcile the current space and
+    /// reload the grid so changes made elsewhere (a delete in the Synology web
+    /// app, another device) show up without pressing Refresh. Only for the
+    /// space-backed library grid, gated by `AutoSyncGate` so it does not fire
+    /// on every trivial focus change, and skipped while the initial crawl is
+    /// still running (reconciling mid-import would fight the crawl).
+    private func autoSyncOnActivation() async {
+        guard isLibraryGridRoute else { return }
+        guard env.crawl.isComplete else { return }
+        guard AutoSyncGate.shouldSync(lastSyncAt: lastAutoSyncAt, now: Date()) else { return }
+        await refreshLibrary()
     }
 
     // MARK: - Delete actions
 
     /// Starts the everyday delete for the current grid selection: resolves the
-    /// selected rows to asset ids and raises the confirm. A no-op on an empty
-    /// resolved selection. Nothing is deleted until the user confirms.
+    /// selected rows to assets and raises the confirm, capturing both the ids
+    /// to delete and their filenames so a subsequent Cmd-Z can undo the
+    /// delete via the recycle bin. A no-op on an empty resolved selection.
+    /// Nothing is deleted until the user confirms.
     private func requestDeleteSelected() {
-        deleteController.requestDelete(ids: controller.selectedAssetIds())
+        let assets = controller.selectedAssets()
+        deleteController.requestDelete(ids: assets.map(\.id), filenames: assets.map(\.filename))
+    }
+
+    /// Undoes the most recent delete (Cmd-Z), restoring those photos from the
+    /// recycle bin. A no-op when there is nothing to undo. On a successful
+    /// restore it runs the same reconcile + grid reload the recycle-bin
+    /// Restore uses, so the returned photos reappear in the grid (a plain
+    /// local reload is not enough: the restored rows only re-enter the local
+    /// index once the reconcile pulls them back from the NAS).
+    private func undoLastDelete() async {
+        await deleteController.undoLastDelete {
+            await refreshLibrary()
+        }
     }
 
     /// Runs a debounced keyword search: same reset/reload/snapshot sequence

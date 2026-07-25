@@ -16,6 +16,31 @@ struct RootRouterTests {
     @Test func restoringRoutesToLogin() { #expect(RootRouter.route(for: .restoring) == .login) }
 }
 
+/// Exercises the activation auto-sync debounce: it always syncs the first
+/// time (no prior sync), skips while inside the minimum interval, and syncs
+/// again once the interval has elapsed. Keeps the "do not reconcile on every
+/// trivial focus change" rule honest without needing a live scene.
+struct AutoSyncGateTests {
+    @Test func syncsWhenNoPriorSyncHasRun() {
+        #expect(AutoSyncGate.shouldSync(lastSyncAt: nil, now: Date()))
+    }
+
+    @Test func skipsWithinTheMinimumInterval() {
+        let last = Date()
+        let soon = last.addingTimeInterval(AutoSyncGate.minimumInterval - 1)
+        #expect(!AutoSyncGate.shouldSync(lastSyncAt: last, now: soon))
+    }
+
+    @Test func syncsOnceTheMinimumIntervalHasElapsed() {
+        let last = Date()
+        let later = last.addingTimeInterval(AutoSyncGate.minimumInterval + 1)
+        #expect(AutoSyncGate.shouldSync(lastSyncAt: last, now: later))
+        // Exactly at the boundary counts as elapsed.
+        let atBoundary = last.addingTimeInterval(AutoSyncGate.minimumInterval)
+        #expect(AutoSyncGate.shouldSync(lastSyncAt: last, now: atBoundary))
+    }
+}
+
 /// Exercises the decision behind what the library area shows once the crawl
 /// barrier is (or is not) complete: the importing spinner while incomplete
 /// and healthy, the failed state while incomplete with a recorded failure,
