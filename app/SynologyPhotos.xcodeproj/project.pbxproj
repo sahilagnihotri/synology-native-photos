@@ -47,6 +47,7 @@
 		8656CA2D10EC4D2F489CE3E3 /* CertApprovalViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47572CC4B55567ECBC59B0AE /* CertApprovalViewModel.swift */; };
 		86DB0E0DF2F5341B0064EF03 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 516C70ED26B5432FC290A9B0 /* LoginView.swift */; };
 		8E6AC06CAA7CF3A875BCE82B /* PathMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AB2048962505837D9708B9 /* PathMonitor.swift */; };
+		922C8EB11F7D863637BEC46E /* AssetInfoFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8F23F7D2E1C87BC4C8C287 /* AssetInfoFormatter.swift */; };
 		94260F0FC0643CE368E6F2FD /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5FC30BA732D8B3CBC757EE /* RootView.swift */; };
 		95D528A305471E65390D3F57 /* ImportProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24E700BE934BC17C20A127A /* ImportProgressView.swift */; };
 		9B7E62A39CDAD710563060AD /* DiscoveryTileGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF50C704ABAE92E624DAE426 /* DiscoveryTileGridView.swift */; };
@@ -74,6 +75,7 @@
 		E8936FC2A8E25821FDA0ED64 /* ImageDownsample.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B5A556BC6D75D787EC6353 /* ImageDownsample.swift */; };
 		E8F637EAF875CC7E53D219B4 /* DiscoveryTileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2AE4FDB73A0F3C890F411E /* DiscoveryTileTests.swift */; };
 		EA884F70294FA80457254F90 /* EmptyLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AA11CEC5270A0AB58CE575 /* EmptyLibraryView.swift */; };
+		F06F24C5903CADBB0E2CF0E0 /* AssetInfoFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B73ADCAA1B227B90E3B1AA /* AssetInfoFormatterTests.swift */; };
 		F3DF81EDC7A33D114986BE0D /* CoreBridgeSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */; };
 		F6E0B0C7401716BE5DF838C4 /* WindowedDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8A7EB2843B1889B47AA6DA /* WindowedDataSource.swift */; };
 		F96DBEA44C5C1026B35AA13B /* SpaceToggleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 943F182991480AA732E73857 /* SpaceToggleTests.swift */; };
@@ -138,6 +140,7 @@
 		19BBC4E1F7A1058D8DB5711F /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		1D65797EEE04B6F9658674A2 /* SynologyPhotosApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynologyPhotosApp.swift; sourceTree = "<group>"; };
 		1EF3205B25839B5C3B86CE9E /* AuthStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStateMachineTests.swift; sourceTree = "<group>"; };
+		21B73ADCAA1B227B90E3B1AA /* AssetInfoFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetInfoFormatterTests.swift; sourceTree = "<group>"; };
 		26622FE9B92A0DFCF2A7EDBE /* PhotosCoreClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosCoreClientTests.swift; sourceTree = "<group>"; };
 		271D63AA455C96290DFEF262 /* FakePhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakePhotosCore.swift; sourceTree = "<group>"; };
 		2A06C5754F8669A8D883CA53 /* PhotoGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridView.swift; sourceTree = "<group>"; };
@@ -185,6 +188,7 @@
 		C220E6EFABA5E50B72BF6CD9 /* ThumbnailCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCacheTests.swift; sourceTree = "<group>"; };
 		C4AB2048962505837D9708B9 /* PathMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathMonitor.swift; sourceTree = "<group>"; };
 		C5A3AD8613F314C51F3D8B05 /* ThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCache.swift; sourceTree = "<group>"; };
+		CE8F23F7D2E1C87BC4C8C287 /* AssetInfoFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetInfoFormatter.swift; sourceTree = "<group>"; };
 		D2AA11CEC5270A0AB58CE575 /* EmptyLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyLibraryView.swift; sourceTree = "<group>"; };
 		D47EE427A3E9626140AF79FE /* SpaceToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceToggle.swift; sourceTree = "<group>"; };
 		DA8A7EB2843B1889B47AA6DA /* WindowedDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowedDataSource.swift; sourceTree = "<group>"; };
@@ -236,6 +240,7 @@
 		00105CDAEC72D08D1B927A56 /* SynologyPhotosTests */ = {
 			isa = PBXGroup;
 			children = (
+				21B73ADCAA1B227B90E3B1AA /* AssetInfoFormatterTests.swift */,
 				1EF3205B25839B5C3B86CE9E /* AuthStateMachineTests.swift */,
 				7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */,
 				66AAF71547574AB2C70C51D8 /* CrawlProgressModelTests.swift */,
@@ -412,6 +417,7 @@
 		EEE1C0699CB8B7E53757A150 /* Detail */ = {
 			isa = PBXGroup;
 			children = (
+				CE8F23F7D2E1C87BC4C8C287 /* AssetInfoFormatter.swift */,
 				BB87B9766B67892624647B7D /* DetailPagingModel.swift */,
 				C1BABD02982B5D08ED3601C9 /* DetailQuickLookView.swift */,
 				9A916BF5C0864E0825725A4A /* DetailZoomModel.swift */,
@@ -609,6 +615,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				922C8EB11F7D863637BEC46E /* AssetInfoFormatter.swift in Sources */,
 				20C709DA59D73EC4AFB5462F /* AuthStateMachine.swift in Sources */,
 				8656CA2D10EC4D2F489CE3E3 /* CertApprovalViewModel.swift in Sources */,
 				37C315EB053CA2E9B258A359 /* CoreError+Swift.swift in Sources */,
@@ -653,6 +660,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F06F24C5903CADBB0E2CF0E0 /* AssetInfoFormatterTests.swift in Sources */,
 				BCB21063765E6F5A0842D854 /* AuthStateMachineTests.swift in Sources */,
 				F3DF81EDC7A33D114986BE0D /* CoreBridgeSmokeTests.swift in Sources */,
 				A263DC9AA52F72AAD703B803 /* CrawlProgressModelTests.swift in Sources */,

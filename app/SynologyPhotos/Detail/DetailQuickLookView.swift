@@ -331,8 +331,14 @@ struct DetailViewerHost: View {
     @Binding var currentIndex: Int
     let onClose: () -> Void
 
+    /// Info panel visibility, toggled by the "i" button or Cmd-I. Not reset
+    /// on paging: Photos keeps the info panel open across Left/Right moves
+    /// so browsing a sequence of photos with metadata visible does not
+    /// require re-opening the panel on every single one.
+    @State private var isShowingInfo = false
+
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topTrailing) {
             Color.black.opacity(0.9).ignoresSafeArea()
             if let asset = assetAt(currentIndex) {
                 DetailQuickLookView(
@@ -341,8 +347,31 @@ struct DetailViewerHost: View {
                     client: client,
                     cache: cache)
                 .padding(24)
+                if isShowingInfo {
+                    HStack {
+                        Spacer()
+                        AssetInfoPanelView(fields: AssetInfoFields(asset: asset))
+                            .padding(.top, 24)
+                            .padding(.trailing, 24)
+                    }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+            Button {
+                isShowingInfo.toggle()
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.white)
+                    .padding(10)
+                    .background(.black.opacity(0.4), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(16)
+            .accessibilityIdentifier("detail.infobutton")
+            .accessibilityLabel("Info")
         }
+        .animation(.easeInOut(duration: 0.15), value: isShowingInfo)
         .background(KeyCatcher { event in
             handleKey(event)
         })
@@ -367,9 +396,65 @@ struct DetailViewerHost: View {
         case KeyCode.space:
             onClose()
             return true
+        case KeyCode.i where event.modifierFlags.contains(.command):
+            isShowingInfo.toggle()
+            return true
         default:
             return false
         }
+    }
+}
+
+/// The detail viewer's info panel content: date, filename, dimensions, and
+/// file size, read straight off `Asset` via `AssetInfoFields`. Per the
+/// brief, camera/EXIF and location are not shown here since neither is a
+/// field the core's `Asset` model or any read-only API call currently
+/// exposes per-asset (see `AssetInfoFormatter`'s doc comment); a plain
+/// note says so instead of a blank or invented field, and it is logged as
+/// a follow-up (see the report/TODO) rather than blocking this panel.
+struct AssetInfoPanelView: View {
+    let fields: AssetInfoFields
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(fields.filename)
+                .font(.headline)
+                .lineLimit(2)
+                .accessibilityIdentifier("info.filename")
+
+            Divider()
+
+            row(label: fields.dateLabel, value: fields.dateValue, identifier: "info.date")
+            if let dimensions = fields.dimensions {
+                row(label: "Dimensions", value: dimensions, identifier: "info.dimensions")
+            }
+            if let fileSize = fields.fileSize {
+                row(label: "File Size", value: fileSize, identifier: "info.filesize")
+            }
+
+            Divider()
+
+            Text(AssetInfoFormatter.exifFollowUpNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("info.exifnote")
+        }
+        .padding(16)
+        .frame(width: 260, alignment: .leading)
+        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+        .foregroundStyle(.white)
+        .accessibilityIdentifier("detail.infopanel")
+    }
+
+    private func row(label: String, value: String, identifier: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.body)
+        }
+        .accessibilityIdentifier(identifier)
     }
 }
 

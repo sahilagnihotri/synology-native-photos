@@ -74,4 +74,6 @@ enum KeyCode {
     static let downArrow: UInt16 = 0x7D
     static let upArrow: UInt16 = 0x7E
     static let a: UInt16 = 0x00
+    /// The "I" key, used by the detail viewer's Cmd-I info panel toggle.
+    static let i: UInt16 = 0x22
 }
