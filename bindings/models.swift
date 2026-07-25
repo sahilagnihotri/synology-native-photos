@@ -2570,6 +2570,107 @@ extension ThumbnailSize: Equatable, Hashable {}
 
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Where a video/live asset can be played back from, as decided by
+ * `photoscore::video_playback_source`.
+ *
+ * Only `LocalFile` is produced today: the real NAS advertises
+ * `SYNO.Foto.Streaming` (confirmed present in the SYNO.API.Info capability
+ * probe, versions 1-2) but every plausible method name tried against it
+ * (`stream`, `get`, `open`, `download`, `video`, `play`, `list`,
+ * `stream_get`, `get_stream`) answered with Synology error 103 ("no such
+ * method"), so no working streaming call has been found on this DSM build.
+ * Per the feature brief's "correctness over cleverness" directive, the
+ * guaranteed-working path (download the original, then play the local
+ * file, exactly how `DetailQuickLookView` already previews photos) ships
+ * now; `Url` is reserved for when a real Streaming method is found, so
+ * callers must already handle both variants even though only one is
+ * reachable yet.
+ */
+
+public enum VideoPlaybackSource {
+    
+    /**
+     * A ready-to-play URL, including any auth the player needs (not yet
+     * produced by any code path; reserved for a future Streaming method).
+     */
+    case url(url: String
+    )
+    /**
+     * An absolute path to a local file already downloaded in full, safe to
+     * hand straight to `AVPlayer`/`AVURLAsset`.
+     */
+    case localFile(path: String
+    )
+}
+
+
+#if compiler(>=6)
+extension VideoPlaybackSource: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVideoPlaybackSource: FfiConverterRustBuffer {
+    typealias SwiftType = VideoPlaybackSource
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VideoPlaybackSource {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .url(url: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .localFile(path: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VideoPlaybackSource, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .url(url):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(url, into: &buf)
+            
+        
+        case let .localFile(path):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(path, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVideoPlaybackSource_lift(_ buf: RustBuffer) throws -> VideoPlaybackSource {
+    return try FfiConverterTypeVideoPlaybackSource.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVideoPlaybackSource_lower(_ value: VideoPlaybackSource) -> RustBuffer {
+    return FfiConverterTypeVideoPlaybackSource.lower(value)
+}
+
+
+extension VideoPlaybackSource: Equatable, Hashable {}
+
+
+
+
+
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif

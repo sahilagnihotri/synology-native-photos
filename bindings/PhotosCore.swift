@@ -812,6 +812,31 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      */
     func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize) async throws  -> ThumbnailData
     
+    /**
+     * Resolves how the detail viewer should play back `asset` (a video, or
+     * a "live"/`MediaKind::Unknown` item that may or may not actually be a
+     * video container -- see `models::VideoPlaybackSource`'s doc comment).
+     *
+     * READ-ONLY PROBE FINDING (verified against the real NAS): SYNO.API.Info
+     * genuinely advertises `SYNO.Foto.Streaming` (and `SYNO.FotoTeam.Streaming`),
+     * versions 1-2, so the API exists on this DSM build. However every
+     * plausible method name tried against it (`stream`, `get`, `open`,
+     * `download`, `video`, `play`, `list`, `stream_get`, `get_stream`) answered
+     * with Synology error 103 ("no such method"), so no working streaming
+     * call was found. Per the feature brief's "correctness over cleverness"
+     * directive, this always returns `VideoPlaybackSource::LocalFile` today,
+     * downloading the asset's original bytes exactly the way
+     * `download_original` already does for still photos (same cache
+     * directory, same atomic-write discipline, same unit_id/cache_key
+     * contract) and handing back the local path for `AVPlayer` to open
+     * directly. `VideoPlaybackSource::Url` is reserved for whenever a real
+     * Streaming method is found; no code path produces it yet.
+     *
+     * Same lock discipline and auth-fail-closed behavior as
+     * `download_original`, which this delegates to internally.
+     */
+    func videoPlaybackSource(space: Space, asset: Asset) async throws  -> VideoPlaybackSource
+    
 }
 /**
  * The single UniFFI-exported facade. Swift holds one instance per app run.
@@ -1488,6 +1513,46 @@ open func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: Thumbna
         )
 }
     
+    /**
+     * Resolves how the detail viewer should play back `asset` (a video, or
+     * a "live"/`MediaKind::Unknown` item that may or may not actually be a
+     * video container -- see `models::VideoPlaybackSource`'s doc comment).
+     *
+     * READ-ONLY PROBE FINDING (verified against the real NAS): SYNO.API.Info
+     * genuinely advertises `SYNO.Foto.Streaming` (and `SYNO.FotoTeam.Streaming`),
+     * versions 1-2, so the API exists on this DSM build. However every
+     * plausible method name tried against it (`stream`, `get`, `open`,
+     * `download`, `video`, `play`, `list`, `stream_get`, `get_stream`) answered
+     * with Synology error 103 ("no such method"), so no working streaming
+     * call was found. Per the feature brief's "correctness over cleverness"
+     * directive, this always returns `VideoPlaybackSource::LocalFile` today,
+     * downloading the asset's original bytes exactly the way
+     * `download_original` already does for still photos (same cache
+     * directory, same atomic-write discipline, same unit_id/cache_key
+     * contract) and handing back the local path for `AVPlayer` to open
+     * directly. `VideoPlaybackSource::Url` is reserved for whenever a real
+     * Streaming method is found; no code path produces it yet.
+     *
+     * Same lock discipline and auth-fail-closed behavior as
+     * `download_original`, which this delegates to internally.
+     */
+open func videoPlaybackSource(space: Space, asset: Asset)async throws  -> VideoPlaybackSource  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_video_playback_source(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeSpace_lower(space),FfiConverterTypeAsset_lower(asset)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeVideoPlaybackSource_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
 
 }
 
@@ -1999,6 +2064,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_thumbnail() != 41967) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_video_playback_source() != 60277) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_constructor_photoscore_new() != 54313) {

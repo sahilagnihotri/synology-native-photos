@@ -391,6 +391,11 @@ uint64_t uniffi_photoscore_fn_method_photoscore_sign_out(void*_Nonnull ptr
 uint64_t uniffi_photoscore_fn_method_photoscore_thumbnail(void*_Nonnull ptr, RustBuffer space, int64_t unit_id, RustBuffer cache_key, RustBuffer size
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_VIDEO_PLAYBACK_SOURCE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_VIDEO_PLAYBACK_SOURCE
+uint64_t uniffi_photoscore_fn_method_photoscore_video_playback_source(void*_Nonnull ptr, RustBuffer space, RustBuffer asset
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_INIT_CALLBACK_VTABLE_FFICRAWLOBSERVER
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_INIT_CALLBACK_VTABLE_FFICRAWLOBSERVER
 void uniffi_photoscore_fn_init_callback_vtable_fficrawlobserver(const UniffiVTableCallbackInterfaceFfiCrawlObserver* _Nonnull vtable
@@ -817,6 +822,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_sign_out(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_THUMBNAIL
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_THUMBNAIL
 uint16_t uniffi_photoscore_checksum_method_photoscore_thumbnail(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_VIDEO_PLAYBACK_SOURCE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_VIDEO_PLAYBACK_SOURCE
+uint16_t uniffi_photoscore_checksum_method_photoscore_video_playback_source(void
     
 );
 #endif
