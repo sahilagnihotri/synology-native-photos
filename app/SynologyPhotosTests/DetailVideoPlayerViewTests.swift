@@ -148,6 +148,61 @@ struct VideoPlaybackPreparationTests {
     }
 }
 
+/// Exercises the cache-first video source resolver: a first open downloads
+/// once and caches the movie by `cacheKey`; a re-open plays the cached file
+/// without touching `videoPlaybackSource` (and thus without re-downloading).
+struct VideoCacheResolverTests {
+    private func videoAsset() -> Asset {
+        Asset(id: 1, unitId: 1, cacheKey: "vk-1", filename: "IMG_1870.MOV", mediaKind: .video,
+              takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
+              space: .personal, serverVersion: nil)
+    }
+
+    private func freshCache() -> OriginalImageCache {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vid-cache-\(UUID().uuidString)", isDirectory: true)
+        return OriginalImageCache(cacheDir: dir, ramLimitBytes: 1_000_000, diskLimitBytes: 100_000_000)
+    }
+
+    @Test func firstOpenDownloadsAndCachesSecondOpenServesFromDisk() async throws {
+        // A real file standing in for the core's downloaded original.
+        let src = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dl-\(UUID().uuidString)")
+        try Data([0x00, 0x11, 0x22, 0x33]).write(to: src)
+        defer { try? FileManager.default.removeItem(at: src) }
+
+        let fake = FakePhotosCore()
+        fake.videoPlaybackSourceResult = .success(.localFile(path: src.path))
+        let client = PhotosCoreClient(core: fake)
+        let originalCache = freshCache()
+        let tempCache = TempFileCache()
+        let asset = videoAsset()
+
+        let first = try await DetailVideoPlayerView.resolvePlayableSource(
+            asset: asset, space: .personal, client: client, originalCache: originalCache, cache: tempCache)
+        guard case .localFile(let firstPath) = first else {
+            Issue.record("expected a .localFile source"); return
+        }
+        // The played file is the cached copy (video-extensioned), not the raw
+        // download temp, and it really exists.
+        #expect(firstPath != src.path)
+        #expect(VideoTempFilename.pathHasRecognizedExtension(firstPath))
+        #expect(FileManager.default.fileExists(atPath: firstPath))
+        #expect(fake.videoPlaybackSourceCallCount == 1)
+
+        let second = try await DetailVideoPlayerView.resolvePlayableSource(
+            asset: asset, space: .personal, client: client, originalCache: originalCache, cache: tempCache)
+        guard case .localFile(let secondPath) = second else {
+            Issue.record("expected a .localFile source"); return
+        }
+        // Re-open serves the same cached file and never re-downloads.
+        #expect(secondPath == firstPath)
+        #expect(fake.videoPlaybackSourceCallCount == 1)
+
+        await originalCache.clear()
+    }
+}
+
 /// Exercises the detail image renderer's state machine (the photo branch),
 /// independent of a real NAS download or a real image on disk: both the
 /// download and the decode step are injected closures, so loading -> loaded
@@ -164,33 +219,60 @@ struct DetailImageLoaderTests {
 
     @Test func startsInLoadingBeforeAnyLoad() {
         let loader = DetailImageLoader(
-            download: { _, _ in URL(fileURLWithPath: "/dev/null") },
-            makeImage: { _ in NSImage(size: NSSize(width: 1, height: 1)) })
+            loadDisplay: { _, _ in NSImage(size: NSSize(width: 1, height: 1)) })
         #expect(loader.state == .loading)
     }
 
     @Test func movesToLoadedOnAValidImage() async {
         let image = NSImage(size: NSSize(width: 2, height: 2))
-        let loader = DetailImageLoader(
-            download: { _, _ in URL(fileURLWithPath: "/tmp/whatever.jpg") },
-            makeImage: { _ in image })
+        let loader = DetailImageLoader(loadDisplay: { _, _ in image })
         await loader.load(asset: photo(), space: .personal)
         #expect(loader.state == .loaded(image))
     }
 
-    @Test func movesToFailedWhenTheDownloadThrows() async {
-        let loader = DetailImageLoader(
-            download: { _, _ in throw DownloadFailed() },
-            makeImage: { _ in NSImage(size: NSSize(width: 1, height: 1)) })
+    @Test func movesToFailedWhenTheLoadThrows() async {
+        let loader = DetailImageLoader(loadDisplay: { _, _ in throw DownloadFailed() })
         await loader.load(asset: photo(), space: .personal)
         #expect(loader.state == .failed("Could not load this photo."))
     }
 
     @Test func movesToFailedWhenTheFileCannotBeDecoded() async {
-        let loader = DetailImageLoader(
-            download: { _, _ in URL(fileURLWithPath: "/tmp/not-an-image") },
-            makeImage: { _ in nil })
+        let loader = DetailImageLoader(loadDisplay: { _, _ in nil })
         await loader.load(asset: photo(), space: .personal)
         #expect(loader.state == .failed("This file could not be opened as an image."))
+    }
+
+    @Test func showsCachedThumbnailAsPlaceholderWhileLoading() async {
+        let thumbnail = NSImage(size: NSSize(width: 8, height: 6))
+        let loader = DetailImageLoader(
+            loadDisplay: { _, _ in NSImage(size: NSSize(width: 2, height: 2)) },
+            placeholderFor: { _ in thumbnail })
+        await loader.load(asset: photo(), space: .personal)
+        // The placeholder is captured up front so the loading frame can show it.
+        #expect(loader.placeholder === thumbnail)
+    }
+
+    @Test func loadFullResolutionPopulatesFromCacheOnlyOnce() async {
+        let full = NSImage(size: NSSize(width: 9, height: 9))
+        var fullCalls = 0
+        let loader = DetailImageLoader(
+            loadDisplay: { _, _ in NSImage(size: NSSize(width: 2, height: 2)) },
+            loadFull: { _, _ in fullCalls += 1; return full })
+        await loader.load(asset: photo(), space: .personal)
+        await loader.loadFullResolutionIfNeeded(asset: photo(), space: .personal)
+        await loader.loadFullResolutionIfNeeded(asset: photo(), space: .personal)
+        #expect(loader.fullResolution === full)
+        #expect(loader.displayImage === full)
+        #expect(fullCalls == 1)
+    }
+
+    @Test func displayMaxPixelIsBoundedAndScaledToTheScreen() {
+        // A retina 1440-point screen -> 2880 native px, within bounds.
+        #expect(DetailImageLoader.displayMaxPixel(screenMaxDimension: 1440, scale: 2) == 2880)
+        // Below the floor clamps up; a huge external display clamps down.
+        #expect(DetailImageLoader.displayMaxPixel(screenMaxDimension: 320, scale: 1) == 1024)
+        #expect(DetailImageLoader.displayMaxPixel(screenMaxDimension: 6016, scale: 2) == 4096)
+        // No screen falls back to a sane default rather than crashing.
+        #expect(DetailImageLoader.displayMaxPixel(screenMaxDimension: nil, scale: nil) == 3200)
     }
 }

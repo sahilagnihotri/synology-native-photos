@@ -236,6 +236,10 @@ struct DetailVideoPlayerView: NSViewRepresentable {
     let space: Space
     let client: PhotosCoreClient
     let cache: TempFileCache
+    /// Two-tier original cache; its disk tier holds the downloaded movie keyed
+    /// by `cacheKey`, so a re-open plays the cached file instead of
+    /// re-downloading the whole original every time.
+    let originalCache: OriginalImageCache
     let synoToken: String?
 
     /// Ensures a `.localFile` playback source points at a file whose
@@ -265,6 +269,38 @@ struct DetailVideoPlayerView: NSViewRepresentable {
         return "This video could not be played."
     }
 
+    /// Resolves the playback source to hand `AVPlayer`, cache-first:
+    ///  1. if the disk tier already holds this asset's original (keyed by
+    ///     `cacheKey`), returns a `.localFile` pointing at it WITHOUT touching
+    ///     the network, so a re-open never re-downloads the movie;
+    ///  2. otherwise downloads via `videoPlaybackSource`, ingests the bytes
+    ///     into the disk tier keyed by `cacheKey` under a video-extensioned
+    ///     name, and returns a `.localFile` pointing at the cached copy;
+    ///  3. a `.url` streaming source (none produced today) passes straight
+    ///     through; an ingest failure (disk full, etc.) degrades to the
+    ///     previous `TempFileCache` re-extension path so playback is still
+    ///     attempted.
+    static func resolvePlayableSource(
+        asset: Asset,
+        space: Space,
+        client: PhotosCoreClient,
+        originalCache: OriginalImageCache,
+        cache: TempFileCache
+    ) async throws -> VideoPlaybackSource {
+        let preferredFilename = VideoTempFilename.derive(for: asset)
+        if let cached = await originalCache.cachedFileURL(
+            cacheKey: asset.cacheKey, preferredFilename: preferredFilename) {
+            return .localFile(path: cached.path)
+        }
+        let source = try await client.videoPlaybackSource(space: space, asset: asset)
+        guard case .localFile(let path) = source else { return source }
+        if let url = try? await originalCache.ingest(
+            cacheKey: asset.cacheKey, preferredFilename: preferredFilename, sourcePath: path) {
+            return .localFile(path: url.path)
+        }
+        return await preparedSource(from: source, asset: asset, cache: cache)
+    }
+
     func makeNSView(context: Context) -> VideoPlayerContainerView {
         VideoPlayerContainerView()
     }
@@ -285,13 +321,12 @@ struct DetailVideoPlayerView: NSViewRepresentable {
 
         let a = asset, s = space, c = client, token = synoToken
         let cache = self.cache
+        let originalCache = self.originalCache
         let coordinator = context.coordinator
         Task {
             do {
-                let source = try await c.videoPlaybackSource(space: s, asset: a)
-                guard coordinator.lastAssetId == a.id else { return }
-                let playable = await DetailVideoPlayerView.preparedSource(
-                    from: source, asset: a, cache: cache)
+                let playable = try await DetailVideoPlayerView.resolvePlayableSource(
+                    asset: a, space: s, client: c, originalCache: originalCache, cache: cache)
                 guard coordinator.lastAssetId == a.id else { return }
                 let urlAsset = VideoPlaybackAssetBuilder.makeAsset(source: playable, synoToken: token)
                 let item = AVPlayerItem(asset: urlAsset)

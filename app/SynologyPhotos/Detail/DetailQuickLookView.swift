@@ -188,36 +188,54 @@ enum DetailImageState: Equatable {
     }
 }
 
-/// Drives the detail image render through its three states. Kept free of any
-/// direct network/SwiftUI dependency by taking its `download` and `makeImage`
-/// steps as injected closures, so the state machine (starts loading, moves to
-/// loaded on a valid image, moves to failed on a thrown error or an
-/// undecodable file) is unit-testable without a live NAS or a real image on
-/// disk.
+/// Drives the detail image render through its three states, cache-aware. Kept
+/// free of any direct network/SwiftUI dependency by taking its load steps as
+/// injected closures (the production wiring hands it `OriginalImageCache`'s
+/// RAM/disk/network path), so the state machine (starts loading, moves to
+/// loaded on a valid image, moves to failed on a thrown error or an undecodable
+/// file) is unit-testable without a live NAS or a real image on disk.
 @MainActor
 @Observable
 final class DetailImageLoader {
     private(set) var state: DetailImageState = .loading
 
-    private let download: (Asset, Space) async throws -> URL
-    private let makeImage: (URL) -> NSImage?
+    /// A grid thumbnail for the current asset, shown scaled up as an immediate
+    /// placeholder while the full original loads, so paging never flashes an
+    /// empty pane for a photo whose thumbnail is already cached. Nil when no
+    /// thumbnail is cached, in which case the view falls back to a spinner.
+    private(set) var placeholder: NSImage?
+
+    /// A near-full-resolution decode, loaded lazily only once the user zooms
+    /// past fit so a zoomed-in photo stays crisp. Nil until then, and reset on
+    /// every new photo.
+    private(set) var fullResolution: NSImage?
+
+    private let loadDisplay: (Asset, Space) async throws -> NSImage?
+    private let loadFull: (Asset, Space) async throws -> NSImage?
+    private let placeholderFor: (Asset) -> NSImage?
 
     init(
-        download: @escaping (Asset, Space) async throws -> URL,
-        makeImage: @escaping (URL) -> NSImage?
+        loadDisplay: @escaping (Asset, Space) async throws -> NSImage?,
+        loadFull: @escaping (Asset, Space) async throws -> NSImage? = { _, _ in nil },
+        placeholderFor: @escaping (Asset) -> NSImage? = { _ in nil }
     ) {
-        self.download = download
-        self.makeImage = makeImage
+        self.loadDisplay = loadDisplay
+        self.loadFull = loadFull
+        self.placeholderFor = placeholderFor
     }
 
-    /// Runs one download-and-decode cycle for `asset`, publishing `.loading`
-    /// first so a re-attempt (Retry, or paging to a new photo) always shows
-    /// progress rather than the previous photo frozen underneath.
+    /// Runs one load-and-decode cycle for `asset`, publishing `.loading` first
+    /// (with the cached grid thumbnail as an immediate placeholder if one
+    /// exists) so a re-attempt or a paging move always shows progress rather
+    /// than the previous photo frozen underneath. The heavy work (network on a
+    /// cache miss, decode) is inside `loadDisplay`, which returns the already
+    /// downsampled image; a `nil` return means the bytes could not be decoded.
     func load(asset: Asset, space: Space) async {
+        fullResolution = nil
+        placeholder = placeholderFor(asset)
         state = .loading
         do {
-            let url = try await download(asset, space)
-            if let image = makeImage(url) {
+            if let image = try await loadDisplay(asset, space) {
                 state = .loaded(image)
             } else {
                 state = .failed("This file could not be opened as an image.")
@@ -227,11 +245,51 @@ final class DetailImageLoader {
         }
     }
 
+    /// Loads the near-full-resolution decode once (idempotent), for when the
+    /// user magnifies past fit. Served from cache on a disk/RAM hit, so it is
+    /// cheap after the first open and never re-downloads. A failure is silently
+    /// ignored: the downsampled image stays on screen (just less crisp when
+    /// zoomed), which beats replacing a working view with an error.
+    func loadFullResolutionIfNeeded(asset: Asset, space: Space) async {
+        guard fullResolution == nil else { return }
+        if let image = try? await loadFull(asset, space) {
+            fullResolution = image
+        }
+    }
+
+    /// The best image to display right now: the full-resolution decode if it
+    /// has loaded (zoomed in), else the downsampled image from `state`.
+    var displayImage: NSImage? {
+        if let fullResolution { return fullResolution }
+        if case .loaded(let image) = state { return image }
+        return nil
+    }
+
     /// A short, human-readable failure line. A `CoreError` already carries a
     /// user-facing message; anything else gets a plain fallback.
     static func message(for error: Error) -> String {
         if let core = error as? CoreError { return core.userMessage }
         return "Could not load this photo."
+    }
+
+    /// Pure display-target policy: the downsample max-pixel derived from a
+    /// screen's native pixel resolution (points times backing scale). Bounded
+    /// so a photo is crisp at fit while the decode stays far cheaper than a
+    /// full original, and so an external 6K/8K display does not push every
+    /// decode to an enormous bitmap. Split out as a pure function so it is
+    /// testable without an actual screen.
+    static func displayMaxPixel(screenMaxDimension: CGFloat?, scale: CGFloat?) -> Int {
+        let dimension = screenMaxDimension ?? 1600
+        let backing = scale ?? 2
+        return min(max(Int(dimension * backing), 1024), 4096)
+    }
+
+    /// The display target for the machine's main screen, or a sane default on a
+    /// headless host.
+    static func displayMaxPixel() -> Int {
+        let screen = NSScreen.main
+        let maxDim = screen.map { max($0.frame.width, $0.frame.height) }
+        return displayMaxPixel(screenMaxDimension: maxDim, scale: screen?.backingScaleFactor)
     }
 }
 
@@ -434,13 +492,17 @@ struct ZoomableImageView: NSViewRepresentable {
     }
 }
 
-/// Full-size photo detail view: downloads the original for `asset` (via
-/// `PhotosCoreClient.downloadOriginal`) into a count-bounded temp cache,
-/// decodes it, and renders it aspect-fit and centered with scroll/pinch zoom.
+/// Full-size photo detail view: resolves the original for `asset` through the
+/// two-tier `OriginalImageCache` (RAM decode, then disk original, then a single
+/// network `downloadOriginal` on a cache miss), decodes it downsampled to the
+/// display size, and renders it aspect-fit and centered with scroll/pinch zoom.
+/// Zooming past fit lazily loads a near-full-resolution decode so the zoomed
+/// image stays crisp.
 ///
-/// Three explicit states, so a failure is never a silent black frame:
-/// a `ProgressView` while the download runs, the zoomable image once loaded,
-/// and a labeled error with a Retry button if the download or decode fails.
+/// States, so a failure is never a silent black frame and paging never flashes
+/// blank: while loading it shows the already-cached grid thumbnail scaled up
+/// (or a spinner when there is none), the zoomable image once loaded, and a
+/// labeled error with a Retry button if the load or decode fails.
 ///
 /// Read-only: this view only ever downloads and previews. It never uploads,
 /// edits, or deletes anything on the NAS.
@@ -448,49 +510,114 @@ struct DetailQuickLookView: View {
     let asset: Asset
     let space: Space
     let client: PhotosCoreClient
-    let cache: TempFileCache
+    let originalCache: OriginalImageCache
+    let thumbnailCache: ThumbnailCache
     @Binding var magnification: CGFloat
 
     @State private var loader: DetailImageLoader
 
-    init(asset: Asset, space: Space, client: PhotosCoreClient, cache: TempFileCache, magnification: Binding<CGFloat>) {
+    init(
+        asset: Asset,
+        space: Space,
+        client: PhotosCoreClient,
+        originalCache: OriginalImageCache,
+        thumbnailCache: ThumbnailCache,
+        magnification: Binding<CGFloat>
+    ) {
         self.asset = asset
         self.space = space
         self.client = client
-        self.cache = cache
+        self.originalCache = originalCache
+        self.thumbnailCache = thumbnailCache
         _magnification = magnification
+        // Computed once per view instance (the detail viewer reuses one
+        // instance across paging), so the RAM cache key stays stable.
+        let maxPixel = DetailImageLoader.displayMaxPixel()
         _loader = State(initialValue: DetailImageLoader(
-            download: { a, s in
-                // Must pass a.unitId, not a.id: the download endpoint keys
-                // on unit_id the same way the thumbnail endpoint does.
-                let path = try await client.downloadOriginal(space: s, unitId: a.unitId, cacheKey: a.cacheKey)
-                let filename = QuickLookFilename.derive(for: a)
-                return await cache.store(path: path, preferredFilename: filename)
+            loadDisplay: { a, s in
+                // Must pass a.unitId, not a.id: the download endpoint keys on
+                // unit_id the same way the thumbnail endpoint does. The cache
+                // only invokes this download on a disk miss.
+                try await originalCache.displayImage(
+                    cacheKey: a.cacheKey,
+                    maxPixel: maxPixel,
+                    preferredFilename: QuickLookFilename.derive(for: a),
+                    download: { try await client.downloadOriginal(space: s, unitId: a.unitId, cacheKey: a.cacheKey) })
             },
-            makeImage: { NSImage(contentsOf: $0) }))
+            loadFull: { a, s in
+                try await originalCache.fullImage(
+                    cacheKey: a.cacheKey,
+                    preferredFilename: QuickLookFilename.derive(for: a),
+                    download: { try await client.downloadOriginal(space: s, unitId: a.unitId, cacheKey: a.cacheKey) })
+            },
+            placeholderFor: { a in Self.placeholder(for: a, thumbnailCache: thumbnailCache) }))
+    }
+
+    /// The best already-cached grid thumbnail for `asset`, largest size first,
+    /// as an `NSImage` placeholder. A synchronous memory-tier peek only (no
+    /// fetch, no actor hop), so it is safe to evaluate while building the view.
+    private static func placeholder(for asset: Asset, thumbnailCache: ThumbnailCache) -> NSImage? {
+        for size in [ThumbnailSize.xl, .m, .sm] {
+            let key = ThumbKey(assetId: asset.id, size: size, cacheKey: asset.cacheKey)
+            if let cg = thumbnailCache.peekMemory(key) {
+                return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+            }
+        }
+        return nil
     }
 
     var body: some View {
         Group {
             switch loader.state {
             case .loading:
-                ProgressView()
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .accessibilityIdentifier("detail.loading")
-            case .loaded(let image):
-                ZoomableImageView(image: image, assetId: asset.id, magnification: $magnification)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let placeholder = loader.placeholder {
+                    placeholderView(placeholder)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityIdentifier("detail.loading")
+                }
+            case .loaded:
+                if let image = loader.displayImage {
+                    ZoomableImageView(image: image, assetId: asset.id, magnification: $magnification)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             case .failed(let message):
                 failureView(message)
             }
         }
         // `.task(id:)` cancels and restarts whenever the shown asset changes,
-        // so paging Left/Right reloads the new photo (and shows its spinner)
+        // so paging Left/Right reloads the new photo (and shows its placeholder)
         // even though this view instance is reused.
         .task(id: asset.id) {
             await loader.load(asset: asset, space: space)
         }
+        .onChange(of: magnification) { _, newValue in
+            // Only fetch the crisp full-resolution decode once the user has
+            // actually zoomed past fit; the initial open stays on the fast
+            // downsampled image.
+            guard DetailZoomModel.isZoomed(newValue) else { return }
+            Task { await loader.loadFullResolutionIfNeeded(asset: asset, space: space) }
+        }
+    }
+
+    /// The cached grid thumbnail shown scaled to fit, with a small spinner
+    /// over it, while the full original loads. Upscaling a small thumbnail is
+    /// deliberately soft, but a soft preview that appears instantly beats a
+    /// blank pane, and it is replaced by the full decode the moment it lands.
+    private func placeholderView(_ image: NSImage) -> some View {
+        ZStack {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.medium)
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("detail.placeholder")
+            ProgressView()
+                .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func failureView(_ message: String) -> some View {
@@ -539,6 +666,13 @@ struct DetailViewerHost: View {
     let space: Space
     let client: PhotosCoreClient
     let cache: TempFileCache
+    /// Two-tier cache of downloaded originals (RAM decode + on-disk bytes),
+    /// shared by the photo and video detail paths so a re-open is instant and
+    /// never re-downloads.
+    let originalCache: OriginalImageCache
+    /// The grid's thumbnail cache, consulted for an instant placeholder while
+    /// a full original loads.
+    let thumbnailCache: ThumbnailCache
     /// The current session's `syno_token`, forwarded to
     /// `DetailVideoPlayerView` for a future streaming-URL playback source
     /// (see that file's header comment); unused on the current
@@ -582,13 +716,15 @@ struct DetailViewerHost: View {
                             space: space,
                             client: client,
                             cache: cache,
+                            originalCache: originalCache,
                             synoToken: synoToken)
                     } else {
                         DetailQuickLookView(
                             asset: asset,
                             space: space,
                             client: client,
-                            cache: cache,
+                            originalCache: originalCache,
+                            thumbnailCache: thumbnailCache,
                             magnification: $magnification)
                     }
                 }
