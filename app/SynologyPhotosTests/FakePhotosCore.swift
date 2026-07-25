@@ -32,6 +32,22 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     var fetchCertificateResult: Result<CertInfo, CoreError> = .success(
         CertInfo(der: Data([0xCE, 0x27]), sha256Hex: "aa:bb:cc:dd", subject: "CN=fake.nas.local"))
 
+    // MARK: - Trash (hybrid safe-delete) scripted results
+
+    /// Result for `ensureTrashAlbum`. Defaults to a plausible app-owned
+    /// Recently Deleted album so a test that never scripts it still gets
+    /// something sensible back.
+    var ensureTrashAlbumResult: Result<Album, CoreError> = .success(
+        Album(id: 9_000, name: "Recently Deleted", itemCount: 0, coverCacheKey: nil,
+              coverUnitId: nil, isShared: false, isSmart: false, space: .personal))
+    var deleteToTrashResult: Result<Void, CoreError> = .success(())
+    var restoreFromTrashResult: Result<Void, CoreError> = .success(())
+    var permanentlyDeleteResult: Result<Void, CoreError> = .success(())
+    var reconcileTrashResult: Result<Void, CoreError> = .success(())
+    /// Canned trashed assets per space, windowed by `fetchTrash` exactly the
+    /// way `assets` is windowed by `fetchAssets`.
+    var trash: [Space: [Asset]] = [:]
+
     /// When set, `login` only succeeds (skipping the `OtpRequired` path)
     /// when the caller's `deviceToken` exactly matches this value; any
     /// other token (including `nil`) is treated as if none had been given
@@ -165,6 +181,25 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var lastDownloadRequest: (space: Space, unitId: Int64, cacheKey: String)?
     private(set) var lastVideoPlaybackRequest: (space: Space, asset: Asset)?
 
+    // MARK: - Trash call tracking
+
+    private(set) var ensureTrashAlbumCallCount = 0
+    private(set) var deleteToTrashCallCount = 0
+    private(set) var restoreFromTrashCallCount = 0
+    private(set) var permanentlyDeleteCallCount = 0
+    private(set) var reconcileTrashCallCount = 0
+    private(set) var fetchTrashCallCount = 0
+    private(set) var trashCountCallCount = 0
+
+    private(set) var lastDeleteToTrashIds: [Int64]?
+    private(set) var lastRestoreFromTrashIds: [Int64]?
+    private(set) var lastPermanentlyDeleteIds: [Int64]?
+    private(set) var lastEnsureTrashAlbumSpace: Space?
+    private(set) var lastDeleteToTrashSpace: Space?
+    private(set) var lastRestoreFromTrashSpace: Space?
+    private(set) var lastPermanentlyDeleteSpace: Space?
+    private(set) var lastReconciledTrashSpace: Space?
+
     init() {}
 
     // MARK: - Auth
@@ -295,6 +330,51 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         videoPlaybackSourceCallCount += 1
         lastVideoPlaybackRequest = (space, asset)
         return try videoPlaybackSourceResult.get()
+    }
+
+    // MARK: - Trash (hybrid safe-delete)
+
+    func ensureTrashAlbum(space: Space) async throws -> Album {
+        ensureTrashAlbumCallCount += 1
+        lastEnsureTrashAlbumSpace = space
+        return try ensureTrashAlbumResult.get()
+    }
+
+    func deleteToTrash(space: Space, assetIds: [Int64]) async throws {
+        deleteToTrashCallCount += 1
+        lastDeleteToTrashSpace = space
+        lastDeleteToTrashIds = assetIds
+        try deleteToTrashResult.get()
+    }
+
+    func restoreFromTrash(space: Space, assetIds: [Int64]) async throws {
+        restoreFromTrashCallCount += 1
+        lastRestoreFromTrashSpace = space
+        lastRestoreFromTrashIds = assetIds
+        try restoreFromTrashResult.get()
+    }
+
+    func fetchTrash(space: Space, offset: UInt32, limit: UInt32) throws -> [Asset] {
+        fetchTrashCallCount += 1
+        return try window(trash[space] ?? [], offset: offset, limit: limit)
+    }
+
+    func trashCount(space: Space) throws -> UInt32 {
+        trashCountCallCount += 1
+        return UInt32((trash[space] ?? []).count)
+    }
+
+    func permanentlyDelete(space: Space, assetIds: [Int64]) async throws {
+        permanentlyDeleteCallCount += 1
+        lastPermanentlyDeleteSpace = space
+        lastPermanentlyDeleteIds = assetIds
+        try permanentlyDeleteResult.get()
+    }
+
+    func reconcileTrash(space: Space) async throws {
+        reconcileTrashCallCount += 1
+        lastReconciledTrashSpace = space
+        try reconcileTrashResult.get()
     }
 
     // MARK: - Discovery browse

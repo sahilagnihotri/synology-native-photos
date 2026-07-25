@@ -38,6 +38,44 @@ actor PhotosCoreClient {
         try await core.videoPlaybackSource(space: space, asset: asset)
     }
 
+    // MARK: - Trash (hybrid safe-delete)
+
+    /// Resolves (creating if needed) the app-owned Recently Deleted album.
+    /// Not called on the everyday path (the core's own delete/reconcile
+    /// manage the album), exposed for completeness and future admin use.
+    func ensureTrashAlbum(space: Space) async throws -> Album {
+        try await core.ensureTrashAlbum(space: space)
+    }
+    /// Everyday delete: moves `assetIds` into the Recently Deleted album,
+    /// fully reversible. NEVER calls the raw destructive verb.
+    func deleteToTrash(space: Space, assetIds: [Int64]) async throws {
+        try await core.deleteToTrash(space: space, assetIds: assetIds)
+    }
+    /// Moves `assetIds` back out of Recently Deleted into the library.
+    func restoreFromTrash(space: Space, assetIds: [Int64]) async throws {
+        try await core.restoreFromTrash(space: space, assetIds: assetIds)
+    }
+    /// Windowed local read of the Recently Deleted album (sync, no network),
+    /// mirroring `fetchAssets`'s own local-read discipline.
+    func fetchTrash(space: Space, offset: UInt32, limit: UInt32) throws -> [Asset] {
+        try core.fetchTrash(space: space, offset: offset, limit: limit)
+    }
+    /// Local count of trashed items (sync, no network), mirroring `assetCount`.
+    func trashCount(space: Space) throws -> UInt32 {
+        try core.trashCount(space: space)
+    }
+    /// The only path that calls the raw destructive verb. Gated behind a
+    /// dedicated, always-shown confirm in the UI; never reachable from the
+    /// everyday delete flow.
+    func permanentlyDelete(space: Space, assetIds: [Int64]) async throws {
+        try await core.permanentlyDelete(space: space, assetIds: assetIds)
+    }
+    /// Re-derives local trash flags from the album's real membership, so a
+    /// restore done on another Synology client is reflected here.
+    func reconcileTrash(space: Space) async throws {
+        try await core.reconcileTrash(space: space)
+    }
+
     // MARK: - Discovery browse
 
     func fetchPeople(offset: UInt32, limit: UInt32) async throws -> [Person] {
