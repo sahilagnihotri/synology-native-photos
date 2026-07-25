@@ -24,6 +24,10 @@ and filters. Do this AFTER the hybrid delete core lands (both touch models/brows
 - [ ] Share link: create a public share link for a photo/video (`SYNO.Foto.PublicSharing` / `SYNO.Foto.Sharing.*`). New feature; probe read-first.
 - [ ] Edit (crop/rotate): Phase 3 non-destructive (upload the edited copy as a NEW asset; original stays immutable).
 
+## Build infra
+
+- [ ] Make the xcframework rebuild self-healing. The `ensure-xcframework` preBuildScript only builds `PhotosCore.xcframework` when it is MISSING, not when the Rust core changed, so after any core pass the app build fails with "cannot find uniffi_..._checksum" until `make xcframework` is run by hand. Fix the preBuildScript to rebuild when the core sources are newer than the packaged xcframework (compare mtimes, run `make xcframework`). Until fixed: run `make xcframework` after every core change before building the app.
+
 ## Security (before real use)
 
 - [ ] Change the DSM password `xatkiW-pitkew-dizno7` (exposed in chat during debugging).
