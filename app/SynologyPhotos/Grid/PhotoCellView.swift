@@ -19,6 +19,11 @@ final class PhotoCellView: NSCollectionViewItem {
     /// Photos' own selection treatment (a rounded highlight border rather
     /// than a filled overlay, so the thumbnail itself stays fully visible).
     private let selectionRing = CALayer()
+    /// Small play-badge shown in the bottom-leading corner of a video cell's
+    /// thumbnail, matching Photos' own grid convention for indicating a cell
+    /// plays back rather than just displaying a still image. Hidden by
+    /// default; `configure` shows it only for `MediaKind.video` assets.
+    private let playBadge = NSImageView()
     private static let ringInset: CGFloat = 3
     private static let cornerRadius: CGFloat = 6
 
@@ -48,6 +53,12 @@ final class PhotoCellView: NSCollectionViewItem {
     /// `thumbView.image`.
     var displayedImage: NSImage? { thumbView.image }
 
+    /// Whether the play badge is currently showing. Internal (not private)
+    /// for the same reason as `displayedImage`: production code never reads
+    /// this, only tests asserting `configure` shows/hides it correctly for
+    /// video vs non-video assets.
+    var isShowingPlayBadge: Bool { !playBadge.isHidden }
+
     override func loadView() {
         let container = NSView()
         container.wantsLayer = true
@@ -69,6 +80,18 @@ final class PhotoCellView: NSCollectionViewItem {
         selectionRing.cornerRadius = Self.cornerRadius
         selectionRing.isHidden = true
         container.layer?.addSublayer(selectionRing)
+
+        playBadge.translatesAutoresizingMaskIntoConstraints = false
+        playBadge.image = NSImage(systemSymbolName: "play.circle.fill", accessibilityDescription: "Video")
+        playBadge.contentTintColor = .white
+        playBadge.symbolConfiguration = .init(pointSize: 14, weight: .semibold)
+        playBadge.isHidden = true
+        playBadge.setAccessibilityIdentifier("grid.cell.playbadge")
+        container.addSubview(playBadge)
+        NSLayoutConstraint.activate([
+            playBadge.trailingAnchor.constraint(equalTo: thumbView.trailingAnchor, constant: -6),
+            playBadge.bottomAnchor.constraint(equalTo: thumbView.bottomAnchor, constant: -6),
+        ])
 
         self.view = container
     }
@@ -105,6 +128,7 @@ final class PhotoCellView: NSCollectionViewItem {
         representedAssetId = -1
         displayedKey = nil
         selectionRing.isHidden = true
+        playBadge.isHidden = true
     }
 
     /// Binds this cell to `asset` and kicks off its thumbnail load.
@@ -137,6 +161,7 @@ final class PhotoCellView: NSCollectionViewItem {
 
         representedAssetId = asset.id
         view.setAccessibilityIdentifier("grid.cell.\(asset.id)")
+        playBadge.isHidden = asset.mediaKind != .video
         loadTask?.cancel()
 
         if let cached = cache.peekMemory(key) {

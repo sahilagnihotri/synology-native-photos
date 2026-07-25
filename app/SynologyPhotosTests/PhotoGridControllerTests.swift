@@ -19,6 +19,12 @@ struct PhotoGridControllerTests {
               fileSize: nil, space: .personal, serverVersion: id)
     }
 
+    private func videoAsset(_ id: Int64) -> Asset {
+        Asset(id: id, unitId: id, cacheKey: "v", filename: "\(id).mov", mediaKind: .video,
+              takenAt: 1_700_000_000 + id, addedAt: nil, width: 1920, height: 1080,
+              fileSize: nil, space: .personal, serverVersion: id)
+    }
+
     /// Writes a solid-color PNG with a distinct aspect ratio so a decoded
     /// thumbnail can be told apart from another asset's without comparing
     /// raw pixels: after `ThumbnailCache` downsamples to a `.sm` (240px)
@@ -65,6 +71,31 @@ struct PhotoGridControllerTests {
         let cache = ThumbnailCache(client: PhotosCoreClient(core: FakePhotosCore()))
         cell.configure(asset: asset(1), space: .personal, cache: cache)
         #expect(cell.representedAssetId == 1)
+    }
+
+    /// A video asset shows the play badge; a plain photo asset does not.
+    @Test func cellConfigureShowsPlayBadgeOnlyForVideoAssets() {
+        let cell = PhotoCellView()
+        _ = cell.view
+        let cache = ThumbnailCache(client: PhotosCoreClient(core: FakePhotosCore()))
+        cell.configure(asset: videoAsset(1), space: .personal, cache: cache)
+        #expect(cell.isShowingPlayBadge)
+
+        cell.prepareForReuse()
+        cell.configure(asset: asset(2), space: .personal, cache: cache)
+        #expect(!cell.isShowingPlayBadge)
+    }
+
+    /// `prepareForReuse` must always hide the badge, so a cell reused from a
+    /// video cell for a not-yet-configured state never shows a stale badge.
+    @Test func prepareForReuseHidesPlayBadge() {
+        let cell = PhotoCellView()
+        _ = cell.view
+        let cache = ThumbnailCache(client: PhotosCoreClient(core: FakePhotosCore()))
+        cell.configure(asset: videoAsset(1), space: .personal, cache: cache)
+        #expect(cell.isShowingPlayBadge)
+        cell.prepareForReuse()
+        #expect(!cell.isShowingPlayBadge)
     }
 
     /// `totalCount` reflects the full space size even before every row has
