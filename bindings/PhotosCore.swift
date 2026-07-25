@@ -722,6 +722,20 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func restoreSession(connection: Connection, session: Session) async throws  -> SessionState
     
     /**
+     * Keyword search (`SYNO.Foto.Search.Search`, method `list_item`),
+     * windowed the same way `fetch_assets_for` windows a discovery
+     * collection: always a live NAS call, no local index. Personal space
+     * only, matching the confirmed real-NAS scope (see the search plan
+     * doc for the probe transcript). An empty or no-match keyword
+     * resolves to an empty `Vec`, not an error; the caller (the app's
+     * empty-state UI) treats that as "no results", never as a failure.
+     *
+     * Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
+     */
+    func searchAssets(keyword: String, offset: UInt32, limit: UInt32) async throws  -> [Asset]
+    
+    /**
      * Sign out: best-effort server-side logout, then unconditionally drop
      * `Live` and clear the per-account thumbnail cache dir contents.
      *
@@ -1275,6 +1289,35 @@ open func restoreSession(connection: Connection, session: Session)async throws  
             completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
             freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeSessionState_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Keyword search (`SYNO.Foto.Search.Search`, method `list_item`),
+     * windowed the same way `fetch_assets_for` windows a discovery
+     * collection: always a live NAS call, no local index. Personal space
+     * only, matching the confirmed real-NAS scope (see the search plan
+     * doc for the probe transcript). An empty or no-match keyword
+     * resolves to an empty `Vec`, not an error; the caller (the app's
+     * empty-state UI) treats that as "no results", never as a failure.
+     *
+     * Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
+     */
+open func searchAssets(keyword: String, offset: UInt32, limit: UInt32)async throws  -> [Asset]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_search_assets(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(keyword),FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeAsset.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -1853,6 +1896,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 22452) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_search_assets() != 47405) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_sign_out() != 54821) {

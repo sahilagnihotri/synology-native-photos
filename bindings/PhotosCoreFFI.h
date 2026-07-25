@@ -366,6 +366,11 @@ uint64_t uniffi_photoscore_fn_method_photoscore_reconcile_delta(void*_Nonnull pt
 uint64_t uniffi_photoscore_fn_method_photoscore_restore_session(void*_Nonnull ptr, RustBuffer connection, RustBuffer session
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_SEARCH_ASSETS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_SEARCH_ASSETS
+uint64_t uniffi_photoscore_fn_method_photoscore_search_assets(void*_Nonnull ptr, RustBuffer keyword, uint32_t offset, uint32_t limit
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_SIGN_OUT
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_SIGN_OUT
 uint64_t uniffi_photoscore_fn_method_photoscore_sign_out(void*_Nonnull ptr
@@ -772,6 +777,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_reconcile_delta(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_SESSION
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_SESSION
 uint16_t uniffi_photoscore_checksum_method_photoscore_restore_session(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_SEARCH_ASSETS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_SEARCH_ASSETS
+uint16_t uniffi_photoscore_checksum_method_photoscore_search_assets(void
     
 );
 #endif
