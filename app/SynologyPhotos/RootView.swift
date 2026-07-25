@@ -134,7 +134,7 @@ struct LibraryView: View {
     @State private var detailIndex: Int?
     @State private var sidebarSelection: SidebarItem? = .library
     @State private var zoom = GridZoomModel()
-    @State private var deleteComingSoon = DeleteComingSoonModel()
+    @State private var deleteController: DeleteController
     /// The tile-grid model for whichever discovery kind is currently
     /// selected, or `nil` when the sidebar is not on a discovery-tiles
     /// section. Rebuilt (not cached across sections) every time the section
@@ -169,6 +169,7 @@ struct LibraryView: View {
         self.env = env
         let c = PhotoGridController(dataSource: env.dataSource, cache: env.thumbnailCache, client: env.client)
         _controller = State(initialValue: c)
+        _deleteController = State(initialValue: DeleteController(client: env.client))
     }
 
     var body: some View {
@@ -195,6 +196,12 @@ struct LibraryView: View {
             await env.dataSource.refreshCount()
             await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
             await controller.applySnapshot()
+            // Once the first crawl/load has completed, reconcile the app-owned
+            // Recently Deleted album so a restore performed on another Synology
+            // client is reflected locally. Best-effort and off the critical
+            // path: a failure here (e.g. transient auth) must never block the
+            // library from showing, so it is fire-and-forget with try?.
+            Task { try? await env.client.reconcileTrash(space: env.spaceSelection.current) }
         }
         .onChange(of: sidebarSelection) { _, newValue in
             guard let newValue else { return }
@@ -211,6 +218,9 @@ struct LibraryView: View {
             case .discoveryGrid(let collection):
                 tilesModel = nil
                 Task { await switchCollection(to: collection) }
+            case .trash(let space):
+                tilesModel = nil
+                Task { await switchToTrash(space: space) }
             }
         }
         .onChange(of: drilledInCollection) { _, newValue in
@@ -249,7 +259,14 @@ struct LibraryView: View {
             // was up; nothing else reclaims it on the same window otherwise.
             if newValue == nil { restoreGridFocus() }
         }
-        .deleteComingSoonAlert(deleteComingSoon)
+        // Everyday delete-to-trash confirm (never destructive) and the
+        // strongly-worded, always-shown permanent-delete confirm. The space
+        // for each is read from the data source, which is the library space
+        // on the main grid and the trashed space in the Recently Deleted
+        // view; both refresh the current grid on success so the acted-on rows
+        // disappear.
+        .deleteConfirm(deleteController, space: env.dataSource.space) { await refreshCurrentGrid() }
+        .permanentDeleteConfirm(deleteController, space: env.dataSource.space) { await refreshCurrentGrid() }
     }
 
     /// The inline detail viewer shown over the grid when `detailIndex` is set.
@@ -303,9 +320,11 @@ struct LibraryView: View {
             detailIndex = (detailIndex != nil) ? nil : index
         }
         controller.onClearSelection = { detailIndex = nil }
-        controller.onDeleteRequested = { count in
-            deleteComingSoon.requestDelete(selectedCount: count)
-        }
+        // Delete / Cmd-Delete on the main grid starts the reversible
+        // move-to-Recently-Deleted flow (a confirm, then deleteToTrash). It is
+        // a no-op in the Recently Deleted view itself, where items are already
+        // trashed and permanent delete is a separate, explicit button.
+        controller.onDeleteRequested = { _ in requestDeleteSelected() }
     }
 
     @ViewBuilder
@@ -339,6 +358,26 @@ struct LibraryView: View {
                         Text("\(controller.selection.count) selected")
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("selection.count")
+                        // Contextual bulk actions. The Recently Deleted view
+                        // offers Restore and the gated Delete Permanently (the
+                        // ONLY place permanent delete is reachable); every
+                        // other photo grid offers the reversible move-to-trash
+                        // Delete.
+                        if isTrashRoute {
+                            Button { restoreSelected() } label: {
+                                Label("Restore", systemImage: "arrow.uturn.backward")
+                            }
+                            .accessibilityIdentifier("trash.restore")
+                            Button(role: .destructive) { requestPermanentDeleteSelected() } label: {
+                                Label("Delete Permanently", systemImage: "trash.slash")
+                            }
+                            .accessibilityIdentifier("trash.deletepermanently")
+                        } else {
+                            Button(role: .destructive) { requestDeleteSelected() } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .accessibilityIdentifier("grid.delete")
+                        }
                     }
                     ZoomSliderView(zoom: zoom) { size in
                         controller.applyZoom(itemSize: size)
@@ -430,6 +469,29 @@ struct LibraryView: View {
                             }
                         }
                     }
+                case .trash:
+                    // The Recently Deleted grid: a plain local read with no
+                    // crawl barrier, so `isReady`/`totalCount` come straight
+                    // from `trashCount`. An empty trash shows its own empty
+                    // state rather than the library's "try the other space"
+                    // hint, which would make no sense here.
+                    switch LibraryContentRoute.route(
+                        isComplete: env.dataSource.isReady,
+                        itemCount: env.dataSource.totalCount
+                    ) {
+                    case .importing:
+                        ProgressView("Loading...").accessibilityIdentifier("trash.progressview")
+                    case .empty:
+                        RecentlyDeletedEmptyView()
+                    case .grid:
+                        PhotoGridView(controller: controller)
+                    case .failed(let message):
+                        CrawlFailedView(message: message) {
+                            if case .trash(let space) = currentRoute {
+                                await switchToTrash(space: space)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -476,9 +538,20 @@ struct LibraryView: View {
     private var isShowingPhotoGrid: Bool {
         if activeSearch != nil { return true }
         switch currentRoute {
-        case .grid, .discoveryGrid: return true
+        case .grid, .discoveryGrid, .trash: return true
         case .discoveryTiles: return false
         }
+    }
+
+    /// Whether the Recently Deleted view is the thing on screen, gating the
+    /// contextual Restore / Delete Permanently actions (and suppressing the
+    /// ordinary Delete). A search overlays its results over whatever the
+    /// sidebar is routed to, so an active search is never the trash view even
+    /// if the sidebar row behind it is Recently Deleted.
+    private var isTrashRoute: Bool {
+        if activeSearch != nil { return false }
+        if case .trash = currentRoute { return true }
+        return false
     }
 
     /// Switches the active space (a no-op if `space` already matches
@@ -515,6 +588,61 @@ struct LibraryView: View {
         await controller.applySnapshot()
     }
 
+    /// Switches the grid to windowing the Recently Deleted album for `space`,
+    /// the trash equivalent of `switchSpace`/`switchCollection`. Clears the
+    /// selection first (indices from the previous view are meaningless here)
+    /// and, like a discovery collection, has no crawl to start: `setTrash`
+    /// re-reads count/readiness from `trashCount` and the first page loads
+    /// straight away.
+    private func switchToTrash(space: Space) async {
+        controller.clearSelection()
+        await env.dataSource.setTrash(space)
+        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+        await controller.applySnapshot()
+    }
+
+    /// Refreshes whatever grid is currently on screen after a trash mutation
+    /// (move-to-trash, restore, permanent delete): drops the cached rows,
+    /// re-reads the count, reloads the first window, and re-applies the
+    /// snapshot so removed rows disappear. Clears the selection because its
+    /// absolute indices no longer line up once rows have shifted. Runs
+    /// against the current source (library or trash), which is exactly what
+    /// needs refreshing in each case.
+    private func refreshCurrentGrid() async {
+        await env.dataSource.reload()
+        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+        controller.clearSelection()
+        await controller.applySnapshot()
+    }
+
+    // MARK: - Delete / restore actions
+
+    /// Starts the reversible move-to-Recently-Deleted flow for the current
+    /// selection: resolves the selected rows to asset ids and raises the
+    /// confirm. A no-op in the Recently Deleted view (items there are already
+    /// trashed) and on an empty resolved selection. Nothing is moved until the
+    /// user confirms.
+    private func requestDeleteSelected() {
+        guard !isTrashRoute else { return }
+        deleteController.requestDelete(ids: controller.selectedAssetIds())
+    }
+
+    /// Restores the current Recently Deleted selection back into the library,
+    /// then refreshes the trash grid so the restored rows leave it. No confirm:
+    /// restore is fully reversible and non-destructive.
+    private func restoreSelected() {
+        let ids = controller.selectedAssetIds()
+        let space = env.dataSource.space
+        Task { await deleteController.restore(space: space, ids: ids) { await refreshCurrentGrid() } }
+    }
+
+    /// Raises the gated, always-shown permanent-delete confirm for the current
+    /// Recently Deleted selection. Nothing is deleted until the user confirms
+    /// on that dedicated sheet.
+    private func requestPermanentDeleteSelected() {
+        deleteController.requestPermanentDelete(ids: controller.selectedAssetIds())
+    }
+
     /// Runs a debounced keyword search: same reset/reload/snapshot sequence
     /// as `switchCollection`, since search is windowed the same way (a live
     /// NAS call, no local index or crawl barrier). Setting `activeSearch`
@@ -547,6 +675,8 @@ struct LibraryView: View {
             await switchSpace(to: space)
         case .discoveryGrid(let collection):
             await switchCollection(to: collection)
+        case .trash(let space):
+            await switchToTrash(space: space)
         case .discoveryTiles:
             // A tile grid has no photo data source to restore at all.
             break
@@ -599,6 +729,29 @@ struct DiscoveryGridEmptyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("discoverygrid.empty")
+    }
+}
+
+/// Shown when the Recently Deleted view has nothing in it. Mirrors
+/// `DiscoveryGridEmptyView`'s visual language, worded to reassure the user
+/// that an empty trash is the normal, safe state rather than an error.
+struct RecentlyDeletedEmptyView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "trash")
+                .font(.system(size: 64))
+                .foregroundStyle(.tertiary)
+            Text("Nothing Recently Deleted")
+                .font(.title2)
+                .fontWeight(.medium)
+            Text("Photos you delete are moved here and can be restored before they are permanently removed.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 40)
+        .accessibilityIdentifier("trash.empty")
     }
 }
 
