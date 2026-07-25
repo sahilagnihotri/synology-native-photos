@@ -633,9 +633,10 @@ impl PhotosCore {
         Ok(tmp.to_string_lossy().into())
     }
 
-    /// Resolves how the detail viewer should play back `asset` (a video, or
-    /// a "live"/`MediaKind::Unknown` item that may or may not actually be a
-    /// video container -- see `models::VideoPlaybackSource`'s doc comment).
+    /// Resolves how the detail viewer should play back `asset` (a video,
+    /// including the motion `.MOV` component of a Live Photo, which now
+    /// classifies as `MediaKind::Video` via its `live_type` -- see
+    /// `models::VideoPlaybackSource`'s doc comment).
     ///
     /// READ-ONLY PROBE FINDING (verified against the real NAS): SYNO.API.Info
     /// genuinely advertises `SYNO.Foto.Streaming` (and `SYNO.FotoTeam.Streaming`),

@@ -14,10 +14,10 @@
 //! carry many fields this crate does not model (and DSM can add more across
 //! releases), so unknown fields are ignored rather than treated as a parse
 //! failure — this module never uses `deny_unknown_fields`. An item's `type`
-//! is matched against the media kinds we recognize; anything else
-//! (including a value we've simply never seen, e.g. a future
-//! `"live_photo"`) decodes as `MediaKind::Unknown` rather than failing the
-//! whole list.
+//! is matched against the media kinds we recognize (`photo`, `video`, and
+//! `live` — a Live Photo, disambiguated by its sibling `live_type`); anything
+//! else (a value we've simply never seen, e.g. a future `"burst"`) decodes as
+//! `MediaKind::Unknown` rather than failing the whole list.
 //!
 //! Decoding is also tolerant *per element*, not just per field: `list` is
 //! parsed as `Vec<serde_json::Value>` first, then each element is decoded
@@ -106,14 +106,31 @@ impl CollectionFilter {
     }
 }
 
-/// Map the item's `type` string to a `MediaKind`. Anything unrecognized
-/// (including future Synology media types we've never seen) falls back to
-/// `MediaKind::Unknown` rather than failing the decode — fail closed on the
-/// *meaning* of the type, not on the ability to list the item at all.
-fn parse_media_kind(raw: &str) -> MediaKind {
-    match raw {
+/// Map an item's `type` (and, for a Live Photo, its sibling `live_type`) to a
+/// `MediaKind`.
+///
+/// VERIFIED against the real NAS: a Live Photo is TWO separate `Browse.Item`
+/// items sharing one capture — a still `.JPG` (`type=live`, `live_type=photo`)
+/// and a motion `.MOV` (`type=live`, `live_type=video`). `live_type` is what
+/// tells the pair apart, so the `.MOV` component classifies as `Video` (and is
+/// routed to the player / shows the grid play badge) while the `.JPG` stays
+/// `Photo`. A `live` item with no `live_type` at all defaults to `Photo`: the
+/// still image is the safe fallback (it never mis-routes a still to the video
+/// player), and it matches the earlier behavior of showing a live capture as
+/// an image.
+///
+/// Anything unrecognized (including future Synology media types we've never
+/// seen) falls back to `MediaKind::Unknown` rather than failing the decode —
+/// fail closed on the *meaning* of the type, not on the ability to list the
+/// item at all.
+fn parse_media_kind(kind: &str, live_type: Option<&str>) -> MediaKind {
+    match kind {
         "photo" => MediaKind::Photo,
         "video" => MediaKind::Video,
+        "live" => match live_type {
+            Some("video") => MediaKind::Video,
+            _ => MediaKind::Photo,
+        },
         _ => MediaKind::Unknown,
     }
 }
@@ -141,6 +158,14 @@ struct RawItem {
     filename: Option<String>,
     #[serde(rename = "type", default)]
     kind: String,
+    // VERIFIED against the real NAS: a Live Photo is two items sharing one
+    // capture — a still `.JPG` (type=live, live_type=photo) and a motion
+    // `.MOV` (type=live, live_type=video). `live_type` is present only on
+    // `live` items; absent/other values decode to None (tolerant), and
+    // `parse_media_kind` then treats a live item with no live_type as the
+    // still (Photo).
+    #[serde(default)]
+    live_type: Option<String>,
     // ASSUMPTION (unverified against real NAS): taken-at epoch seconds is
     // reported under `time`. Community clients and the brief agree on this
     // name; confirm at first real login.
@@ -405,7 +430,7 @@ async fn list_items_inner(
                 unit_id,
                 cache_key,
                 filename: item.filename.unwrap_or_else(|| item.id.to_string()),
-                media_kind: parse_media_kind(&item.kind),
+                media_kind: parse_media_kind(&item.kind, item.live_type.as_deref()),
                 taken_at: item.time,
                 added_at: item.create_time,
                 width,
@@ -450,10 +475,10 @@ async fn list_items_inner(
 /// `list_items`: `cache_key`/`unit_id` under `additional.thumbnail`,
 /// `width`/`height` under `additional.resolution`. Reuses `RawItem`/`Asset`
 /// end to end -- search rows have the exact same shape as browse rows, so
-/// no new model or decoder was needed. One new observed `type` value on
-/// search results is `"live"` (Live Photos), which decodes as
-/// `MediaKind::Unknown` per the existing fail-open convention on an
-/// unrecognized type.
+/// no new model or decoder was needed. Live Photos surface here with
+/// `type="live"` and are classified by their sibling `live_type` exactly as
+/// on the browse path (`parse_media_kind`): the motion `.MOV` component is a
+/// `Video`, the still `.JPG` a `Photo`.
 ///
 /// Decoding is per-element and tolerant, same discipline as `list_items`:
 /// a malformed row or one missing a usable `cache_key` is skipped and
@@ -554,7 +579,7 @@ pub async fn search_filtered(
                 unit_id,
                 cache_key,
                 filename: item.filename.unwrap_or_else(|| item.id.to_string()),
-                media_kind: parse_media_kind(&item.kind),
+                media_kind: parse_media_kind(&item.kind, item.live_type.as_deref()),
                 taken_at: item.time,
                 added_at: item.create_time,
                 width,
@@ -655,4 +680,44 @@ pub async fn list_albums(
         tracing::warn!("browse album list: skipped {} of {} elements (failed to decode)", skipped, total);
     }
     Ok(albums)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_media_kind;
+    use models::MediaKind;
+
+    // The six-case classification table the media-enrichment brief locks in.
+    // A Live Photo is two items: a still `.JPG` (live_type=photo) and a motion
+    // `.MOV` (live_type=video); the latter must classify as Video so it routes
+    // to the player, the former as Photo.
+    #[test]
+    fn live_video_component_is_video() {
+        assert_eq!(parse_media_kind("live", Some("video")), MediaKind::Video);
+    }
+    #[test]
+    fn live_photo_component_is_photo() {
+        assert_eq!(parse_media_kind("live", Some("photo")), MediaKind::Photo);
+    }
+    #[test]
+    fn live_without_live_type_defaults_to_photo() {
+        assert_eq!(parse_media_kind("live", None), MediaKind::Photo);
+    }
+    #[test]
+    fn plain_video_is_video() {
+        assert_eq!(parse_media_kind("video", None), MediaKind::Video);
+        // A stray live_type on a plain video is irrelevant: `type` wins.
+        assert_eq!(parse_media_kind("video", Some("photo")), MediaKind::Video);
+    }
+    #[test]
+    fn plain_photo_is_photo() {
+        assert_eq!(parse_media_kind("photo", None), MediaKind::Photo);
+    }
+    #[test]
+    fn unrecognized_type_is_unknown() {
+        // A future/unseen type stays Unknown even if it carries a live_type.
+        assert_eq!(parse_media_kind("burst", None), MediaKind::Unknown);
+        assert_eq!(parse_media_kind("live_photo", Some("video")), MediaKind::Unknown);
+        assert_eq!(parse_media_kind("", None), MediaKind::Unknown);
+    }
 }

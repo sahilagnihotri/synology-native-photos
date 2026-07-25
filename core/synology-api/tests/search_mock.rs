@@ -37,10 +37,11 @@ async fn search_sends_list_item_method_and_keyword_param_with_token_header() {
     assert_eq!(a.unit_id, 55853);
     assert_eq!(a.cache_key, "55853_1480101974");
     assert_eq!(a.filename, "IMG_1619.JPG");
-    // "live" is a type never seen from Browse.Item; it must decode as
-    // Unknown rather than failing the whole search, per the fail-open
-    // convention every other unrecognized type already follows.
-    assert_eq!(a.media_kind, MediaKind::Unknown);
+    // This "live" row carries no `live_type` field, so it is the still
+    // component of a Live Photo and classifies as Photo (a live item with no
+    // live_type defaults to the still). Search classifies `type=live` exactly
+    // as the browse path does.
+    assert_eq!(a.media_kind, MediaKind::Photo);
     assert_eq!(a.width, Some(3024));
     assert_eq!(a.height, Some(4032));
     assert_eq!(a.space, Space::Personal);

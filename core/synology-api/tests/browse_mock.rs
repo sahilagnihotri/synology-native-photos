@@ -118,6 +118,40 @@ async fn list_items_shared_uses_fototeam_namespace() {
     assert!(assets.is_empty());
 }
 
+/// A Live Photo is TWO items sharing one capture (VERIFIED against the real
+/// NAS): a still `.JPG` (type=live, live_type=photo) and a motion `.MOV`
+/// (type=live, live_type=video). The `.MOV` must classify as Video so the app
+/// routes it to the player and shows the grid play badge; the `.JPG` stays
+/// Photo. A `live` item with no `live_type` at all defaults to Photo (the
+/// still component is the safe fallback). This is the end-to-end wire decode
+/// proving `RawItem.live_type` flows through `parse_media_kind` into the Asset.
+#[tokio::test]
+async fn live_photo_components_classify_by_live_type() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":501,"filename":"IMG_0501.JPG","type":"live","live_type":"photo",
+             "additional":{"thumbnail":{"cache_key":"CK501","unit_id":5010}}},
+            {"id":502,"filename":"IMG_0501.MOV","type":"live","live_type":"video",
+             "additional":{"thumbnail":{"cache_key":"CK502","unit_id":5020}}},
+            {"id":503,"filename":"IMG_0503.HEIC","type":"live",
+             "additional":{"thumbnail":{"cache_key":"CK503","unit_id":5030}}}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok");
+    assert_eq!(assets.len(), 3);
+    assert_eq!(assets[0].media_kind, MediaKind::Photo, "live still .JPG stays Photo");
+    assert_eq!(assets[1].media_kind, MediaKind::Video, "live motion .MOV becomes Video");
+    assert_eq!(assets[2].media_kind, MediaKind::Photo, "live with no live_type defaults to Photo");
+}
+
 #[tokio::test]
 async fn unknown_media_type_decodes_as_unknown_not_error() {
     let mut server = mockito::Server::new_async().await;
