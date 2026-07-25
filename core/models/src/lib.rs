@@ -10,6 +10,23 @@ pub enum Space { Personal, Shared }
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MediaKind { Photo, Video, Unknown }
 
+/// Classify a file as `Video` or `Photo` purely from its filename extension.
+///
+/// Used by the recycle-bin listing (`RecycleItem`), where the only signal we
+/// have for an item is its filename on disk (the DSM File Station listing
+/// carries no Photos `type` marker). The video extensions (`.mov`, `.mp4`,
+/// `.m4v`) match the ones the browse decoder treats as motion assets;
+/// everything else defaults to `Photo` rather than `Unknown`, because a file
+/// sitting in the Photos recycle folder is a photo unless it is obviously a
+/// video, and a neutral `Unknown` would give the UI nothing useful to show.
+/// The match is case-insensitive (`.MOV` and `.mov` are the same).
+pub fn media_kind_from_filename(filename: &str) -> MediaKind {
+    match filename.rsplit('.').next().map(|ext| ext.to_ascii_lowercase()).as_deref() {
+        Some("mov") | Some("mp4") | Some("m4v") => MediaKind::Video,
+        _ => MediaKind::Photo,
+    }
+}
+
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThumbnailSize { Sm, M, Xl }
 
@@ -172,6 +189,29 @@ impl Default for Asset {
             container_type: String::new(),
         }
     }
+}
+
+/// One file recovered from the DSM home recycle bin under
+/// `/home/#recycle/Photos/...`, as surfaced by the "real delete" flow.
+///
+/// The everyday delete now removes an item from the Photos library outright
+/// (`SYNO.Foto.Browse.Item` `method=delete`), which lands the physical
+/// original in the home recycle bin at the mirrored path. That recycle bin is
+/// browsed with DSM File Station, which knows nothing about the Photos index,
+/// so a recovered file is described here by its filesystem facts rather than
+/// by a Photos item id: `recycle_path` is the absolute path inside
+/// `#recycle` (the handle used to restore or permanently delete it),
+/// `filename` is the leaf name, `deleted_at` is the File Station `mtime`
+/// (which is when the file was moved into the recycle bin), `file_size` is
+/// the byte size, and `media_kind` is derived from the filename extension via
+/// `media_kind_from_filename` (photo unless it is obviously a video).
+#[derive(uniffi::Record, Clone, Debug, PartialEq)]
+pub struct RecycleItem {
+    pub recycle_path: String,
+    pub filename: String,
+    pub deleted_at: i64,
+    pub file_size: u64,
+    pub media_kind: MediaKind,
 }
 
 /// One row from `SYNO.Foto.Browse.Album`: either a user-created normal album
@@ -585,6 +625,40 @@ mod tests {
         let url = VideoPlaybackSource::Url { url: "https://nas.example.com/stream".to_string() };
         assert_ne!(local, url);
         assert_eq!(local, VideoPlaybackSource::LocalFile { path: "/tmp/syno-orig-abc".to_string() });
+    }
+
+    #[test]
+    fn media_kind_from_filename_classifies_videos_case_insensitively() {
+        assert_eq!(media_kind_from_filename("IMG_0924.MOV"), MediaKind::Video);
+        assert_eq!(media_kind_from_filename("clip.mov"), MediaKind::Video);
+        assert_eq!(media_kind_from_filename("clip.mp4"), MediaKind::Video);
+        assert_eq!(media_kind_from_filename("clip.M4V"), MediaKind::Video);
+    }
+
+    #[test]
+    fn media_kind_from_filename_defaults_everything_else_to_photo() {
+        assert_eq!(media_kind_from_filename("IMG_0924.JPG"), MediaKind::Photo);
+        assert_eq!(media_kind_from_filename("photo.heic"), MediaKind::Photo);
+        assert_eq!(media_kind_from_filename("scan.png"), MediaKind::Photo);
+        // No extension at all still degrades to Photo rather than Unknown.
+        assert_eq!(media_kind_from_filename("noextension"), MediaKind::Photo);
+        assert_eq!(media_kind_from_filename(""), MediaKind::Photo);
+    }
+
+    #[test]
+    fn recycle_item_holds_all_fields() {
+        let item = RecycleItem {
+            recycle_path: "/home/#recycle/Photos/iPhone/2016/09/IMG_0924.JPG".to_string(),
+            filename: "IMG_0924.JPG".to_string(),
+            deleted_at: 1_600_000_000,
+            file_size: 2_500_000,
+            media_kind: media_kind_from_filename("IMG_0924.JPG"),
+        };
+        assert_eq!(item.filename, "IMG_0924.JPG");
+        assert_eq!(item.deleted_at, 1_600_000_000);
+        assert_eq!(item.file_size, 2_500_000);
+        assert_eq!(item.media_kind, MediaKind::Photo);
+        assert_eq!(item, item.clone());
     }
 
     #[test]
