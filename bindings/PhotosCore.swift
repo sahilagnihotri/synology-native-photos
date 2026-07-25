@@ -944,9 +944,10 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func trashCount(space: Space) throws  -> UInt32
     
     /**
-     * Resolves how the detail viewer should play back `asset` (a video, or
-     * a "live"/`MediaKind::Unknown` item that may or may not actually be a
-     * video container -- see `models::VideoPlaybackSource`'s doc comment).
+     * Resolves how the detail viewer should play back `asset` (a video,
+     * including the motion `.MOV` component of a Live Photo, which now
+     * classifies as `MediaKind::Video` via its `live_type` -- see
+     * `models::VideoPlaybackSource`'s doc comment).
      *
      * READ-ONLY PROBE FINDING (verified against the real NAS): SYNO.API.Info
      * genuinely advertises `SYNO.Foto.Streaming` (and `SYNO.FotoTeam.Streaming`),
@@ -1865,9 +1866,10 @@ open func trashCount(space: Space)throws  -> UInt32  {
 }
     
     /**
-     * Resolves how the detail viewer should play back `asset` (a video, or
-     * a "live"/`MediaKind::Unknown` item that may or may not actually be a
-     * video container -- see `models::VideoPlaybackSource`'s doc comment).
+     * Resolves how the detail viewer should play back `asset` (a video,
+     * including the motion `.MOV` component of a Live Photo, which now
+     * classifies as `MediaKind::Video` via its `live_type` -- see
+     * `models::VideoPlaybackSource`'s doc comment).
      *
      * READ-ONLY PROBE FINDING (verified against the real NAS): SYNO.API.Info
      * genuinely advertises `SYNO.Foto.Streaming` (and `SYNO.FotoTeam.Streaming`),
@@ -2463,7 +2465,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_trash_count() != 13931) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_video_playback_source() != 60277) {
+    if (uniffi_photoscore_checksum_method_photoscore_video_playback_source() != 55502) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_constructor_photoscore_new() != 54313) {

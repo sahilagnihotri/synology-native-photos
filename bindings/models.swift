@@ -416,6 +416,22 @@ fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
+    typealias FfiType = Int32
+    typealias SwiftType = Int32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -772,6 +788,55 @@ public struct Asset {
     public var fileSize: UInt64?
     public var space: Space
     public var serverVersion: Int64?
+    /**
+     * 0..5 star rating (Synology's own scale); 0 means unrated.
+     */
+    public var rating: Int32
+    /**
+     * User-entered caption/description; "" when none.
+     */
+    public var description: String
+    /**
+     * EXIF camera model, e.g. "Apple iPhone 12". "" when unknown.
+     */
+    public var camera: String
+    /**
+     * EXIF aperture, e.g. "f/1.8" (raw server string). "" when unknown.
+     */
+    public var aperture: String
+    /**
+     * EXIF exposure/shutter time, e.g. "1/120". "" when unknown.
+     */
+    public var exposureTime: String
+    /**
+     * EXIF focal length, e.g. "26 mm". "" when unknown.
+     */
+    public var focalLength: String
+    /**
+     * EXIF ISO, e.g. "100". "" when unknown.
+     */
+    public var iso: String
+    /**
+     * EXIF lens model. "" when unknown.
+     */
+    public var lens: String
+    /**
+     * Video duration, raw server value (e.g. milliseconds as a string).
+     * "" for non-videos or when the NAS omits it.
+     */
+    public var duration: String
+    /**
+     * Video frame rate, raw server value (e.g. "29.97"). "" for non-videos.
+     */
+    public var framerate: String
+    /**
+     * Video codec, e.g. "hevc". "" for non-videos.
+     */
+    public var videoCodec: String
+    /**
+     * Video container type, e.g. "mov". "" for non-videos.
+     */
+    public var containerType: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -783,7 +848,44 @@ public struct Asset {
          * field is what fetch_thumbnail/download_original must send. Defaults
          * to 0 when the server response did not carry a unit_id (see browse.rs);
          * a 0 value means this asset cannot be thumbnailed/downloaded yet.
-         */unitId: Int64, cacheKey: String, filename: String, mediaKind: MediaKind, takenAt: Int64?, addedAt: Int64?, width: UInt32?, height: UInt32?, fileSize: UInt64?, space: Space, serverVersion: Int64?) {
+         */unitId: Int64, cacheKey: String, filename: String, mediaKind: MediaKind, takenAt: Int64?, addedAt: Int64?, width: UInt32?, height: UInt32?, fileSize: UInt64?, space: Space, serverVersion: Int64?, 
+        /**
+         * 0..5 star rating (Synology's own scale); 0 means unrated.
+         */rating: Int32, 
+        /**
+         * User-entered caption/description; "" when none.
+         */description: String, 
+        /**
+         * EXIF camera model, e.g. "Apple iPhone 12". "" when unknown.
+         */camera: String, 
+        /**
+         * EXIF aperture, e.g. "f/1.8" (raw server string). "" when unknown.
+         */aperture: String, 
+        /**
+         * EXIF exposure/shutter time, e.g. "1/120". "" when unknown.
+         */exposureTime: String, 
+        /**
+         * EXIF focal length, e.g. "26 mm". "" when unknown.
+         */focalLength: String, 
+        /**
+         * EXIF ISO, e.g. "100". "" when unknown.
+         */iso: String, 
+        /**
+         * EXIF lens model. "" when unknown.
+         */lens: String, 
+        /**
+         * Video duration, raw server value (e.g. milliseconds as a string).
+         * "" for non-videos or when the NAS omits it.
+         */duration: String, 
+        /**
+         * Video frame rate, raw server value (e.g. "29.97"). "" for non-videos.
+         */framerate: String, 
+        /**
+         * Video codec, e.g. "hevc". "" for non-videos.
+         */videoCodec: String, 
+        /**
+         * Video container type, e.g. "mov". "" for non-videos.
+         */containerType: String) {
         self.id = id
         self.unitId = unitId
         self.cacheKey = cacheKey
@@ -796,6 +898,18 @@ public struct Asset {
         self.fileSize = fileSize
         self.space = space
         self.serverVersion = serverVersion
+        self.rating = rating
+        self.description = description
+        self.camera = camera
+        self.aperture = aperture
+        self.exposureTime = exposureTime
+        self.focalLength = focalLength
+        self.iso = iso
+        self.lens = lens
+        self.duration = duration
+        self.framerate = framerate
+        self.videoCodec = videoCodec
+        self.containerType = containerType
     }
 }
 
@@ -842,6 +956,42 @@ extension Asset: Equatable, Hashable {
         if lhs.serverVersion != rhs.serverVersion {
             return false
         }
+        if lhs.rating != rhs.rating {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        if lhs.camera != rhs.camera {
+            return false
+        }
+        if lhs.aperture != rhs.aperture {
+            return false
+        }
+        if lhs.exposureTime != rhs.exposureTime {
+            return false
+        }
+        if lhs.focalLength != rhs.focalLength {
+            return false
+        }
+        if lhs.iso != rhs.iso {
+            return false
+        }
+        if lhs.lens != rhs.lens {
+            return false
+        }
+        if lhs.duration != rhs.duration {
+            return false
+        }
+        if lhs.framerate != rhs.framerate {
+            return false
+        }
+        if lhs.videoCodec != rhs.videoCodec {
+            return false
+        }
+        if lhs.containerType != rhs.containerType {
+            return false
+        }
         return true
     }
 
@@ -858,6 +1008,18 @@ extension Asset: Equatable, Hashable {
         hasher.combine(fileSize)
         hasher.combine(space)
         hasher.combine(serverVersion)
+        hasher.combine(rating)
+        hasher.combine(description)
+        hasher.combine(camera)
+        hasher.combine(aperture)
+        hasher.combine(exposureTime)
+        hasher.combine(focalLength)
+        hasher.combine(iso)
+        hasher.combine(lens)
+        hasher.combine(duration)
+        hasher.combine(framerate)
+        hasher.combine(videoCodec)
+        hasher.combine(containerType)
     }
 }
 
@@ -881,7 +1043,19 @@ public struct FfiConverterTypeAsset: FfiConverterRustBuffer {
                 height: FfiConverterOptionUInt32.read(from: &buf), 
                 fileSize: FfiConverterOptionUInt64.read(from: &buf), 
                 space: FfiConverterTypeSpace.read(from: &buf), 
-                serverVersion: FfiConverterOptionInt64.read(from: &buf)
+                serverVersion: FfiConverterOptionInt64.read(from: &buf), 
+                rating: FfiConverterInt32.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                camera: FfiConverterString.read(from: &buf), 
+                aperture: FfiConverterString.read(from: &buf), 
+                exposureTime: FfiConverterString.read(from: &buf), 
+                focalLength: FfiConverterString.read(from: &buf), 
+                iso: FfiConverterString.read(from: &buf), 
+                lens: FfiConverterString.read(from: &buf), 
+                duration: FfiConverterString.read(from: &buf), 
+                framerate: FfiConverterString.read(from: &buf), 
+                videoCodec: FfiConverterString.read(from: &buf), 
+                containerType: FfiConverterString.read(from: &buf)
         )
     }
 
@@ -898,6 +1072,18 @@ public struct FfiConverterTypeAsset: FfiConverterRustBuffer {
         FfiConverterOptionUInt64.write(value.fileSize, into: &buf)
         FfiConverterTypeSpace.write(value.space, into: &buf)
         FfiConverterOptionInt64.write(value.serverVersion, into: &buf)
+        FfiConverterInt32.write(value.rating, into: &buf)
+        FfiConverterString.write(value.description, into: &buf)
+        FfiConverterString.write(value.camera, into: &buf)
+        FfiConverterString.write(value.aperture, into: &buf)
+        FfiConverterString.write(value.exposureTime, into: &buf)
+        FfiConverterString.write(value.focalLength, into: &buf)
+        FfiConverterString.write(value.iso, into: &buf)
+        FfiConverterString.write(value.lens, into: &buf)
+        FfiConverterString.write(value.duration, into: &buf)
+        FfiConverterString.write(value.framerate, into: &buf)
+        FfiConverterString.write(value.videoCodec, into: &buf)
+        FfiConverterString.write(value.containerType, into: &buf)
     }
 }
 
