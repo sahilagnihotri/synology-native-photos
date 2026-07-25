@@ -256,6 +256,16 @@ final class ZoomableImageScrollView: NSScrollView {
     /// intercepted by this recognizer.
     private var resetGesture: NSClickGestureRecognizer?
 
+    /// Click-and-drag panning when zoomed in past fit. A gesture recognizer
+    /// (rather than a `mouseDragged` override) so it fires anywhere over the
+    /// image without fighting the document `NSImageView` for the responder
+    /// chain, and so AppKit's own gesture arbitration keeps it from ever
+    /// swallowing the double-click reset: a stationary double-click produces
+    /// no translation, so this recognizer never begins for it. A primary
+    /// button drag, not a two-finger trackpad scroll (which stays a
+    /// scroll-wheel event the scroll view pans natively), is what drives it.
+    private var panGesture: NSPanGestureRecognizer?
+
     init() {
         super.init(frame: .zero)
         allowsMagnification = true
@@ -273,6 +283,9 @@ final class ZoomableImageScrollView: NSScrollView {
         gesture.numberOfClicksRequired = 2
         addGestureRecognizer(gesture)
         resetGesture = gesture
+        let pan = NSPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        addGestureRecognizer(pan)
+        panGesture = pan
         NotificationCenter.default.addObserver(
             self, selector: #selector(liveMagnifyEnded),
             name: NSScrollView.didEndLiveMagnifyNotification, object: self)
@@ -317,6 +330,30 @@ final class ZoomableImageScrollView: NSScrollView {
 
     @objc private func handleDoubleClick() {
         resetZoom()
+    }
+
+    /// Pans the zoomed image by moving the clip view's origin opposite the
+    /// drag, so the content follows the cursor (grab-and-drag). No-op unless
+    /// actually zoomed past fit, matching the spec's "only pan when zoomed".
+    ///
+    /// The gesture's translation is read in this scroll view's own
+    /// (un-magnified) coordinate space and divided by the magnification to
+    /// convert screen points into clip-bounds units; the result is clamped
+    /// through `constrainBoundsRect` so a drag can never scroll past the
+    /// image edges. Translation is reset to zero each callback so successive
+    /// events apply incremental deltas.
+    @objc private func handlePan(_ gesture: NSPanGestureRecognizer) {
+        guard DetailZoomModel.isZoomed(magnification) else { return }
+        let translation = gesture.translation(in: self)
+        gesture.setTranslation(.zero, in: self)
+        guard translation != .zero else { return }
+        let scale = max(magnification, 0.0001)
+        var proposed = contentView.bounds
+        proposed.origin.x -= translation.x / scale
+        proposed.origin.y -= translation.y / scale
+        let constrained = contentView.constrainBoundsRect(proposed)
+        contentView.scroll(to: constrained.origin)
+        reflectScrolledClipView(contentView)
     }
 
     @objc private func liveMagnifyEnded() {
