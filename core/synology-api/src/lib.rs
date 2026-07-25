@@ -13,7 +13,7 @@ pub mod thumbnail;
 pub mod transport;
 
 pub use auth::{login, logout};
-pub use browse::{list_albums, list_items, list_items_filtered, CollectionFilter};
+pub use browse::{list_albums, list_items, list_items_filtered, search, CollectionFilter};
 pub use discovery::{list_people, list_places, list_subjects, list_tags};
 pub use download::download_original;
 pub use envelope::{decode_envelope, map_error_code, SynoError, SynoResponse};
@@ -32,6 +32,7 @@ mod facade_tests {
         let _ = crate::list_items as usize;
         let _ = crate::list_items_filtered as usize;
         let _ = crate::list_albums as usize;
+        let _ = crate::search as usize;
         let _ = crate::list_people as usize;
         let _ = crate::list_places as usize;
         let _ = crate::list_subjects as usize;

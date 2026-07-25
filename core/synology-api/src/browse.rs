@@ -429,6 +429,117 @@ async fn list_items_inner(
     Ok(assets)
 }
 
+/// `SYNO.Foto.Search.Search`, `method=list_item`. Personal space only (no
+/// `FotoTeam` equivalent probed or in scope; see the search plan doc for
+/// the full probe transcript).
+///
+/// VERIFIED against the real NAS: the method name is `list_item`, not
+/// `list` or `search` (both plausible guesses were rejected with error 103,
+/// "no such method", even though `SYNO.API.Info` genuinely advertises the
+/// API -- a different error code than an unknown API entirely, which is
+/// what proves the API exists but the method name was wrong). The keyword
+/// param is `keyword`, not `query` (confirmed by two controls: a
+/// nonsense keyword value returns a clean empty list, proving `keyword`
+/// genuinely filters; sending `query` instead of `keyword` returns error
+/// 100 "invalid parameter" rather than being silently ignored, proving
+/// `query` is not a valid alias). Results are flat, the same
+/// `{"data":{"list":[...]}}` envelope as `Browse.Item`, not grouped into
+/// people/places/tags sections.
+///
+/// `additional=["thumbnail","resolution"]` is honored identically to
+/// `list_items`: `cache_key`/`unit_id` under `additional.thumbnail`,
+/// `width`/`height` under `additional.resolution`. Reuses `RawItem`/`Asset`
+/// end to end -- search rows have the exact same shape as browse rows, so
+/// no new model or decoder was needed. One new observed `type` value on
+/// search results is `"live"` (Live Photos), which decodes as
+/// `MediaKind::Unknown` per the existing fail-open convention on an
+/// unrecognized type.
+///
+/// Decoding is per-element and tolerant, same discipline as `list_items`:
+/// a malformed row or one missing a usable `cache_key` is skipped and
+/// logged rather than failing the whole page.
+///
+/// `syno_token` is forwarded the same way as `list_items`: see that
+/// function's doc comment.
+pub async fn search(
+    transport: &Transport,
+    sid: &str,
+    keyword: &str,
+    offset: u32,
+    limit: u32,
+    version: u32,
+    syno_token: Option<&str>,
+) -> Result<Vec<Asset>, CoreError> {
+    let query: Vec<(&str, String)> = vec![
+        ("api", "SYNO.Foto.Search.Search".to_string()),
+        ("version", version.to_string()),
+        ("method", "list_item".to_string()),
+        ("keyword", keyword.to_string()),
+        ("offset", offset.to_string()),
+        ("limit", limit.to_string()),
+        ("additional", "[\"thumbnail\",\"resolution\"]".to_string()),
+        ("_sid", sid.to_string()),
+    ];
+    let body = get_body(transport, &query, syno_token).await?;
+    let parsed: ItemList = decode_envelope(&body)?;
+    let total = parsed.list.len();
+    let mut skipped = 0usize;
+    let assets: Vec<Asset> = parsed
+        .list
+        .iter()
+        .filter_map(|raw| {
+            let item: RawItem = decode_one(raw, "search item")?;
+            let additional = item.additional.unwrap_or_default();
+            let thumb = additional.thumbnail;
+            let cache_key = thumb.as_ref().map(|t| t.cache_key.clone()).unwrap_or_default();
+            if cache_key.is_empty() {
+                tracing::warn!(
+                    "skipping search item (id={}): missing cache_key, not usable for thumbnails/downloads",
+                    item.id
+                );
+                skipped += 1;
+                return None;
+            }
+            let unit_id = thumb.and_then(|t| t.unit_id).unwrap_or_else(|| {
+                tracing::warn!(
+                    "search item (id={}): missing additional.thumbnail.unit_id, thumbnails/downloads for it will fail (defaulting unit_id=0)",
+                    item.id
+                );
+                0
+            });
+            let (width, height) = match additional.resolution {
+                Some(r) => (r.width, r.height),
+                None => (None, None),
+            };
+            Some(Asset {
+                id: item.id,
+                unit_id,
+                cache_key,
+                filename: item.filename.unwrap_or_else(|| item.id.to_string()),
+                media_kind: parse_media_kind(&item.kind),
+                taken_at: item.time,
+                added_at: item.create_time,
+                width,
+                height,
+                file_size: item.filesize,
+                space: Space::Personal,
+                server_version: item.version,
+            })
+        })
+        .collect();
+    let hard_skipped = total - (assets.len() + skipped);
+    if hard_skipped > 0 || skipped > 0 {
+        tracing::warn!(
+            "search item list: skipped {} of {} elements ({} failed to decode, {} missing cache_key)",
+            hard_skipped + skipped,
+            total,
+            hard_skipped,
+            skipped
+        );
+    }
+    Ok(assets)
+}
+
 /// `SYNO.Foto.Browse.Album` / `SYNO.FotoTeam.Browse.Album`, `method=list`.
 /// Space-aware the same way as `list_items`: API name resolved via
 /// `namespace`, and every returned `Album.space` is set to the requested
