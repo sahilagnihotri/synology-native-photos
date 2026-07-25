@@ -9,15 +9,17 @@ pub mod download;
 pub mod envelope;
 pub mod info;
 pub mod namespace;
+pub mod search_filter;
 pub mod thumbnail;
 pub mod transport;
 
 pub use auth::{login, logout};
-pub use browse::{list_albums, list_items, list_items_filtered, search, CollectionFilter};
+pub use browse::{list_albums, list_items, list_items_filtered, search, search_filtered, CollectionFilter};
 pub use discovery::{list_people, list_places, list_subjects, list_tags};
 pub use download::download_original;
 pub use envelope::{decode_envelope, map_error_code, SynoError, SynoResponse};
 pub use info::{pin_version, probe_capabilities};
+pub use search_filter::search_facets;
 pub use thumbnail::fetch_thumbnail;
 pub use transport::{build_client, fetch_server_cert_der, Transport};
 
@@ -33,6 +35,8 @@ mod facade_tests {
         let _ = crate::list_items_filtered as usize;
         let _ = crate::list_albums as usize;
         let _ = crate::search as usize;
+        let _ = crate::search_filtered as usize;
+        let _ = crate::search_facets as usize;
         let _ = crate::list_people as usize;
         let _ = crate::list_places as usize;
         let _ = crate::list_subjects as usize;

@@ -172,6 +172,69 @@ pub struct Tag {
     pub item_count: u32,
 }
 
+/// One entry in a `SearchFacets` catalog: an id/name pair as returned by
+/// `SYNO.Foto.Search.Filter`. Shared shape for `cameras`, `apertures`, and
+/// `geocodings` (the geocoding tree is flattened -- see
+/// `synology_api::search_filter`'s doc comment for how nested regions are
+/// walked into one flat list of leaves-and-branches).
+///
+/// VERIFIED against the real NAS: these three facets are listed correctly
+/// by `Search.Filter`, but NEITHER `SYNO.Foto.Search.Search list_item` NOR
+/// `SYNO.Foto.Browse.Item` accepts a working filter param for any of them
+/// on this NAS/DSM build (`camera_id`, `aperture_id`, `geocoding_id`, and
+/// several JSON-blob shapes -- `condition={...}`, `filter={...}` -- were all
+/// probed with a real id alongside a bogus-id control; every one returned
+/// the exact same unfiltered result set for both, the signature of a
+/// silently-ignored param rather than a real filter). So `Facet` values
+/// here are shown for browsing/labeling only; the UI cannot yet filter
+/// search results by camera/aperture/place. `Place`/`geocoding_id` remains
+/// filterable through `Browse.Item`'s discovery-browse `CollectionFilter`
+/// (a different, already-working code path), just not through
+/// `Search.Search`.
+#[derive(uniffi::Record, Clone, Debug, PartialEq)]
+pub struct Facet {
+    pub id: i64,
+    pub name: String,
+}
+
+/// The facet catalog from `SYNO.Foto.Search.Filter`, `method=list`.
+/// `cameras`/`apertures`/`geocodings` are listed for display only (see
+/// `Facet`'s doc comment: no working filter param exists for them yet).
+/// `media_types` mirrors the `item_type` facet DSM lists (this account only
+/// ever reports `photo`); it is likewise display-only, since neither
+/// `item_type` nor `media_type` filtered `Search.Search list_item` in the
+/// probe (bogus and real values returned identical unfiltered lists).
+///
+/// There is deliberately no field for `exposure_time_group`, `iso`, `lens`,
+/// `flash`, `focal_length_group`, `folder_filter`, `general_tag`, `person`,
+/// `rating`, or the `time` buckets: none of these had a confirmed, working
+/// filter param on `Search.Search list_item` either, and the brief calls
+/// for dropping (not faking) a facet with no confirmable filter. Time
+/// filtering IS supported, but through the free `start_time`/`end_time`
+/// unix-second range on `SearchFilters` below, not through DSM's
+/// preset month buckets, so it needs no catalog entry here.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct SearchFacets {
+    pub cameras: Vec<Facet>,
+    pub apertures: Vec<Facet>,
+    pub geocodings: Vec<Facet>,
+    pub media_types: Vec<Facet>,
+}
+
+/// The one confirmed-working filter set for `SYNO.Foto.Search.Search
+/// list_item`: an inclusive `start_time`/`end_time` unix-second range,
+/// verified against the real NAS with an exact-second boundary test (a
+/// `start_time` one second after a known item's `time` excluded it; an
+/// `end_time` one second before it excluded it while keeping earlier items).
+/// Both ends are optional so a caller can filter with only a floor, only a
+/// ceiling, or both. `None` in both fields means "no date filter" -- the
+/// same as omitting the params entirely.
+#[derive(uniffi::Record, Clone, Debug, Default, PartialEq)]
+pub struct SearchFilters {
+    pub start_time: Option<i64>,
+    pub end_time: Option<i64>,
+}
+
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct CrawlProgress {
     pub space: Space,
@@ -356,6 +419,43 @@ mod tests {
         assert_ne!(tag, favorites);
         assert_eq!(album, DiscoveryCollection::Album { id: 42 });
         assert_ne!(album, favorites);
+    }
+
+    #[test]
+    fn facet_holds_id_and_name() {
+        let f = Facet { id: 23, name: "iPhone 6s".to_string() };
+        assert_eq!(f.id, 23);
+        assert_eq!(f.name, "iPhone 6s");
+        assert_eq!(f, Facet { id: 23, name: "iPhone 6s".to_string() });
+    }
+
+    #[test]
+    fn search_facets_holds_display_only_catalogs() {
+        let facets = SearchFacets {
+            cameras: vec![Facet { id: 23, name: "iPhone 6s".to_string() }],
+            apertures: vec![Facet { id: 1, name: "F1.8".to_string() }],
+            geocodings: vec![Facet { id: 12, name: "Oslo".to_string() }],
+            media_types: vec![Facet { id: 0, name: "photo".to_string() }],
+        };
+        assert_eq!(facets.cameras.len(), 1);
+        assert_eq!(facets.apertures[0].name, "F1.8");
+        assert_eq!(facets.geocodings[0].id, 12);
+        assert_eq!(facets.media_types[0].name, "photo");
+    }
+
+    #[test]
+    fn search_filters_default_is_no_date_filter() {
+        let f = SearchFilters::default();
+        assert!(f.start_time.is_none());
+        assert!(f.end_time.is_none());
+    }
+
+    #[test]
+    fn search_filters_holds_start_and_end() {
+        let f = SearchFilters { start_time: Some(1_400_000_000), end_time: Some(1_500_000_000) };
+        assert_eq!(f.start_time, Some(1_400_000_000));
+        assert_eq!(f.end_time, Some(1_500_000_000));
+        assert_ne!(f, SearchFilters::default());
     }
 
     #[test]

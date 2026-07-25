@@ -51,7 +51,7 @@
 use crate::envelope::decode_envelope;
 use crate::namespace::{browse_album_api, browse_item_api};
 use crate::transport::Transport;
-use models::{Album, Asset, CoreError, MediaKind, Space};
+use models::{Album, Asset, CoreError, MediaKind, SearchFilters, Space};
 use serde::Deserialize;
 
 /// A discovery-browse collection to filter `Browse.Item` by, plus the
@@ -461,6 +461,10 @@ async fn list_items_inner(
 ///
 /// `syno_token` is forwarded the same way as `list_items`: see that
 /// function's doc comment.
+///
+/// Delegates to `search_filtered` with an empty `SearchFilters` (no date
+/// range), so a plain keyword search sends exactly the same request it
+/// always has.
 pub async fn search(
     transport: &Transport,
     sid: &str,
@@ -470,7 +474,35 @@ pub async fn search(
     version: u32,
     syno_token: Option<&str>,
 ) -> Result<Vec<Asset>, CoreError> {
-    let query: Vec<(&str, String)> = vec![
+    search_filtered(transport, sid, keyword, &SearchFilters::default(), offset, limit, version, syno_token).await
+}
+
+/// Same as `search`, but additionally narrows results to a `start_time`/
+/// `end_time` unix-second range via `filters`.
+///
+/// VERIFIED against the real NAS (see `models::SearchFilters`'s doc
+/// comment): `start_time`/`end_time` are the only facet-shaped filter
+/// params confirmed to genuinely narrow `Search.Search list_item` results
+/// -- every other candidate (`camera_id`, `aperture_id`, `geocoding_id`,
+/// `item_type`, `media_type`, `folder_id`, `general_tag_id`, `person_id`,
+/// `exposure_time_group_id`, and JSON-blob `condition`/`filter` params) was
+/// probed with a real id alongside a bogus-id control and found to be
+/// silently ignored: real and bogus returned byte-identical unfiltered
+/// results. Only the params present in `filters` (`None` fields are omitted
+/// entirely, never sent as an empty string) are added to the request, so a
+/// default `SearchFilters` produces the exact same query `search` always
+/// sent.
+pub async fn search_filtered(
+    transport: &Transport,
+    sid: &str,
+    keyword: &str,
+    filters: &SearchFilters,
+    offset: u32,
+    limit: u32,
+    version: u32,
+    syno_token: Option<&str>,
+) -> Result<Vec<Asset>, CoreError> {
+    let mut query: Vec<(&str, String)> = vec![
         ("api", "SYNO.Foto.Search.Search".to_string()),
         ("version", version.to_string()),
         ("method", "list_item".to_string()),
@@ -480,6 +512,12 @@ pub async fn search(
         ("additional", "[\"thumbnail\",\"resolution\"]".to_string()),
         ("_sid", sid.to_string()),
     ];
+    if let Some(start) = filters.start_time {
+        query.push(("start_time", start.to_string()));
+    }
+    if let Some(end) = filters.end_time {
+        query.push(("end_time", end.to_string()));
+    }
     let body = get_body(transport, &query, syno_token).await?;
     let parsed: ItemList = decode_envelope(&body)?;
     let total = parsed.list.len();
