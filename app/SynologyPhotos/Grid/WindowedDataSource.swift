@@ -24,7 +24,12 @@ struct AssetItemID: Hashable {
 private enum FetchSource: Equatable {
     case space(Space)
     case collection(DiscoveryCollection)
-    case search(String)
+    /// A live keyword search, optionally narrowed by `SearchFilters` (the
+    /// confirmed start_time/end_time date range; see `models::SearchFilters`
+    /// for why no other facet is wired as a real filter yet). A default
+    /// `SearchFilters()` behaves exactly like the plain keyword search this
+    /// case always supported.
+    case search(String, SearchFilters)
 }
 
 /// Bridges the NSCollectionView grid to the core's windowed reads.
@@ -66,7 +71,7 @@ final class WindowedDataSource {
     var space: Space {
         switch source {
         case .space(let s): return s
-        case .collection, .search: return .personal
+        case .collection, .search(_, _): return .personal
         }
     }
 
@@ -129,8 +134,8 @@ final class WindowedDataSource {
                 // (fewer rows than asked for) means this was the last one.
                 isReady = rows.count < limit
                 totalCount = max(totalCount, offset + rows.count)
-            case .search(let keyword):
-                rows = try await client.searchAssets(keyword: keyword, offset: UInt32(offset), limit: UInt32(limit))
+            case .search(let keyword, let filters):
+                rows = try await client.searchAssetsFiltered(keyword: keyword, filters: filters, offset: UInt32(offset), limit: UInt32(limit))
                 // Same live-fetch, no-local-index estimate as `.collection`
                 // above: a search has no crawl barrier or grand total either.
                 isReady = rows.count < limit
@@ -183,12 +188,15 @@ final class WindowedDataSource {
     }
 
     /// Switches to windowing a live keyword `search` instead of a space's
-    /// library or a discovery-browse collection. Same reset discipline as
-    /// `setCollection`: every cached row/page marker from whatever was
-    /// previously loaded is dropped, and `totalCount`/`isReady` start at
-    /// zero/false, populated by the first `loadWindow` call the same way.
-    func setSearch(_ keyword: String) async {
-        source = .search(keyword)
+    /// library or a discovery-browse collection, optionally narrowed by
+    /// `filters` (the confirmed date range; defaults to no filter, matching
+    /// the plain keyword search this method always supported). Same reset
+    /// discipline as `setCollection`: every cached row/page marker from
+    /// whatever was previously loaded is dropped, and `totalCount`/`isReady`
+    /// start at zero/false, populated by the first `loadWindow` call the
+    /// same way.
+    func setSearch(_ keyword: String, filters: SearchFilters = SearchFilters(startTime: nil, endTime: nil)) async {
+        source = .search(keyword, filters)
         resetResident()
         totalCount = 0
         isReady = false

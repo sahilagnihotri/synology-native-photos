@@ -42,6 +42,7 @@ final class AppEnvironment {
     let crawl: CrawlProgressModel
     let spaceSelection: SpaceSelection
     let discoveryCoverCache: DiscoveryCoverCache
+    let searchFilters: SearchFilterModel
     let host: String
     let accountCacheDir: URL
 
@@ -56,6 +57,7 @@ final class AppEnvironment {
         self.crawl = CrawlProgressModel(client: c)
         self.spaceSelection = SpaceSelection(current: .personal)
         self.discoveryCoverCache = DiscoveryCoverCache(client: c)
+        self.searchFilters = SearchFilterModel(client: c)
         self.host = host
         self.accountCacheDir = accountCacheDir
     }
@@ -212,9 +214,14 @@ struct LibraryView: View {
                 // already routed to, no debounce needed for clearing. Only
                 // do this if a search was actually active, so clearing an
                 // already-empty field on first launch is a no-op rather
-                // than an extra reload.
+                // than an extra reload. Also clears any date filter that was
+                // active for the search being abandoned, per the brief
+                // ("clearing filters + keyword returns to the current
+                // sidebar view") -- a filter left over from a previous
+                // search should not silently apply to whatever comes next.
                 guard activeSearch != nil else { return }
                 activeSearch = nil
+                env.searchFilters.clear()
                 Task { await restoreCurrentRoute() }
                 return
             }
@@ -284,6 +291,16 @@ struct LibraryView: View {
                 // results would be a meaningless, permanently-stuck status.
                 if activeSearch == nil, case .grid = currentRoute, !env.crawl.isComplete {
                     Text(env.crawl.statusText).accessibilityIdentifier("crawl.status")
+                }
+                // Filters only make sense once a keyword search is active:
+                // the NAS has no way to run a date-only search (see
+                // `runSearch`'s doc comment), so the filter button only
+                // appears alongside actual search results, matching Photos'
+                // own placement of its filter control next to active search.
+                if activeSearch != nil {
+                    SearchFilterBarView(model: env.searchFilters) {
+                        Task { await runSearch(activeSearch ?? searchQuery) }
+                    }
                 }
                 if isShowingPhotoGrid {
                     if controller.selection.count > 0 {
@@ -473,9 +490,16 @@ struct LibraryView: View {
     /// this always happens after the data source itself is already
     /// windowing the new keyword, so the grid never briefly shows the
     /// previous view's stale rows under the new header.
+    ///
+    /// Always applies `env.searchFilters.currentFilters` alongside the
+    /// keyword: the NAS requires a non-empty `keyword` on every
+    /// `Search.Search` call (confirmed against the real NAS -- an absent or
+    /// empty keyword is rejected outright, so there is no way to run a
+    /// date-only search), which is why the filter popover only lets Apply
+    /// be pressed while a keyword is already active.
     private func runSearch(_ keyword: String) async {
         controller.clearSelection()
-        await env.dataSource.setSearch(keyword)
+        await env.dataSource.setSearch(keyword, filters: env.searchFilters.currentFilters)
         await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
         await controller.applySnapshot()
         activeSearch = keyword

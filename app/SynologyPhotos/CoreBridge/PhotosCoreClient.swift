@@ -58,4 +58,10 @@ actor PhotosCoreClient {
     func searchAssets(keyword: String, offset: UInt32, limit: UInt32) async throws -> [Asset] {
         try await core.searchAssets(keyword: keyword, offset: offset, limit: limit)
     }
+    func searchAssetsFiltered(keyword: String, filters: SearchFilters, offset: UInt32, limit: UInt32) async throws -> [Asset] {
+        try await core.searchAssetsFiltered(keyword: keyword, filters: filters, offset: offset, limit: limit)
+    }
+    func fetchSearchFacets() async throws -> SearchFacets {
+        try await core.fetchSearchFacets()
+    }
 }

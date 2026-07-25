@@ -114,6 +114,16 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     /// needing a real error path through the windowing logic below.
     var searchAssetsResult: Result<[Asset], CoreError>?
 
+    /// Overrides `searchAssetsFiltered` entirely when set; falls back to
+    /// `assetsForKeyword` (ignoring the filters) when unset, matching the
+    /// plain `searchAssets` fallback above -- a test that only cares about
+    /// the keyword-routing part of the fake does not also need to script
+    /// filters.
+    var searchAssetsFilteredResult: Result<[Asset], CoreError>?
+    /// Result for `fetchSearchFacets`. Defaults to an empty catalog.
+    var searchFacetsResult: Result<SearchFacets, CoreError> = .success(
+        SearchFacets(cameras: [], apertures: [], geocodings: [], mediaTypes: []))
+
     private(set) var fetchPeopleCallCount = 0
     private(set) var fetchPlacesCallCount = 0
     private(set) var fetchSubjectsCallCount = 0
@@ -121,8 +131,11 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var fetchLiveAlbumsCallCount = 0
     private(set) var fetchAssetsForCallCount = 0
     private(set) var searchAssetsCallCount = 0
+    private(set) var searchAssetsFilteredCallCount = 0
+    private(set) var fetchSearchFacetsCallCount = 0
     private(set) var lastFetchAssetsForCollection: DiscoveryCollection?
     private(set) var lastSearchKeyword: String?
+    private(set) var lastSearchFilters: SearchFilters?
 
     // MARK: - Call tracking
 
@@ -314,6 +327,21 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
             return try window(try searchAssetsResult.get(), offset: offset, limit: limit)
         }
         return try window(assetsForKeyword[keyword] ?? [], offset: offset, limit: limit)
+    }
+
+    func searchAssetsFiltered(keyword: String, filters: SearchFilters, offset: UInt32, limit: UInt32) async throws -> [Asset] {
+        searchAssetsFilteredCallCount += 1
+        lastSearchKeyword = keyword
+        lastSearchFilters = filters
+        if let searchAssetsFilteredResult {
+            return try window(try searchAssetsFilteredResult.get(), offset: offset, limit: limit)
+        }
+        return try window(assetsForKeyword[keyword] ?? [], offset: offset, limit: limit)
+    }
+
+    func fetchSearchFacets() async throws -> SearchFacets {
+        fetchSearchFacetsCallCount += 1
+        return try searchFacetsResult.get()
     }
 
     /// Shared windowing helper matching `fetchAssets`' own offset/limit

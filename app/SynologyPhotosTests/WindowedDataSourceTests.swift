@@ -192,15 +192,34 @@ struct WindowedDataSourceTests {
 
     // MARK: - Search windowing
 
-    @Test func setSearchLoadsFromSearchAssetsNotFetchAssets() async {
+    @Test func setSearchLoadsFromSearchAssetsFilteredNotFetchAssets() async {
         let fake = FakePhotosCore()
         fake.assetsForKeyword["food"] = (0..<5).map { asset(Int64($0) + 6000) }
         let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
         await ds.setSearch("food")
         let window = await ds.loadWindow(offset: 0, limit: 50)
         #expect(window.count == 5)
-        #expect(fake.searchAssetsCallCount == 1)
+        #expect(fake.searchAssetsFilteredCallCount == 1)
         #expect(fake.lastSearchKeyword == "food")
+    }
+
+    @Test func setSearchWithFiltersPassesThemThroughToTheCore() async {
+        let fake = FakePhotosCore()
+        fake.assetsForKeyword["food"] = (0..<5).map { asset(Int64($0) + 6000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        let filters = SearchFilters(startTime: 1_400_000_000, endTime: 1_500_000_000)
+        await ds.setSearch("food", filters: filters)
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(fake.lastSearchFilters == filters)
+    }
+
+    @Test func setSearchWithNoFiltersDefaultsToEmptyRange() async {
+        let fake = FakePhotosCore()
+        fake.assetsForKeyword["food"] = (0..<5).map { asset(Int64($0) + 6000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setSearch("food")
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(fake.lastSearchFilters == SearchFilters(startTime: nil, endTime: nil))
     }
 
     @Test func searchWindowMarksReadyOnceAShortPageArrives() async {
