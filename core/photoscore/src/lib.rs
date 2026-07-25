@@ -418,6 +418,21 @@ impl PhotosCore {
             .await
     }
 
+    /// Keyword search (`SYNO.Foto.Search.Search`, method `list_item`),
+    /// windowed the same way `fetch_assets_for` windows a discovery
+    /// collection: always a live NAS call, no local index. Personal space
+    /// only, matching the confirmed real-NAS scope (see the search plan
+    /// doc for the probe transcript). An empty or no-match keyword
+    /// resolves to an empty `Vec`, not an error; the caller (the app's
+    /// empty-state UI) treats that as "no results", never as a failure.
+    ///
+    /// Requires a live session; fails closed with `CoreError::Auth`
+    /// otherwise.
+    pub async fn search_assets(&self, keyword: String, offset: u32, limit: u32) -> Result<Vec<Asset>, CoreError> {
+        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Search.Search")?;
+        synology_api::search(&transport, &sid, &keyword, offset, limit, version, syno_token.as_deref()).await
+    }
+
     /// Fetches a thumbnail for `unit_id` at `size`, served from a
     /// composite-key on-disk cache whenever possible.
     ///
@@ -1782,6 +1797,43 @@ mod core_tests {
     }
 
     #[tokio::test]
+    async fn search_assets_sends_list_item_method_and_keyword_param() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _search = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Search.Search".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "list_item".into()),
+                mockito::Matcher::UrlEncoded("keyword".into(), "food".into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[{"id":73507,"filename":"IMG_1619.JPG","type":"live","additional":{"thumbnail":{"cache_key":"55853_1480101974","unit_id":55853}}}]}}"#)
+            .create_async().await;
+        let core = logged_in_core("search-assets", &server).await;
+        let assets = core.search_assets("food".to_string(), 0, 50).await.expect("search_assets ok");
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].unit_id, 55853);
+    }
+
+    #[tokio::test]
+    async fn search_assets_returns_empty_list_cleanly_on_no_match() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _search = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("keyword".into(), "zzzznosuchthing123".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[]}}"#)
+            .create_async().await;
+        let core = logged_in_core("search-assets-empty", &server).await;
+        let assets = core.search_assets("zzzznosuchthing123".to_string(), 0, 50).await.expect("search_assets ok");
+        assert!(assets.is_empty(), "a keyword with no matches must decode to an empty list, not error");
+    }
+
+    #[tokio::test]
     async fn fetch_people_without_login_returns_auth_error() {
         let core = core_at("fetch-people-no-login");
         let err = core.fetch_people(0, 50).await.unwrap_err();
@@ -1792,6 +1844,13 @@ mod core_tests {
     async fn fetch_assets_for_without_login_returns_auth_error() {
         let core = core_at("fetch-assets-for-no-login");
         let err = core.fetch_assets_for(DiscoveryCollection::Favorites, 0, 50).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn search_assets_without_login_returns_auth_error() {
+        let core = core_at("search-assets-no-login");
+        let err = core.search_assets("food".to_string(), 0, 50).await.unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 }
