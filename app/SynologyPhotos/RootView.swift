@@ -165,7 +165,7 @@ struct LibraryView: View {
 
     init(env: AppEnvironment) {
         self.env = env
-        let c = PhotoGridController(dataSource: env.dataSource, cache: env.thumbnailCache)
+        let c = PhotoGridController(dataSource: env.dataSource, cache: env.thumbnailCache, client: env.client)
         _controller = State(initialValue: c)
     }
 

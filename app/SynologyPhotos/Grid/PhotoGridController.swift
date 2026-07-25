@@ -30,7 +30,17 @@ final class KeyHandlingCollectionView: NSCollectionView {
 final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, NSCollectionViewDelegate {
     private let dataSource: WindowedDataSource
     private let cache: ThumbnailCache
+    /// Used only to fulfill a drag-to-Finder export promise (downloading
+    /// the ORIGINAL via `downloadOriginal(unitId:)`, see
+    /// `PhotoExportPromiseDelegate`). Never used for anything that would
+    /// mutate NAS state; the grid's own reads all go through `dataSource`.
+    private let client: PhotosCoreClient
     let collectionView = KeyHandlingCollectionView()
+    /// Retains every `PhotoExportPromiseDelegate` created for the drag
+    /// currently in flight (see `pasteboardWriterForItemAt:`'s doc comment
+    /// on why retention is needed at all), cleared once the drag session
+    /// ends.
+    private var pendingExportDelegates: [PhotoExportPromiseDelegate] = []
     private var diffable: NSCollectionViewDiffableDataSource<Int, AssetItemID>?
     /// Small, fixed inter-item gap, matching Photos' tight justified grid.
     /// Item size itself is variable (driven by `applyZoom`); the gap stays
@@ -110,9 +120,10 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// be wrong until every page finishes loading.
     private static let section = 0
 
-    init(dataSource: WindowedDataSource, cache: ThumbnailCache) {
+    init(dataSource: WindowedDataSource, cache: ThumbnailCache, client: PhotosCoreClient) {
         self.dataSource = dataSource
         self.cache = cache
+        self.client = client
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -133,6 +144,13 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         collectionView.delegate = self
         collectionView.register(PhotoCellView.self, forItemWithIdentifier: PhotoCellView.reuseIdentifier)
         collectionView.setAccessibilityIdentifier("grid.collection")
+        // Drag-to-Finder export (read-only): registering the file-promise
+        // pasteboard type is what lets AppKit treat a drag started from
+        // this collection view as a file-promise drag Finder/Desktop can
+        // accept a real file drop for. The actual promise objects are
+        // built per-drag in `collectionView(_:pasteboardWriterForItemAt:)`.
+        collectionView.registerForDraggedTypes([.fileURL])
+        collectionView.setDraggingSourceOperationMask(.copy, forLocal: false)
         collectionView.keyHandler = { [weak self] event in
             self?.handleKey(event) ?? false
         }
@@ -503,6 +521,45 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
             guard !rows.isEmpty else { return }
             await applySnapshot()
         }
+    }
+
+    /// `NSCollectionViewDelegate`: only a cell backed by an already-loaded
+    /// asset can be dragged. A not-yet-loaded placeholder row (see
+    /// `applySnapshot()`'s doc comment on negative placeholder ids) has no
+    /// `unit_id`/`cache_key` to download from yet, so it must not start a
+    /// drag that would only ever fail to fulfill.
+    func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexPaths: Set<IndexPath>) -> Bool {
+        indexPaths.contains { dataSource.item(at: $0.item) != nil }
+    }
+
+    /// `NSCollectionViewDelegate`: the drag-to-Finder export itself. Builds
+    /// one `NSFilePromiseProvider` per dragged cell, backed by a
+    /// `PhotoExportPromiseDelegate` that fulfills by downloading the
+    /// asset's ORIGINAL file on demand (never a thumbnail, never anything
+    /// already cached at a lower resolution). Read-only: nothing here
+    /// touches the NAS beyond that download.
+    ///
+    /// The delegate is retained in `pendingExportDelegates` for the
+    /// duration of the drag: `NSFilePromiseProvider.delegate` is a `weak`
+    /// reference (see the AppKit header), so nothing else keeps this
+    /// object alive between the drag starting and Finder actually asking
+    /// for the promise to be fulfilled, which can be well after this
+    /// method returns.
+    func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
+        guard let asset = dataSource.item(at: indexPath.item) else { return nil }
+        let delegate = PhotoExportPromiseDelegate(asset: asset, space: dataSource.space, client: client)
+        pendingExportDelegates.append(delegate)
+        let provider = NSFilePromiseProvider(fileType: PhotoDragExport.fileType(for: asset), delegate: delegate)
+        return provider
+    }
+
+    /// `NSCollectionViewDelegate`: the drag session (successful or not) is
+    /// over, so every `PhotoExportPromiseDelegate` retained for it can be
+    /// released. A cancelled or failed drag still reaches this callback,
+    /// so delegates are never retained forever on a drag the user abandons
+    /// mid-gesture.
+    func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) {
+        pendingExportDelegates.removeAll()
     }
 
     /// `NSCollectionViewDelegate`: mirrors AppKit's own hit-testing/modifier

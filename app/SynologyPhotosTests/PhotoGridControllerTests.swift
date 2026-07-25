@@ -46,7 +46,7 @@ struct PhotoGridControllerTests {
         let client = PhotosCoreClient(core: fake)
         let ds = WindowedDataSource(client: client, space: .personal, pageSize: 60)
         let cache = ThumbnailCache(client: client)
-        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
         _ = controller.view
         await ds.refreshCount()
         await ds.loadWindow(offset: 0, limit: 60)
@@ -76,7 +76,7 @@ struct PhotoGridControllerTests {
         let client = PhotosCoreClient(core: fake)
         let ds = WindowedDataSource(client: client, space: .personal, pageSize: 50)
         let cache = ThumbnailCache(client: client)
-        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
         _ = controller.view
         await ds.refreshCount()
         await controller.applySnapshot()
@@ -192,7 +192,7 @@ struct PhotoGridControllerTests {
         let client = PhotosCoreClient(core: fake)
         let ds = WindowedDataSource(client: client, space: .personal, pageSize: 50)
         let cache = ThumbnailCache(client: client)
-        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
         _ = controller.view
 
         await ds.refreshCount()
@@ -218,7 +218,7 @@ struct PhotoGridControllerTests {
         let client = PhotosCoreClient(core: fake)
         let ds = WindowedDataSource(client: client, space: .personal, pageSize: 50)
         let cache = ThumbnailCache(client: client)
-        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
         _ = controller.view
 
         await ds.refreshCount()
@@ -259,7 +259,7 @@ struct PhotoGridControllerTests {
         let client = PhotosCoreClient(core: fake)
         let ds = WindowedDataSource(client: client, space: .personal, pageSize: 40)
         let cache = ThumbnailCache(client: client)
-        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
 
         // Populate the data source the way `LibraryView`'s `.task` does,
         // still without ever touching `controller.view`.
@@ -293,7 +293,7 @@ struct PhotoGridControllerTests {
         let client = PhotosCoreClient(core: fake)
         let ds = WindowedDataSource(client: client, space: .personal, pageSize: 40)
         let cache = ThumbnailCache(client: client)
-        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
 
         await ds.refreshCount()
         await controller.applySnapshot() // deferred: no view yet
@@ -361,7 +361,7 @@ struct PhotoGridControllerTests {
         let client = PhotosCoreClient(core: fake)
         let ds = WindowedDataSource(client: client, space: .personal, pageSize: 50)
         let cache = ThumbnailCache(client: client)
-        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
         _ = controller.view
 
         await ds.refreshCount()
@@ -469,7 +469,7 @@ struct PhotoGridControllerTests {
         let client = PhotosCoreClient(core: fake)
         let ds = WindowedDataSource(client: client, space: .personal, pageSize: max(count, 1))
         let cache = ThumbnailCache(client: client)
-        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
         _ = controller.view
         await ds.refreshCount()
         await ds.loadWindow(offset: 0, limit: max(count, 1))
@@ -655,6 +655,65 @@ struct PhotoGridControllerTests {
         #expect(controller.selection.selected == [0])
     }
 
+    // MARK: - Drag-to-Finder export (canDragItemsAt / pasteboardWriterForItemAt)
+
+    @Test func loadedRowCanBeDragged() async {
+        let (controller, _) = await makeController(count: 5)
+        let canDrag = controller.collectionView(
+            controller.collectionView, canDragItemsAt: [IndexPath(item: 2, section: 0)])
+        #expect(canDrag == true)
+    }
+
+    /// A not-yet-loaded placeholder row (index beyond what `loadWindow` has
+    /// actually populated in `WindowedDataSource`) has no `unit_id`/
+    /// `cache_key` to download from yet, so dragging it must be refused
+    /// rather than starting a promise doomed to fail.
+    @Test func unloadedPlaceholderRowCannotBeDragged() async {
+        let fake = FakePhotosCore()
+        // 5 rows exist server-side, but the page size is smaller than the
+        // index under test, and no loadWindow call is made for it, so
+        // index 4 stays an unresolved placeholder.
+        fake.assets[.personal] = (0..<5).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 5, total: 5, complete: true)
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: 2)
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
+        _ = controller.view
+        await ds.refreshCount()
+        await ds.loadWindow(offset: 0, limit: 2) // only rows 0-1 resident
+        await controller.applySnapshot()
+
+        let canDrag = controller.collectionView(
+            controller.collectionView, canDragItemsAt: [IndexPath(item: 4, section: 0)])
+        #expect(canDrag == false)
+    }
+
+    @Test func pasteboardWriterBuildsAFilePromiseProviderForALoadedRow() async {
+        let (controller, _) = await makeController(count: 5)
+        let writer = controller.collectionView(
+            controller.collectionView, pasteboardWriterForItemAt: IndexPath(item: 1, section: 0))
+        #expect(writer is NSFilePromiseProvider)
+    }
+
+    @Test func pasteboardWriterIsNilForAnUnloadedPlaceholderRow() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<5).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 5, total: 5, complete: true)
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: 2)
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
+        _ = controller.view
+        await ds.refreshCount()
+        await ds.loadWindow(offset: 0, limit: 2)
+        await controller.applySnapshot()
+
+        let writer = controller.collectionView(
+            controller.collectionView, pasteboardWriterForItemAt: IndexPath(item: 4, section: 0))
+        #expect(writer == nil)
+    }
+
     @Test func unrecognizedKeyIsNotConsumed() async {
         let (controller, _) = await makeController(count: 5)
         #expect(controller.handleKey(keyEvent(0xFF)) == false)
@@ -679,7 +738,7 @@ struct PhotoGridControllerTests {
         let client = PhotosCoreClient(core: fake)
         let ds = WindowedDataSource(client: client, space: .personal, pageSize: 10)
         let cache = ThumbnailCache(client: client)
-        let controller = PhotoGridController(dataSource: ds, cache: cache)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
         _ = controller.view
         await ds.refreshCount()
         // Deliberately no `loadWindow`/`applySnapshot()` call: the
