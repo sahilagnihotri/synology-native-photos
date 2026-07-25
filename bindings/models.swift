@@ -1199,6 +1199,97 @@ public func FfiConverterTypeCrawlProgress_lower(_ value: CrawlProgress) -> RustB
 
 
 /**
+ * One entry in a `SearchFacets` catalog: an id/name pair as returned by
+ * `SYNO.Foto.Search.Filter`. Shared shape for `cameras`, `apertures`, and
+ * `geocodings` (the geocoding tree is flattened -- see
+ * `synology_api::search_filter`'s doc comment for how nested regions are
+ * walked into one flat list of leaves-and-branches).
+ *
+ * VERIFIED against the real NAS: these three facets are listed correctly
+ * by `Search.Filter`, but NEITHER `SYNO.Foto.Search.Search list_item` NOR
+ * `SYNO.Foto.Browse.Item` accepts a working filter param for any of them
+ * on this NAS/DSM build (`camera_id`, `aperture_id`, `geocoding_id`, and
+ * several JSON-blob shapes -- `condition={...}`, `filter={...}` -- were all
+ * probed with a real id alongside a bogus-id control; every one returned
+ * the exact same unfiltered result set for both, the signature of a
+ * silently-ignored param rather than a real filter). So `Facet` values
+ * here are shown for browsing/labeling only; the UI cannot yet filter
+ * search results by camera/aperture/place. `Place`/`geocoding_id` remains
+ * filterable through `Browse.Item`'s discovery-browse `CollectionFilter`
+ * (a different, already-working code path), just not through
+ * `Search.Search`.
+ */
+public struct Facet {
+    public var id: Int64
+    public var name: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: Int64, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+#if compiler(>=6)
+extension Facet: Sendable {}
+#endif
+
+
+extension Facet: Equatable, Hashable {
+    public static func ==(lhs: Facet, rhs: Facet) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFacet: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Facet {
+        return
+            try Facet(
+                id: FfiConverterInt64.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Facet, into buf: inout [UInt8]) {
+        FfiConverterInt64.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFacet_lift(_ buf: RustBuffer) throws -> Facet {
+    return try FfiConverterTypeFacet.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFacet_lower(_ value: Facet) -> RustBuffer {
+    return FfiConverterTypeFacet.lower(value)
+}
+
+
+/**
  * One row from `SYNO.Foto.Browse.Person`: a face cluster DSM has detected.
  * `name` is the empty string for a person DSM has not been given a name
  * for yet (the app shows this as a disabled "Add Name" placeholder rather
@@ -1412,6 +1503,190 @@ public func FfiConverterTypePlace_lift(_ buf: RustBuffer) throws -> Place {
 #endif
 public func FfiConverterTypePlace_lower(_ value: Place) -> RustBuffer {
     return FfiConverterTypePlace.lower(value)
+}
+
+
+/**
+ * The facet catalog from `SYNO.Foto.Search.Filter`, `method=list`.
+ * `cameras`/`apertures`/`geocodings` are listed for display only (see
+ * `Facet`'s doc comment: no working filter param exists for them yet).
+ * `media_types` mirrors the `item_type` facet DSM lists (this account only
+ * ever reports `photo`); it is likewise display-only, since neither
+ * `item_type` nor `media_type` filtered `Search.Search list_item` in the
+ * probe (bogus and real values returned identical unfiltered lists).
+ *
+ * There is deliberately no field for `exposure_time_group`, `iso`, `lens`,
+ * `flash`, `focal_length_group`, `folder_filter`, `general_tag`, `person`,
+ * `rating`, or the `time` buckets: none of these had a confirmed, working
+ * filter param on `Search.Search list_item` either, and the brief calls
+ * for dropping (not faking) a facet with no confirmable filter. Time
+ * filtering IS supported, but through the free `start_time`/`end_time`
+ * unix-second range on `SearchFilters` below, not through DSM's
+ * preset month buckets, so it needs no catalog entry here.
+ */
+public struct SearchFacets {
+    public var cameras: [Facet]
+    public var apertures: [Facet]
+    public var geocodings: [Facet]
+    public var mediaTypes: [Facet]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(cameras: [Facet], apertures: [Facet], geocodings: [Facet], mediaTypes: [Facet]) {
+        self.cameras = cameras
+        self.apertures = apertures
+        self.geocodings = geocodings
+        self.mediaTypes = mediaTypes
+    }
+}
+
+#if compiler(>=6)
+extension SearchFacets: Sendable {}
+#endif
+
+
+extension SearchFacets: Equatable, Hashable {
+    public static func ==(lhs: SearchFacets, rhs: SearchFacets) -> Bool {
+        if lhs.cameras != rhs.cameras {
+            return false
+        }
+        if lhs.apertures != rhs.apertures {
+            return false
+        }
+        if lhs.geocodings != rhs.geocodings {
+            return false
+        }
+        if lhs.mediaTypes != rhs.mediaTypes {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(cameras)
+        hasher.combine(apertures)
+        hasher.combine(geocodings)
+        hasher.combine(mediaTypes)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSearchFacets: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SearchFacets {
+        return
+            try SearchFacets(
+                cameras: FfiConverterSequenceTypeFacet.read(from: &buf), 
+                apertures: FfiConverterSequenceTypeFacet.read(from: &buf), 
+                geocodings: FfiConverterSequenceTypeFacet.read(from: &buf), 
+                mediaTypes: FfiConverterSequenceTypeFacet.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SearchFacets, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeFacet.write(value.cameras, into: &buf)
+        FfiConverterSequenceTypeFacet.write(value.apertures, into: &buf)
+        FfiConverterSequenceTypeFacet.write(value.geocodings, into: &buf)
+        FfiConverterSequenceTypeFacet.write(value.mediaTypes, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSearchFacets_lift(_ buf: RustBuffer) throws -> SearchFacets {
+    return try FfiConverterTypeSearchFacets.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSearchFacets_lower(_ value: SearchFacets) -> RustBuffer {
+    return FfiConverterTypeSearchFacets.lower(value)
+}
+
+
+/**
+ * The one confirmed-working filter set for `SYNO.Foto.Search.Search
+ * list_item`: an inclusive `start_time`/`end_time` unix-second range,
+ * verified against the real NAS with an exact-second boundary test (a
+ * `start_time` one second after a known item's `time` excluded it; an
+ * `end_time` one second before it excluded it while keeping earlier items).
+ * Both ends are optional so a caller can filter with only a floor, only a
+ * ceiling, or both. `None` in both fields means "no date filter" -- the
+ * same as omitting the params entirely.
+ */
+public struct SearchFilters {
+    public var startTime: Int64?
+    public var endTime: Int64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(startTime: Int64?, endTime: Int64?) {
+        self.startTime = startTime
+        self.endTime = endTime
+    }
+}
+
+#if compiler(>=6)
+extension SearchFilters: Sendable {}
+#endif
+
+
+extension SearchFilters: Equatable, Hashable {
+    public static func ==(lhs: SearchFilters, rhs: SearchFilters) -> Bool {
+        if lhs.startTime != rhs.startTime {
+            return false
+        }
+        if lhs.endTime != rhs.endTime {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(startTime)
+        hasher.combine(endTime)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSearchFilters: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SearchFilters {
+        return
+            try SearchFilters(
+                startTime: FfiConverterOptionInt64.read(from: &buf), 
+                endTime: FfiConverterOptionInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SearchFilters, into buf: inout [UInt8]) {
+        FfiConverterOptionInt64.write(value.startTime, into: &buf)
+        FfiConverterOptionInt64.write(value.endTime, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSearchFilters_lift(_ buf: RustBuffer) throws -> SearchFilters {
+    return try FfiConverterTypeSearchFilters.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSearchFilters_lower(_ value: SearchFilters) -> RustBuffer {
+    return FfiConverterTypeSearchFilters.lower(value)
 }
 
 
@@ -2412,6 +2687,31 @@ fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
         case 1: return try FfiConverterData.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFacet: FfiConverterRustBuffer {
+    typealias SwiftType = [Facet]
+
+    public static func write(_ value: [Facet], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFacet.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Facet] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Facet]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFacet.read(from: &buf))
+        }
+        return seq
     }
 }
 

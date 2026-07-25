@@ -648,6 +648,21 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func fetchPlaces(offset: UInt32, limit: UInt32) async throws  -> [Place]
     
     /**
+     * Fetches the search facet catalog (`SYNO.Foto.Search.Filter`,
+     * `method=list`): camera, aperture, and geocoding facets for display,
+     * plus the media-type list. See `models::SearchFacets`'s doc comment
+     * for why these are shown but not (yet) filterable -- only the date
+     * range on `search_assets_filtered` is a real working filter on this
+     * NAS.
+     *
+     * A live network call every time, same discipline as
+     * `fetch_people`/`fetch_places`/etc: no local index for the facet
+     * catalog. Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
+     */
+    func fetchSearchFacets() async throws  -> SearchFacets
+    
+    /**
      * Lists Subjects (`SYNO.Foto.Browse.Concept`). Same live-call and auth
      * discipline as `fetch_people`. Listing works; there is deliberately no
      * `fetch_assets_for` variant for a subject yet (see
@@ -734,6 +749,20 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * otherwise.
      */
     func searchAssets(keyword: String, offset: UInt32, limit: UInt32) async throws  -> [Asset]
+    
+    /**
+     * Same as `search_assets`, but additionally narrows results to
+     * `filters.start_time`/`filters.end_time` (unix seconds), the one
+     * confirmed-working facet filter on `Search.Search list_item` -- see
+     * `models::SearchFilters`'s doc comment for the probe that ruled every
+     * camera/aperture/geocoding/media-type candidate out. A default
+     * `SearchFilters` (both fields `None`) behaves exactly like
+     * `search_assets`.
+     *
+     * Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
+     */
+    func searchAssetsFiltered(keyword: String, filters: SearchFilters, offset: UInt32, limit: UInt32) async throws  -> [Asset]
     
     /**
      * Sign out: best-effort server-side logout, then unconditionally drop
@@ -1130,6 +1159,36 @@ open func fetchPlaces(offset: UInt32, limit: UInt32)async throws  -> [Place]  {
 }
     
     /**
+     * Fetches the search facet catalog (`SYNO.Foto.Search.Filter`,
+     * `method=list`): camera, aperture, and geocoding facets for display,
+     * plus the media-type list. See `models::SearchFacets`'s doc comment
+     * for why these are shown but not (yet) filterable -- only the date
+     * range on `search_assets_filtered` is a real working filter on this
+     * NAS.
+     *
+     * A live network call every time, same discipline as
+     * `fetch_people`/`fetch_places`/etc: no local index for the facet
+     * catalog. Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
+     */
+open func fetchSearchFacets()async throws  -> SearchFacets  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_fetch_search_facets(
+                    self.uniffiClonePointer()
+                    
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeSearchFacets_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
      * Lists Subjects (`SYNO.Foto.Browse.Concept`). Same live-call and auth
      * discipline as `fetch_people`. Listing works; there is deliberately no
      * `fetch_assets_for` variant for a subject yet (see
@@ -1312,6 +1371,35 @@ open func searchAssets(keyword: String, offset: UInt32, limit: UInt32)async thro
                 uniffi_photoscore_fn_method_photoscore_search_assets(
                     self.uniffiClonePointer(),
                     FfiConverterString.lower(keyword),FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeAsset.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Same as `search_assets`, but additionally narrows results to
+     * `filters.start_time`/`filters.end_time` (unix seconds), the one
+     * confirmed-working facet filter on `Search.Search list_item` -- see
+     * `models::SearchFilters`'s doc comment for the probe that ruled every
+     * camera/aperture/geocoding/media-type candidate out. A default
+     * `SearchFilters` (both fields `None`) behaves exactly like
+     * `search_assets`.
+     *
+     * Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
+     */
+open func searchAssetsFiltered(keyword: String, filters: SearchFilters, offset: UInt32, limit: UInt32)async throws  -> [Asset]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_search_assets_filtered(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(keyword),FfiConverterTypeSearchFilters_lower(filters),FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
                 )
             },
             pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
@@ -1880,6 +1968,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_fetch_places() != 23273) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_search_facets() != 30002) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_subjects() != 59577) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1899,6 +1990,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_search_assets() != 47405) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_search_assets_filtered() != 16234) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_sign_out() != 54821) {
