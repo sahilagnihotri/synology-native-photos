@@ -173,6 +173,72 @@ actor TempFileCache {
     }
 }
 
+/// `NSScrollView` subclass that hosts `QLPreviewView` and owns the zoom
+/// state the detail viewer's scroll/pinch magnify + reset-to-fit act on.
+///
+/// Zooming the detail image is implemented as plain AppKit scroll-view
+/// magnification (`allowsMagnification`) around the already-loaded
+/// `QLPreviewView`, rather than anything QuickLook-specific: `QLPreviewView`
+/// keeps its own full format dispatch (RAW/HEIC/video) completely
+/// untouched, this class only decides how large its frame is drawn and lets
+/// the user pan by scrolling once magnified, exactly the same mechanism
+/// Preview.app and Xcode's own asset viewers use. No bytes are re-fetched
+/// for a higher-resolution image: this magnifies whatever `QLPreviewView`
+/// already rendered.
+final class ZoomableQuickLookScrollView: NSScrollView {
+    let previewView = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
+
+    /// Double-click anywhere in the zoomed content resets to fit, matching
+    /// the spec's "a way to reset to fit (double-click or a fit button)".
+    /// `numberOfClicksRequired = 2` means a single click (which QuickLook
+    /// itself may want for e.g. video scrubber controls) is never
+    /// intercepted by this recognizer.
+    private var resetGesture: NSClickGestureRecognizer?
+
+    init() {
+        super.init(frame: .zero)
+        allowsMagnification = true
+        minMagnification = DetailZoomModel.fitScale
+        maxMagnification = DetailZoomModel.maxScale
+        hasHorizontalScroller = false
+        hasVerticalScroller = false
+        drawsBackground = false
+        previewView.setAccessibilityIdentifier("detail.quicklook")
+        documentView = previewView
+        let gesture = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick))
+        gesture.numberOfClicksRequired = 2
+        addGestureRecognizer(gesture)
+        resetGesture = gesture
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not used")
+    }
+
+    /// Resets the current zoom to fit, e.g. after paging to a new asset or
+    /// on a double-click. `NSScrollView.magnification` is the live "current
+    /// zoom" property scroll/pinch gestures already write into directly;
+    /// setting it back to `DetailZoomModel.fitScale` is exactly what
+    /// resetting to fit means here, there is no separate stored "fit" state
+    /// to reconcile.
+    func resetZoom() {
+        magnification = DetailZoomModel.fitScale
+    }
+
+    /// Clamps every magnification change (scroll-wheel, pinch, or the
+    /// system's own momentum) through `DetailZoomModel.clamp`, so the same
+    /// fit..8x bound the model's tests verify is what the live view
+    /// actually enforces, not a second, undocumented copy of the range.
+    override var magnification: CGFloat {
+        get { super.magnification }
+        set { super.magnification = DetailZoomModel.clamp(newValue) }
+    }
+
+    @objc private func handleDoubleClick() {
+        resetZoom()
+    }
+}
+
 /// Full-size photo/video detail view: downloads the original for `asset`
 /// (via `PhotosCoreClient.downloadOriginal`, Task 40 -> 37) into a
 /// count-bounded temp cache, then previews it with QuickLook.
@@ -180,19 +246,36 @@ actor TempFileCache {
 /// Read-only: this view only ever downloads and previews. It never uploads,
 /// edits, or deletes anything on the NAS, selecting a grid item and
 /// opening detail cannot mutate NAS state.
+///
+/// Wrapped in `ZoomableQuickLookScrollView` (see above) so scroll/pinch can
+/// magnify the photo itself, with click-drag pan once zoomed (the scroll
+/// view's own natural behavior above `fitScale`) and a double-click reset.
+/// Left/Right paging keeps working at any zoom level: `DetailViewerHost`'s
+/// key handling pages regardless of the current magnification, matching
+/// Photos' own choice to keep arrow keys as paging and zoom as a
+/// trackpad/scroll-only gesture.
 struct DetailQuickLookView: NSViewRepresentable {
     let asset: Asset
     let space: Space
     let client: PhotosCoreClient
     let cache: TempFileCache
 
-    func makeNSView(context: Context) -> QLPreviewView {
-        let preview = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
-        preview.setAccessibilityIdentifier("detail.quicklook")
-        return preview
+    func makeNSView(context: Context) -> ZoomableQuickLookScrollView {
+        ZoomableQuickLookScrollView()
     }
 
-    func updateNSView(_ nsView: QLPreviewView, context: Context) {
+    func updateNSView(_ nsView: ZoomableQuickLookScrollView, context: Context) {
+        // A new asset (paging Left/Right reuses this same NSView instance,
+        // SwiftUI does not re-create it) always resets zoom back to fit:
+        // carrying a zoomed-in scale over to the next photo would leave the
+        // user looking at a random crop of a photo they never zoomed
+        // themselves, matching Photos' own behavior of resetting zoom per
+        // photo.
+        if context.coordinator.lastAssetId != asset.id {
+            context.coordinator.lastAssetId = asset.id
+            nsView.resetZoom()
+        }
+
         let a = asset, s = space, c = client, tc = cache
         Task {
             do {
@@ -202,12 +285,22 @@ struct DetailQuickLookView: NSViewRepresentable {
                     space: s, unitId: a.unitId, cacheKey: a.cacheKey)
                 let filename = QuickLookFilename.derive(for: a)
                 let url = await tc.store(path: downloadedPath, preferredFilename: filename)
-                await MainActor.run { nsView.previewItem = url as NSURL }
+                await MainActor.run { nsView.previewView.previewItem = url as NSURL }
             } catch {
                 // Read-only: on failure, leave the preview empty; no
                 // mutation of the NAS is ever attempted on this path.
             }
         }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// Tracks which asset the hosted view is currently showing, purely so
+    /// `updateNSView` can tell "this is the same photo, a redundant SwiftUI
+    /// re-render" apart from "this is a new photo, reset the zoom", without
+    /// resetting on every single body re-evaluation.
+    final class Coordinator {
+        var lastAssetId: Int64?
     }
 }
 
