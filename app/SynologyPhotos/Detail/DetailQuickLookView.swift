@@ -297,23 +297,40 @@ final class ZoomableImageScrollView: NSScrollView {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
-    /// Keeps the image view filling the viewport at 100%; magnification
-    /// scales it from there. Only re-sized while at fit so a window resize
+    /// Keeps the fitted image view filling the viewport at 100%, from where
+    /// magnification scales it. Done in response to the scroll view's own
+    /// frame changing (a window resize) rather than inside a `layout()`
+    /// override: mutating a subview's geometry from within the scroll view's
+    /// layout pass is what produced the "-layoutSubtreeIfNeeded on a view
+    /// which is already being laid out" warning, because it re-dirtied the
+    /// document view mid-layout. Only re-sized while at fit, so a resize
     /// mid-zoom does not fight the user's current pan/zoom.
-    override func layout() {
-        super.layout()
-        if !DetailZoomModel.isZoomed(magnification) {
-            imageView.frame = NSRect(origin: .zero, size: bounds.size)
-        }
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        sizeImageViewToFitIfNeeded()
+    }
+
+    /// Sets the fitted image view's frame to the current viewport size, but
+    /// only when at fit and only when it actually differs, so a redundant
+    /// same-value assignment never re-triggers layout.
+    private func sizeImageViewToFitIfNeeded() {
+        guard !DetailZoomModel.isZoomed(magnification) else { return }
+        let target = NSRect(origin: .zero, size: bounds.size)
+        if imageView.frame != target { imageView.frame = target }
     }
 
     /// Resets the current zoom to fit. `NSScrollView.magnification` is the
     /// live "current zoom" property scroll/pinch gestures write into
     /// directly; setting it back to `fitScale` is what resetting to fit
-    /// means here.
+    /// means here. Both writes are deduplicated so a reset that is already at
+    /// fit does no redundant work (and fires no spurious magnification
+    /// callback).
     func resetZoom() {
-        magnification = DetailZoomModel.fitScale
-        imageView.frame = NSRect(origin: .zero, size: bounds.size)
+        if magnification != DetailZoomModel.fitScale {
+            magnification = DetailZoomModel.fitScale
+        }
+        let target = NSRect(origin: .zero, size: bounds.size)
+        if imageView.frame != target { imageView.frame = target }
     }
 
     /// Clamps every programmatic magnification change through
@@ -555,6 +572,7 @@ struct DetailViewerHost: View {
                             asset: asset,
                             space: space,
                             client: client,
+                            cache: cache,
                             synoToken: synoToken)
                     } else {
                         DetailQuickLookView(
