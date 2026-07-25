@@ -21,6 +21,10 @@ enum SidebarSelectionRoute: Equatable {
     case grid(Space)
     case discoveryTiles(DiscoveryKind)
     case discoveryGrid(DiscoveryCollection)
+    /// The Recently Deleted grid for a `Space`: a photo grid (so selection,
+    /// zoom, and count controls all apply) backed by the trash source rather
+    /// than the library, with its own Restore / Delete Permanently actions.
+    case trash(Space)
 }
 
 /// Which discovery-browse tile grid is being shown. A separate type from
@@ -52,6 +56,7 @@ extension SidebarItem {
         case .subjects: return .discoveryTiles(.subjects)
         case .tags: return .discoveryTiles(.tags)
         case .favorites: return .discoveryGrid(.favorites)
+        case .recentlyDeleted: return .trash(currentSpace)
         }
     }
 }

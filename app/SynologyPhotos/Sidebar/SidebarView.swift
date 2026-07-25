@@ -37,6 +37,12 @@ struct SidebarView: View {
                         .tag(item)
                 }
             }
+            Section {
+                ForEach(SidebarSections.utilities, id: \.self) { item in
+                    Label(item.title, systemImage: item.systemImage)
+                        .tag(item)
+                }
+            }
         }
         .listStyle(.sidebar)
         .accessibilityIdentifier("sidebar.list")

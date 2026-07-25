@@ -24,6 +24,10 @@ enum SidebarItem: Hashable {
     case subjects
     case tags
     case favorites
+    /// The app-owned Recently Deleted view: a grid of soft-deleted items that
+    /// can be restored, or permanently deleted from there (and only there).
+    /// Mirrors Photos' own "Recently Deleted" source-list row.
+    case recentlyDeleted
 }
 
 /// Static sidebar layout: one Library row, one row per space, one Albums
@@ -35,6 +39,9 @@ enum SidebarSections {
     static let libraryAndSpaces: [SidebarItem] = [.library, .space(.personal), .space(.shared)]
     static let albums: [SidebarItem] = [.albums]
     static let discovery: [SidebarItem] = [.people, .places, .subjects, .tags, .favorites]
+    /// Utility rows shown at the bottom of the sidebar, matching Photos' own
+    /// placement of Recently Deleted below the main sources.
+    static let utilities: [SidebarItem] = [.recentlyDeleted]
 }
 
 extension SidebarItem {
@@ -50,6 +57,7 @@ extension SidebarItem {
         case .subjects: return "Subjects"
         case .tags: return "Tags"
         case .favorites: return "Favorites"
+        case .recentlyDeleted: return "Recently Deleted"
         }
     }
 
@@ -66,6 +74,7 @@ extension SidebarItem {
         case .subjects: return "square.grid.2x2"
         case .tags: return "tag"
         case .favorites: return "heart"
+        case .recentlyDeleted: return "trash"
         }
     }
 }
