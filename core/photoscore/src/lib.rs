@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use models::{
     Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DiscoveryCollection, Person, Place,
-    SearchFacets, SearchFilters, Session, SessionState, Space, Subject, Tag, ThumbnailData, ThumbnailSize,
-    VideoPlaybackSource,
+    RecycleItem, SearchFacets, SearchFilters, Session, SessionState, Space, Subject, Tag, ThumbnailData,
+    ThumbnailSize, VideoPlaybackSource,
 };
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
@@ -660,7 +660,131 @@ impl PhotosCore {
         Ok(VideoPlaybackSource::LocalFile { path })
     }
 
-    // --- Phase 2a: hybrid safe delete -----------------------------------
+    // --- Phase 2b: real delete + DSM recycle bin ------------------------
+    //
+    // The everyday delete now REMOVES the item from the Synology Photos
+    // library outright (`SYNO.Foto.Browse.Item` `method=delete`), so it
+    // disappears from Synology Photos everywhere (web app, phone), and the
+    // physical original lands in the DSM home recycle bin at its mirrored
+    // path, recoverable for the recycle bin's retention window. "Recently
+    // Deleted" is that recycle bin, browsed/restored/emptied through DSM File
+    // Station (`synology_api::recycle`). This supersedes the older
+    // trash-album flow below, which is kept only until the Swift call sites
+    // are switched over.
+
+    /// EVERYDAY DELETE: permanently removes `asset_ids` from the Synology
+    /// Photos library via the real Foto delete verb, which lands each
+    /// original in the DSM home recycle bin (recoverable). On server success,
+    /// and only then, removes those rows from the local index so they leave
+    /// the grid immediately.
+    ///
+    /// FAIL CLOSED: on any error from the server delete, the local mirror is
+    /// left completely unchanged. An empty `asset_ids` is a no-op with no
+    /// network call. Serialized with every other mutating operation via
+    /// `trash_lock`. Requires a live session (fails closed with
+    /// `CoreError::Auth`).
+    ///
+    /// ATOMICITY: the server delete and the local row removal are each
+    /// transactional but not jointly atomic; the only failure window
+    /// ("deleted on the NAS, local row still present") is the safe direction
+    /// (the item lingers in the grid until the next reconcile/crawl drops it)
+    /// and self-heals, never resurrecting a deleted asset.
+    pub async fn delete_assets(&self, space: Space, asset_ids: Vec<i64>) -> Result<(), CoreError> {
+        if asset_ids.is_empty() {
+            return Ok(());
+        }
+        let _lock = self.trash_lock.lock().await;
+        let mut ids = asset_ids;
+        ids.sort_unstable();
+        ids.dedup();
+        let (transport, sid, version, syno_token) = self.write_call_context(browse_item_api(space), 7)?;
+        synology_api::permanent_delete(&transport, &sid, space, &ids, version, syno_token.as_deref()).await?;
+        // Confirmed gone from the NAS; drop the local rows entirely.
+        let guard = self.store.lock().expect("store mutex poisoned");
+        let store = guard.as_ref().ok_or_else(store_busy_err)?;
+        store.delete_assets(space, &ids)?;
+        Ok(())
+    }
+
+    /// Lists the DSM home recycle bin's Photos tree (the "Recently Deleted"
+    /// view), most-recently-deleted first, windowed by `offset`/`limit`. This
+    /// is a File Station read against the live NAS (there is no local mirror
+    /// of the recycle bin), so it needs a live session and makes network
+    /// calls; an absent recycle folder returns an empty list, not an error.
+    /// Fails closed with `CoreError::Auth` if no session is held.
+    pub async fn fetch_recently_deleted(&self, offset: u32, limit: u32) -> Result<Vec<RecycleItem>, CoreError> {
+        let (transport, sid, syno_token) = self.recycle_call_context()?;
+        synology_api::list_recycle_photos(&transport, &sid, syno_token.as_deref(), offset, limit).await
+    }
+
+    /// RESTORE: moves each of `recycle_paths` back out of the recycle bin to
+    /// its original library location (File Station move), then triggers ONE
+    /// Photos re-index so the restored files reappear in the library.
+    ///
+    /// FAIL CLOSED and stop on the first error: if a move fails, no re-index
+    /// is triggered and the error is returned (reporting how many items were
+    /// restored before the failure when partial progress was made). Any file
+    /// already moved before the failure stays restored on disk and is picked
+    /// up by the next successful re-index or crawl. An empty `recycle_paths`
+    /// is a no-op. Serialized via `trash_lock`; requires a live session.
+    pub async fn restore_recently_deleted(&self, recycle_paths: Vec<String>) -> Result<(), CoreError> {
+        if recycle_paths.is_empty() {
+            return Ok(());
+        }
+        let _lock = self.trash_lock.lock().await;
+        let (transport, sid, syno_token) = self.recycle_call_context()?;
+        let total = recycle_paths.len();
+        let mut restored = 0usize;
+        for path in &recycle_paths {
+            if let Err(e) = synology_api::restore_recycle_item(&transport, &sid, syno_token.as_deref(), path).await {
+                if restored == 0 {
+                    return Err(e);
+                }
+                return Err(CoreError::UnexpectedResponse {
+                    message: format!("restored {restored} of {total} item(s) before failing: {e}"),
+                });
+            }
+            restored += 1;
+        }
+        // All moves confirmed; re-index once so Photos picks the files back up.
+        synology_api::trigger_reindex(&transport, &sid, syno_token.as_deref()).await
+    }
+
+    /// EMPTY (permanent): unrecoverably deletes each of `recycle_paths` from
+    /// the DSM recycle bin (File Station delete). This is the point of no
+    /// return; the caller (UI) must confirm first. Stops and fails closed on
+    /// the first error. An empty `recycle_paths` is a no-op. Serialized via
+    /// `trash_lock`; requires a live session.
+    pub async fn empty_recently_deleted(&self, recycle_paths: Vec<String>) -> Result<(), CoreError> {
+        if recycle_paths.is_empty() {
+            return Ok(());
+        }
+        let _lock = self.trash_lock.lock().await;
+        let (transport, sid, syno_token) = self.recycle_call_context()?;
+        for path in &recycle_paths {
+            synology_api::delete_recycle_item(&transport, &sid, syno_token.as_deref(), path).await?;
+        }
+        Ok(())
+    }
+
+    /// Fetches a thumbnail for one recycled file (by its recycle path) for the
+    /// Recently Deleted grid. Returns the raw image bytes; `size` is passed
+    /// through to File Station's own scale keyword. A JSON error from the NAS
+    /// maps to a `CoreError` (never returned as bogus image bytes), which the
+    /// UI can treat as "show a placeholder". Requires a live session.
+    pub async fn recycle_thumbnail(&self, recycle_path: String, size: String) -> Result<Vec<u8>, CoreError> {
+        let (transport, sid, syno_token) = self.recycle_call_context()?;
+        synology_api::recycle_thumbnail(&transport, &sid, syno_token.as_deref(), &recycle_path, &size).await
+    }
+
+    // --- Phase 2a: hybrid safe delete (SUPERSEDED by Phase 2b above) ----
+    //
+    // SUPERSEDED: the trash-album flow below (move a "deleted" item into an
+    // app-owned `Recently Deleted` album, gate the raw delete behind an
+    // in-trash check) is kept only so the current Swift call sites keep
+    // compiling while the UI is switched over to the real-delete methods
+    // above. Do not build new callers against these; they will be removed
+    // once the UI rework lands.
 
     /// Resolves the app-owned `Recently Deleted` album for `space`, creating
     /// it on the NAS if it does not exist yet.
@@ -1085,6 +1209,23 @@ impl PhotosCore {
             Transport::new(&live.connection)?,
             live.session.sid.clone(),
             version,
+            live.session.syno_token.clone(),
+        ))
+    }
+
+    /// Builds the `(transport, sid, syno_token)` triple the recycle-bin
+    /// (File Station) facade methods need. Unlike `write_call_context`, there
+    /// is no capability-pinned API version to resolve: the File Station calls
+    /// carry their own fixed versions inside `synology_api::recycle`, so this
+    /// only needs the session basics. Same lock discipline as every other
+    /// context builder: `live` is locked just long enough to clone what is
+    /// needed and dropped before the caller `.await`s the network call.
+    fn recycle_call_context(&self) -> Result<(Transport, String, Option<String>), CoreError> {
+        let guard = self.live.lock().expect("live mutex poisoned");
+        let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
+        Ok((
+            Transport::new(&live.connection)?,
+            live.session.sid.clone(),
             live.session.syno_token.clone(),
         ))
     }
@@ -3110,5 +3251,281 @@ mod core_tests {
         handle.await.unwrap().expect("permanently_delete completes after the lock is released");
         assert_eq!(core.trash_count(Space::Personal).unwrap(), 0);
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
+    }
+
+    // --- Phase 2b: real delete + recycle-bin facade ---------------------
+
+    #[tokio::test]
+    async fn delete_assets_calls_the_real_delete_and_removes_local_rows() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _delete = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("api=SYNO.Foto.Browse.Item".into()),
+                mockito::Matcher::Regex("method=delete".into()),
+                mockito::Matcher::Regex("id=%5B1%5D".into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("real-delete-ok", &server).await;
+        // A LIVE (non-trashed) library asset: the everyday delete removes it
+        // outright, no trash step required.
+        seed_asset(&core, Space::Personal, 1);
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
+
+        core.delete_assets(Space::Personal, vec![1]).await.expect("delete_assets ok");
+
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 0, "deleted asset leaves the library");
+        assert!(core.fetch_assets(Space::Personal, 0, 10).unwrap().is_empty());
+        _delete.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn delete_assets_leaves_db_unchanged_when_the_server_delete_fails() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _delete = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=delete".into()))
+            .with_status(200)
+            .with_body(r#"{"success":false,"error":{"code":400}}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("real-delete-fail", &server).await;
+        seed_asset(&core, Space::Personal, 1);
+
+        let err = core.delete_assets(Space::Personal, vec![1]).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+        // Fail closed: a failed server delete must not remove the local row.
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn delete_assets_empty_list_is_a_noop_without_network() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _trap = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=delete".into()))
+            .expect(0)
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("real-delete-empty", &server).await;
+        core.delete_assets(Space::Personal, vec![]).await.expect("empty delete is a no-op");
+        _trap.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn delete_assets_without_login_returns_auth_error() {
+        let core = core_at("real-delete-noauth");
+        let err = core.delete_assets(Space::Personal, vec![1]).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn fetch_recently_deleted_returns_parsed_recycle_items() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _root = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+                mockito::Matcher::UrlEncoded("folder_path".into(), "/home/#recycle/Photos".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"success":true,"data":{"files":[
+                    {"isdir":false,"name":"IMG_9.JPG","path":"/home/#recycle/Photos/IMG_9.JPG","additional":{"size":42,"time":{"mtime":1600000000}}}
+                ]}}"#,
+            )
+            .create_async()
+            .await;
+
+        let core = logged_in_core("fetch-recycle", &server).await;
+        let items = core.fetch_recently_deleted(0, 50).await.expect("fetch ok");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].filename, "IMG_9.JPG");
+        assert_eq!(items[0].deleted_at, 1_600_000_000);
+        assert_eq!(items[0].file_size, 42);
+    }
+
+    #[tokio::test]
+    async fn restore_recently_deleted_moves_then_reindexes_once() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _move = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.FileStation.CopyMove".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "start".into()),
+                mockito::Matcher::UrlEncoded("dest_folder_path".into(), "/home/Photos/iPhone/2016/09".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true,"data":{"taskid":"t1"}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let _reindex = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Index".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "reindex".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("restore-recycle", &server).await;
+        core.restore_recently_deleted(vec!["/home/#recycle/Photos/iPhone/2016/09/IMG_0924.JPG".into()])
+            .await
+            .expect("restore ok");
+        _move.assert_async().await;
+        _reindex.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn restore_recently_deleted_does_not_reindex_when_a_move_fails() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _move = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("SYNO.FileStation.CopyMove".into()))
+            .with_status(200)
+            .with_body(r#"{"success":false,"error":{"code":400}}"#)
+            .create_async()
+            .await;
+        // If a failed move still triggered a re-index, this trap fails the test.
+        let _reindex_trap = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=reindex".into()))
+            .expect(0)
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("restore-recycle-fail", &server).await;
+        let err = core
+            .restore_recently_deleted(vec!["/home/#recycle/Photos/a.jpg".into()])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+        _reindex_trap.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn empty_recently_deleted_permanently_deletes_each_path() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _del = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.FileStation.Delete".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "start".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true,"data":{"taskid":"t2"}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("empty-recycle", &server).await;
+        core.empty_recently_deleted(vec!["/home/#recycle/Photos/a.jpg".into()]).await.expect("empty ok");
+        _del.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn recycle_thumbnail_returns_image_bytes() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let payload = b"RECYCLE-THUMB".to_vec();
+        let _thumb = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.FileStation.Thumb".into()),
+                mockito::Matcher::UrlEncoded("path".into(), "/home/#recycle/Photos/a.jpg".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "image/jpeg")
+            .with_body(payload.clone())
+            .create_async()
+            .await;
+
+        let core = logged_in_core("recycle-thumb", &server).await;
+        let bytes = core
+            .recycle_thumbnail("/home/#recycle/Photos/a.jpg".into(), "small".into())
+            .await
+            .expect("thumb ok");
+        assert_eq!(bytes, payload);
+    }
+
+    #[tokio::test]
+    async fn fetch_recently_deleted_without_login_returns_auth_error() {
+        let core = core_at("fetch-recycle-noauth");
+        let err = core.fetch_recently_deleted(0, 50).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 }
