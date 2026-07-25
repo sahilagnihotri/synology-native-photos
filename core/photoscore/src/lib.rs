@@ -4,9 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use models::{
-    Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DayCount, DiscoveryCollection, Person,
-    Place, RecycleItem, SearchFacets, SearchFilters, Session, SessionState, Space, Subject, Tag, ThumbnailData,
-    ThumbnailSize, VideoPlaybackSource,
+    Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DayCount, DiscoveryCollection,
+    MediaKind, Person, Place, RecycleItem, SearchFacets, SearchFilters, Session, SessionState, Space, Subject, Tag,
+    ThumbnailData, ThumbnailSize, VideoPlaybackSource,
 };
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
@@ -369,6 +369,52 @@ impl PhotosCore {
         let guard = self.store.lock().expect("store mutex poisoned");
         let store = guard.as_ref().ok_or_else(store_busy_err)?;
         store.fetch_assets(space, offset, limit)
+    }
+
+    /// Windowed local read of assets in `space` matching the Quick Filter
+    /// facets (media kind, a `taken_at` floor/ceiling in unix seconds, and a
+    /// minimum star rating), newest-first with the exact same ordering as
+    /// `fetch_assets` so a filtered scroll pages stably. Every facet is
+    /// optional; passing all `None` returns exactly what `fetch_assets` returns
+    /// for the same window. No network access at all: this only ever locks
+    /// `store` for the duration of the read, same discipline as `fetch_assets`.
+    ///
+    /// This is a COMPOUND, local-index filter over the facets the local index
+    /// carries (`media_kind`, `taken_at`, `rating`). People, Geolocation, and
+    /// Favorites are deliberately not folded in here: they are server-side
+    /// clusters with their own sidebar destinations (`fetch_assets_for`), not
+    /// local-index columns.
+    pub fn filter_assets(
+        &self,
+        space: Space,
+        media_kind: Option<MediaKind>,
+        taken_after: Option<i64>,
+        taken_before: Option<i64>,
+        min_rating: Option<u8>,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Asset>, CoreError> {
+        let guard = self.store.lock().expect("store mutex poisoned");
+        let store = guard.as_ref().ok_or_else(store_busy_err)?;
+        store.filter_assets(space, media_kind, taken_after, taken_before, min_rating, offset, limit)
+    }
+
+    /// Local-only count of assets in `space` matching the same Quick Filter
+    /// facets as `filter_assets`; with all facets `None` this equals
+    /// `asset_count`. Lets the grid size a filtered result set for windowing
+    /// and readiness without paging the rows. No network access; same lock
+    /// discipline as `fetch_assets`/`asset_count`.
+    pub fn filter_count(
+        &self,
+        space: Space,
+        media_kind: Option<MediaKind>,
+        taken_after: Option<i64>,
+        taken_before: Option<i64>,
+        min_rating: Option<u8>,
+    ) -> Result<u64, CoreError> {
+        let guard = self.store.lock().expect("store mutex poisoned");
+        let store = guard.as_ref().ok_or_else(store_busy_err)?;
+        store.filter_count(space, media_kind, taken_after, taken_before, min_rating)
     }
 
     /// Local-only date histogram for `space`: one bucket per calendar day

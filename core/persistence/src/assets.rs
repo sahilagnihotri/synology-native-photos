@@ -52,6 +52,47 @@ pub(crate) fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// Builds the shared `WHERE` clause and its positional bind params for the
+/// Quick Filter reads (`filter_assets` / `filter_count`). `space` and
+/// `in_trash = 0` are always present; each optional facet (media kind, a
+/// `taken_at` floor/ceiling, a minimum rating) appends its clause ONLY when
+/// `Some`, so an all-`None` filter collapses to exactly the predicate
+/// `fetch_assets`/`asset_count` use. That is what makes an unfiltered Quick
+/// Filter behave identically to the plain library grid.
+///
+/// Params are returned as owned boxes so both callers can bind them
+/// positionally (anonymous `?`, filled in declaration order) via
+/// `params_from_iter` and append their own `LIMIT`/`OFFSET` afterwards, without
+/// re-deriving the space/media-kind integer encodings. `media_kind` binds via
+/// `media_kind_to_int`, matching exactly how `upsert_asset` writes the column.
+fn build_filter_where(
+    space: Space,
+    media_kind: Option<MediaKind>,
+    taken_after: Option<i64>,
+    taken_before: Option<i64>,
+    min_rating: Option<u8>,
+) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
+    let mut clause = String::from("space = ? AND in_trash = 0");
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(space_to_int(space))];
+    if let Some(kind) = media_kind {
+        clause.push_str(" AND media_kind = ?");
+        params.push(Box::new(media_kind_to_int(kind)));
+    }
+    if let Some(after) = taken_after {
+        clause.push_str(" AND taken_at >= ?");
+        params.push(Box::new(after));
+    }
+    if let Some(before) = taken_before {
+        clause.push_str(" AND taken_at <= ?");
+        params.push(Box::new(before));
+    }
+    if let Some(rating) = min_rating {
+        clause.push_str(" AND rating >= ?");
+        params.push(Box::new(i64::from(rating)));
+    }
+    (clause, params)
+}
+
 /// The asset columns, in the exact order `row_to_asset` reads them. Both
 /// windowed reads (`fetch_assets`, `fetch_trash`) select this list verbatim so
 /// the positional row mapping stays valid and the two queries can never drift
@@ -263,6 +304,72 @@ impl Store {
             out.push(row.map_err(map_sql)?);
         }
         Ok(out)
+    }
+
+    /// Returns a window of assets for `space` matching the Quick Filter facets,
+    /// in the exact same order as `fetch_assets` (newest `taken_at` first,
+    /// `server_id` tiebreak, NULL `taken_at` last), so paging by
+    /// `offset`/`limit` stays stable across the two. Every facet is optional; a
+    /// facet left `None` imposes no constraint. Passing every facet `None`
+    /// returns exactly what `fetch_assets` returns for the same window (see
+    /// `filter_with_no_facets_equals_fetch_assets`).
+    ///
+    /// A `taken_after`/`taken_before` bound excludes NULL-`taken_at` rows,
+    /// because a SQL comparison against NULL is never true. That is the
+    /// intended behaviour: an undated asset cannot satisfy a "taken between"
+    /// constraint, so it drops out of a date-filtered view.
+    pub fn filter_assets(
+        &self,
+        space: Space,
+        media_kind: Option<MediaKind>,
+        taken_after: Option<i64>,
+        taken_before: Option<i64>,
+        min_rating: Option<u8>,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Asset>, CoreError> {
+        let (where_clause, mut params) =
+            build_filter_where(space, media_kind, taken_after, taken_before, min_rating);
+        let sql = format!(
+            "SELECT {ASSET_SELECT_COLUMNS}
+                 FROM assets
+                 WHERE {where_clause}
+                 ORDER BY (taken_at IS NULL) ASC, taken_at DESC, server_id DESC
+                 LIMIT ? OFFSET ?"
+        );
+        params.push(Box::new(limit as i64));
+        params.push(Box::new(offset as i64));
+        let mut stmt = self.conn.prepare(&sql).map_err(map_sql)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(params), row_to_asset)
+            .map_err(map_sql)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(map_sql)?);
+        }
+        Ok(out)
+    }
+
+    /// Number of non-trashed assets in `space` matching the same Quick Filter
+    /// facets as `filter_assets`. With every facet `None` this equals
+    /// `asset_count(space)`. Lets the grid size a filtered result set (for
+    /// windowing and readiness) without paging the rows.
+    pub fn filter_count(
+        &self,
+        space: Space,
+        media_kind: Option<MediaKind>,
+        taken_after: Option<i64>,
+        taken_before: Option<i64>,
+        min_rating: Option<u8>,
+    ) -> Result<u64, CoreError> {
+        let (where_clause, params) =
+            build_filter_where(space, media_kind, taken_after, taken_before, min_rating);
+        let sql = format!("SELECT COUNT(*) FROM assets WHERE {where_clause}");
+        let n: i64 = self
+            .conn
+            .query_row(&sql, rusqlite::params_from_iter(params), |r| r.get(0))
+            .map_err(map_sql)?;
+        Ok(n as u64)
     }
 
     /// Groups the non-trashed assets in `space` into one bucket per calendar
@@ -696,6 +803,241 @@ mod tests {
         assert_eq!(deleted, 1);
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
         assert_eq!(store.asset_count(Space::Shared).unwrap(), 1);
+    }
+
+    // --- Quick Filter: filter_assets / filter_count ---------------------
+
+    /// Builds an asset with an explicit media kind and rating on top of the
+    /// base `asset` helper, so the filter tests can seed a mix of photos and
+    /// videos at various star ratings without restating every field.
+    fn filtered_asset(space: Space, id: i64, taken: Option<i64>, kind: MediaKind, rating: i32) -> Asset {
+        Asset {
+            media_kind: kind,
+            rating,
+            ..asset(space, id, taken, Some(1))
+        }
+    }
+
+    /// The load-bearing invariant: an all-`None` filter must be identical to
+    /// `fetch_assets`/`asset_count`, both in the rows it returns (order and
+    /// windowing) and in the count, including the NULL-`taken_at`-last tiebreak
+    /// ordering. If this ever drifts, switching a cleared filter back to the
+    /// library would silently change what the user sees.
+    #[test]
+    fn filter_with_no_facets_equals_fetch_assets() {
+        let store = Store::open_in_memory().unwrap();
+        // A mix: two videos, several photos, tied taken_at, and an undated row.
+        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Photo, 0)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(300), MediaKind::Video, 5)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 3, Some(300), MediaKind::Photo, 3)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 4, Some(200), MediaKind::Video, 2)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 5, None, MediaKind::Photo, 4)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Shared, 9, Some(999), MediaKind::Photo, 5)).unwrap();
+
+        // Full window.
+        let filtered = store.filter_assets(Space::Personal, None, None, None, None, 0, 100).unwrap();
+        let plain = store.fetch_assets(Space::Personal, 0, 100).unwrap();
+        let filtered_ids: Vec<i64> = filtered.iter().map(|a| a.id).collect();
+        let plain_ids: Vec<i64> = plain.iter().map(|a| a.id).collect();
+        assert_eq!(filtered_ids, plain_ids, "all-None filter must match fetch_assets row-for-row and in order");
+
+        // A mid-stream window must page identically too.
+        let fw: Vec<i64> = store.filter_assets(Space::Personal, None, None, None, None, 1, 2).unwrap().iter().map(|a| a.id).collect();
+        let pw: Vec<i64> = store.fetch_assets(Space::Personal, 1, 2).unwrap().iter().map(|a| a.id).collect();
+        assert_eq!(fw, pw, "all-None filter must window identically to fetch_assets");
+
+        assert_eq!(
+            store.filter_count(Space::Personal, None, None, None, None).unwrap(),
+            store.asset_count(Space::Personal).unwrap(),
+            "all-None filter_count must equal asset_count"
+        );
+    }
+
+    /// The media-kind facet returns only rows of that kind and nothing else.
+    #[test]
+    fn filter_by_media_kind_alone() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Photo, 0)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(200), MediaKind::Video, 0)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 3, Some(300), MediaKind::Photo, 0)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 4, Some(400), MediaKind::Video, 0)).unwrap();
+
+        let videos: Vec<i64> = store
+            .filter_assets(Space::Personal, Some(MediaKind::Video), None, None, None, 0, 100)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(videos, vec![4, 2], "only videos, newest first");
+        assert_eq!(store.filter_count(Space::Personal, Some(MediaKind::Video), None, None, None).unwrap(), 2);
+
+        let photos: Vec<i64> = store
+            .filter_assets(Space::Personal, Some(MediaKind::Photo), None, None, None, 0, 100)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(photos, vec![3, 1]);
+        assert_eq!(store.filter_count(Space::Personal, Some(MediaKind::Photo), None, None, None).unwrap(), 2);
+    }
+
+    /// The minimum-rating facet is inclusive (`rating >= min`) and drops
+    /// everything below the floor, including unrated (rating 0) rows.
+    #[test]
+    fn filter_by_min_rating_alone() {
+        let store = Store::open_in_memory().unwrap();
+        for r in 0..=5 {
+            // id encodes the rating; taken_at ascending with the rating so the
+            // newest-first order is predictable.
+            store.upsert_asset(&filtered_asset(Space::Personal, r as i64 + 1, Some((r as i64 + 1) * 10), MediaKind::Photo, r)).unwrap();
+        }
+        let at_least_three: Vec<i32> = store
+            .filter_assets(Space::Personal, None, None, None, Some(3), 0, 100)
+            .unwrap()
+            .iter()
+            .map(|a| a.rating)
+            .collect();
+        assert_eq!(at_least_three, vec![5, 4, 3], "rating >= 3, newest first");
+        assert_eq!(store.filter_count(Space::Personal, None, None, None, Some(3)).unwrap(), 3);
+
+        // A floor of 1 excludes only the unrated row.
+        assert_eq!(store.filter_count(Space::Personal, None, None, None, Some(1)).unwrap(), 5);
+        // A floor of 0 keeps everything (matches all-None on the rating axis).
+        assert_eq!(store.filter_count(Space::Personal, None, None, None, Some(0)).unwrap(), 6);
+    }
+
+    /// The date facet applies an inclusive floor/ceiling on `taken_at`, and a
+    /// bound in either direction excludes NULL-`taken_at` rows entirely.
+    #[test]
+    fn filter_by_date_range_alone_and_excludes_undated() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Photo, 0)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(200), MediaKind::Photo, 0)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 3, Some(300), MediaKind::Photo, 0)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 4, None, MediaKind::Photo, 0)).unwrap();
+
+        // Inclusive both ends: [200, 300] keeps ids 2 and 3.
+        let ranged: Vec<i64> = store
+            .filter_assets(Space::Personal, None, Some(200), Some(300), None, 0, 100)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(ranged, vec![3, 2]);
+        assert_eq!(store.filter_count(Space::Personal, None, Some(200), Some(300), None).unwrap(), 2);
+
+        // Floor only.
+        assert_eq!(store.filter_count(Space::Personal, None, Some(200), None, None).unwrap(), 2);
+        // Ceiling only.
+        assert_eq!(store.filter_count(Space::Personal, None, None, Some(200), None).unwrap(), 2);
+
+        // Any date bound drops the undated row (id 4): a floor of 0 would keep
+        // every dated row but still exclude the NULL one.
+        let with_floor = store.filter_count(Space::Personal, None, Some(0), None, None).unwrap();
+        assert_eq!(with_floor, 3, "undated row is excluded once a date bound is set");
+        // Whereas no date bound at all keeps the undated row.
+        assert_eq!(store.filter_count(Space::Personal, None, None, None, None).unwrap(), 4);
+    }
+
+    /// All three facets combine as an AND: only rows satisfying media kind,
+    /// date range, and rating floor simultaneously survive.
+    #[test]
+    fn filter_combined_facets_and_together() {
+        let store = Store::open_in_memory().unwrap();
+        // Target row: a highly-rated video inside the date window.
+        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(250), MediaKind::Video, 5)).unwrap();
+        // Right kind + rating, wrong (too-early) date.
+        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(100), MediaKind::Video, 5)).unwrap();
+        // Right date + rating, wrong kind (photo).
+        store.upsert_asset(&filtered_asset(Space::Personal, 3, Some(250), MediaKind::Photo, 5)).unwrap();
+        // Right kind + date, rating below the floor.
+        store.upsert_asset(&filtered_asset(Space::Personal, 4, Some(250), MediaKind::Video, 2)).unwrap();
+        // Another qualifying video later in the window.
+        store.upsert_asset(&filtered_asset(Space::Personal, 5, Some(280), MediaKind::Video, 4)).unwrap();
+
+        let got: Vec<i64> = store
+            .filter_assets(Space::Personal, Some(MediaKind::Video), Some(200), Some(300), Some(4), 0, 100)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(got, vec![5, 1], "only videos rated >=4 taken in [200,300], newest first");
+        assert_eq!(
+            store.filter_count(Space::Personal, Some(MediaKind::Video), Some(200), Some(300), Some(4)).unwrap(),
+            2
+        );
+    }
+
+    /// A filtered read pages by offset/limit with the same stable ordering as
+    /// `fetch_assets`, so a windowed scroll over a filtered set neither skips
+    /// nor duplicates a row, even with tied `taken_at`.
+    #[test]
+    fn filter_windowing_is_stable_with_ties() {
+        let store = Store::open_in_memory().unwrap();
+        // Six qualifying videos, three sharing taken_at=100 and three sharing 200.
+        for id in 1..=3 {
+            store.upsert_asset(&filtered_asset(Space::Personal, id, Some(100), MediaKind::Video, 5)).unwrap();
+        }
+        for id in 4..=6 {
+            store.upsert_asset(&filtered_asset(Space::Personal, id, Some(200), MediaKind::Video, 5)).unwrap();
+        }
+        // A non-qualifying photo interleaved, to prove the filter holds across pages.
+        store.upsert_asset(&filtered_asset(Space::Personal, 7, Some(150), MediaKind::Photo, 5)).unwrap();
+
+        let mut seen: Vec<i64> = Vec::new();
+        let mut offset = 0u32;
+        loop {
+            let page = store
+                .filter_assets(Space::Personal, Some(MediaKind::Video), None, None, None, offset, 2)
+                .unwrap();
+            if page.is_empty() {
+                break;
+            }
+            seen.extend(page.iter().map(|a| a.id));
+            offset += 2;
+        }
+        assert_eq!(seen, vec![6, 5, 4, 3, 2, 1], "filtered paging is stable and video-only");
+        let unique: std::collections::HashSet<i64> = seen.iter().copied().collect();
+        assert_eq!(unique.len(), seen.len(), "no duplicates across filtered pages");
+    }
+
+    /// The filter is space-scoped: a Personal filter never returns a Shared
+    /// row, even one that would match every facet.
+    #[test]
+    fn filter_is_space_scoped() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Video, 5)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Shared, 1, Some(200), MediaKind::Video, 5)).unwrap();
+
+        let personal: Vec<i64> = store
+            .filter_assets(Space::Personal, Some(MediaKind::Video), None, None, None, 0, 100)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(personal, vec![1]);
+        assert_eq!(store.filter_count(Space::Personal, Some(MediaKind::Video), None, None, None).unwrap(), 1);
+        assert_eq!(store.filter_count(Space::Shared, Some(MediaKind::Video), None, None, None).unwrap(), 1);
+    }
+
+    /// Trashed rows are excluded from every filtered read, exactly like
+    /// `fetch_assets`/`asset_count`, so a Quick Filter never surfaces an item
+    /// sitting in Recently Deleted.
+    #[test]
+    fn filter_excludes_trashed_rows() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Video, 5)).unwrap();
+        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(200), MediaKind::Video, 5)).unwrap();
+        store.set_trash_flag(Space::Personal, &[2], true, Some(5000)).unwrap();
+
+        let got: Vec<i64> = store
+            .filter_assets(Space::Personal, Some(MediaKind::Video), None, None, None, 0, 100)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(got, vec![1], "the trashed video must not appear in a filtered read");
+        assert_eq!(store.filter_count(Space::Personal, Some(MediaKind::Video), None, None, None).unwrap(), 1);
     }
 
     // --- Phase 2a: trash flag and trash queries -------------------------

@@ -406,6 +406,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -795,6 +811,32 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * `fetch_assets`.
      */
     func fetchTrash(space: Space, offset: UInt32, limit: UInt32) throws  -> [Asset]
+    
+    /**
+     * Windowed local read of assets in `space` matching the Quick Filter
+     * facets (media kind, a `taken_at` floor/ceiling in unix seconds, and a
+     * minimum star rating), newest-first with the exact same ordering as
+     * `fetch_assets` so a filtered scroll pages stably. Every facet is
+     * optional; passing all `None` returns exactly what `fetch_assets` returns
+     * for the same window. No network access at all: this only ever locks
+     * `store` for the duration of the read, same discipline as `fetch_assets`.
+     *
+     * This is a COMPOUND, local-index filter over the facets the local index
+     * carries (`media_kind`, `taken_at`, `rating`). People, Geolocation, and
+     * Favorites are deliberately not folded in here: they are server-side
+     * clusters with their own sidebar destinations (`fetch_assets_for`), not
+     * local-index columns.
+     */
+    func filterAssets(space: Space, mediaKind: MediaKind?, takenAfter: Int64?, takenBefore: Int64?, minRating: UInt8?, offset: UInt32, limit: UInt32) throws  -> [Asset]
+    
+    /**
+     * Local-only count of assets in `space` matching the same Quick Filter
+     * facets as `filter_assets`; with all facets `None` this equals
+     * `asset_count`. Lets the grid size a filtered result set for windowing
+     * and readiness without paging the rows. No network access; same lock
+     * discipline as `fetch_assets`/`asset_count`.
+     */
+    func filterCount(space: Space, mediaKind: MediaKind?, takenAfter: Int64?, takenBefore: Int64?, minRating: UInt8?) throws  -> UInt64
     
     /**
      * Log in against `connection` with the given credentials.
@@ -1672,6 +1714,54 @@ open func fetchTrash(space: Space, offset: UInt32, limit: UInt32)throws  -> [Ass
 }
     
     /**
+     * Windowed local read of assets in `space` matching the Quick Filter
+     * facets (media kind, a `taken_at` floor/ceiling in unix seconds, and a
+     * minimum star rating), newest-first with the exact same ordering as
+     * `fetch_assets` so a filtered scroll pages stably. Every facet is
+     * optional; passing all `None` returns exactly what `fetch_assets` returns
+     * for the same window. No network access at all: this only ever locks
+     * `store` for the duration of the read, same discipline as `fetch_assets`.
+     *
+     * This is a COMPOUND, local-index filter over the facets the local index
+     * carries (`media_kind`, `taken_at`, `rating`). People, Geolocation, and
+     * Favorites are deliberately not folded in here: they are server-side
+     * clusters with their own sidebar destinations (`fetch_assets_for`), not
+     * local-index columns.
+     */
+open func filterAssets(space: Space, mediaKind: MediaKind?, takenAfter: Int64?, takenBefore: Int64?, minRating: UInt8?, offset: UInt32, limit: UInt32)throws  -> [Asset]  {
+    return try  FfiConverterSequenceTypeAsset.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_photoscore_fn_method_photoscore_filter_assets(self.uniffiClonePointer(),
+        FfiConverterTypeSpace_lower(space),
+        FfiConverterOptionTypeMediaKind.lower(mediaKind),
+        FfiConverterOptionInt64.lower(takenAfter),
+        FfiConverterOptionInt64.lower(takenBefore),
+        FfiConverterOptionUInt8.lower(minRating),
+        FfiConverterUInt32.lower(offset),
+        FfiConverterUInt32.lower(limit),$0
+    )
+})
+}
+    
+    /**
+     * Local-only count of assets in `space` matching the same Quick Filter
+     * facets as `filter_assets`; with all facets `None` this equals
+     * `asset_count`. Lets the grid size a filtered result set for windowing
+     * and readiness without paging the rows. No network access; same lock
+     * discipline as `fetch_assets`/`asset_count`.
+     */
+open func filterCount(space: Space, mediaKind: MediaKind?, takenAfter: Int64?, takenBefore: Int64?, minRating: UInt8?)throws  -> UInt64  {
+    return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_photoscore_fn_method_photoscore_filter_count(self.uniffiClonePointer(),
+        FfiConverterTypeSpace_lower(space),
+        FfiConverterOptionTypeMediaKind.lower(mediaKind),
+        FfiConverterOptionInt64.lower(takenAfter),
+        FfiConverterOptionInt64.lower(takenBefore),
+        FfiConverterOptionUInt8.lower(minRating),$0
+    )
+})
+}
+    
+    /**
      * Log in against `connection` with the given credentials.
      *
      * `otp_code` and `device_token` are forwarded to `synology_api::login`
@@ -2328,6 +2418,54 @@ public func FfiConverterCallbackInterfaceFfiCrawlObserver_lower(_ v: FfiCrawlObs
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt8: FfiConverterRustBuffer {
+    typealias SwiftType = UInt8?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt8.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt8.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
+    typealias SwiftType = Int64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -2344,6 +2482,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeMediaKind: FfiConverterRustBuffer {
+    typealias SwiftType = MediaKind?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeMediaKind.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeMediaKind.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -2759,6 +2921,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_trash() != 16800) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_filter_assets() != 5216) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_filter_count() != 64872) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_login() != 52991) {

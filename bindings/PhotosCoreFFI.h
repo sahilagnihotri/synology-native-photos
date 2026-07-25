@@ -386,6 +386,16 @@ uint64_t uniffi_photoscore_fn_method_photoscore_fetch_tags(void*_Nonnull ptr, ui
 RustBuffer uniffi_photoscore_fn_method_photoscore_fetch_trash(void*_Nonnull ptr, RustBuffer space, uint32_t offset, uint32_t limit, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FILTER_ASSETS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FILTER_ASSETS
+RustBuffer uniffi_photoscore_fn_method_photoscore_filter_assets(void*_Nonnull ptr, RustBuffer space, RustBuffer media_kind, RustBuffer taken_after, RustBuffer taken_before, RustBuffer min_rating, uint32_t offset, uint32_t limit, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FILTER_COUNT
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FILTER_COUNT
+uint64_t uniffi_photoscore_fn_method_photoscore_filter_count(void*_Nonnull ptr, RustBuffer space, RustBuffer media_kind, RustBuffer taken_after, RustBuffer taken_before, RustBuffer min_rating, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
 uint64_t uniffi_photoscore_fn_method_photoscore_login(void*_Nonnull ptr, RustBuffer connection, RustBuffer username, RustBuffer password, RustBuffer otp_code, RustBuffer device_token
@@ -881,6 +891,18 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_tags(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_TRASH
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_TRASH
 uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_trash(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FILTER_ASSETS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FILTER_ASSETS
+uint16_t uniffi_photoscore_checksum_method_photoscore_filter_assets(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FILTER_COUNT
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FILTER_COUNT
+uint16_t uniffi_photoscore_checksum_method_photoscore_filter_count(void
     
 );
 #endif
