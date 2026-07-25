@@ -31,6 +31,31 @@ pub enum DiscoveryCollection {
     Album { id: i64 },
 }
 
+/// Where a video/live asset can be played back from, as decided by
+/// `photoscore::video_playback_source`.
+///
+/// Only `LocalFile` is produced today: the real NAS advertises
+/// `SYNO.Foto.Streaming` (confirmed present in the SYNO.API.Info capability
+/// probe, versions 1-2) but every plausible method name tried against it
+/// (`stream`, `get`, `open`, `download`, `video`, `play`, `list`,
+/// `stream_get`, `get_stream`) answered with Synology error 103 ("no such
+/// method"), so no working streaming call has been found on this DSM build.
+/// Per the feature brief's "correctness over cleverness" directive, the
+/// guaranteed-working path (download the original, then play the local
+/// file, exactly how `DetailQuickLookView` already previews photos) ships
+/// now; `Url` is reserved for when a real Streaming method is found, so
+/// callers must already handle both variants even though only one is
+/// reachable yet.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum VideoPlaybackSource {
+    /// A ready-to-play URL, including any auth the player needs (not yet
+    /// produced by any code path; reserved for a future Streaming method).
+    Url { url: String },
+    /// An absolute path to a local file already downloaded in full, safe to
+    /// hand straight to `AVPlayer`/`AVURLAsset`.
+    LocalFile { path: String },
+}
+
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct Connection {
     pub host: String,
@@ -456,6 +481,14 @@ mod tests {
         assert_eq!(f.start_time, Some(1_400_000_000));
         assert_eq!(f.end_time, Some(1_500_000_000));
         assert_ne!(f, SearchFilters::default());
+    }
+
+    #[test]
+    fn video_playback_source_variants_are_distinct() {
+        let local = VideoPlaybackSource::LocalFile { path: "/tmp/syno-orig-abc".to_string() };
+        let url = VideoPlaybackSource::Url { url: "https://nas.example.com/stream".to_string() };
+        assert_ne!(local, url);
+        assert_eq!(local, VideoPlaybackSource::LocalFile { path: "/tmp/syno-orig-abc".to_string() });
     }
 
     #[test]

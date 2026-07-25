@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use models::{
     Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DiscoveryCollection, Person, Place,
     SearchFacets, SearchFilters, Session, SessionState, Space, Subject, Tag, ThumbnailData, ThumbnailSize,
+    VideoPlaybackSource,
 };
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
@@ -589,6 +590,32 @@ impl PhotosCore {
         let tmp = dir.join(format!("syno-orig-{}", cache_digest(&[&unit_id.to_string(), &cache_key])));
         write_cache_file_atomically(&dir, &tmp, &bytes)?;
         Ok(tmp.to_string_lossy().into())
+    }
+
+    /// Resolves how the detail viewer should play back `asset` (a video, or
+    /// a "live"/`MediaKind::Unknown` item that may or may not actually be a
+    /// video container -- see `models::VideoPlaybackSource`'s doc comment).
+    ///
+    /// READ-ONLY PROBE FINDING (verified against the real NAS): SYNO.API.Info
+    /// genuinely advertises `SYNO.Foto.Streaming` (and `SYNO.FotoTeam.Streaming`),
+    /// versions 1-2, so the API exists on this DSM build. However every
+    /// plausible method name tried against it (`stream`, `get`, `open`,
+    /// `download`, `video`, `play`, `list`, `stream_get`, `get_stream`) answered
+    /// with Synology error 103 ("no such method"), so no working streaming
+    /// call was found. Per the feature brief's "correctness over cleverness"
+    /// directive, this always returns `VideoPlaybackSource::LocalFile` today,
+    /// downloading the asset's original bytes exactly the way
+    /// `download_original` already does for still photos (same cache
+    /// directory, same atomic-write discipline, same unit_id/cache_key
+    /// contract) and handing back the local path for `AVPlayer` to open
+    /// directly. `VideoPlaybackSource::Url` is reserved for whenever a real
+    /// Streaming method is found; no code path produces it yet.
+    ///
+    /// Same lock discipline and auth-fail-closed behavior as
+    /// `download_original`, which this delegates to internally.
+    pub async fn video_playback_source(&self, space: Space, asset: Asset) -> Result<VideoPlaybackSource, CoreError> {
+        let path = self.download_original(space, asset.unit_id, asset.cache_key).await?;
+        Ok(VideoPlaybackSource::LocalFile { path })
     }
 }
 
@@ -1626,6 +1653,105 @@ mod core_tests {
     async fn download_original_without_login_returns_auth_error() {
         let core = core_at("download-no-login");
         let err = core.download_original(Space::Personal, 1, "CK".into()).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    fn video_asset(unit_id: i64, cache_key: &str) -> Asset {
+        Asset {
+            id: unit_id - 5000,
+            unit_id,
+            cache_key: cache_key.to_string(),
+            filename: "IMG_0100.MOV".to_string(),
+            media_kind: models::MediaKind::Video,
+            taken_at: Some(1_700_000_000),
+            added_at: None,
+            width: Some(1920),
+            height: Some(1080),
+            file_size: Some(10_000_000),
+            space: Space::Personal,
+            server_version: Some(1),
+        }
+    }
+
+    /// video_playback_source downloads the original the same way
+    /// download_original does and reports it back as LocalFile, the
+    /// confirmed approach per the probe findings (no working Streaming
+    /// method was found on the real NAS).
+    #[tokio::test]
+    async fn video_playback_source_returns_local_file_for_downloaded_bytes() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _info = server.mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"SYNO.Foto.Download":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
+            .create_async().await;
+        let _dl = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Download".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "download".into()),
+            ]))
+            .with_status(200).with_header("content-type", "video/quicktime")
+            .with_body(b"FAKE-MOV-BYTES".to_vec())
+            .create_async().await;
+        let core = core_at("video-playback-ok");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        core.probe_capabilities().await.unwrap();
+
+        let asset = video_asset(202, "CK-VIDEO");
+        let source = core.video_playback_source(Space::Personal, asset).await.expect("video playback source ok");
+        match source {
+            VideoPlaybackSource::LocalFile { path } => {
+                assert!(std::path::Path::new(&path).exists());
+                let bytes = std::fs::read(&path).unwrap();
+                assert_eq!(bytes, b"FAKE-MOV-BYTES".to_vec());
+            }
+            VideoPlaybackSource::Url { url } => panic!("expected LocalFile, got Url({url})"),
+        }
+    }
+
+    /// A download failure (JSON error envelope) propagates through
+    /// video_playback_source exactly like it does through download_original,
+    /// rather than being swallowed or turned into a different error shape.
+    #[tokio::test]
+    async fn video_playback_source_propagates_download_error() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _info = server.mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"SYNO.Foto.Download":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
+            .create_async().await;
+        let _dl = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Download".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "download".into()),
+            ]))
+            .with_status(200).with_header("content-type", "application/json")
+            .with_body(r#"{"success":false,"error":{"code":400}}"#)
+            .create_async().await;
+        let core = core_at("video-playback-err");
+        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        core.probe_capabilities().await.unwrap();
+
+        let asset = video_asset(202, "CK-VIDEO");
+        let err = core.video_playback_source(Space::Personal, asset).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    /// Fail-closed when no session is held; no network hit, same discipline
+    /// as download_original_without_login_returns_auth_error.
+    #[tokio::test]
+    async fn video_playback_source_without_login_returns_auth_error() {
+        let core = core_at("video-playback-no-login");
+        let asset = video_asset(1, "CK");
+        let err = core.video_playback_source(Space::Personal, asset).await.unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
