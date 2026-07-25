@@ -15,6 +15,12 @@ struct PhotoGridSectioningTests {
               fileSize: nil, space: .personal, serverVersion: id)
     }
 
+    private func videoAsset(_ id: Int64, takenAt: Int64?) -> Asset {
+        Asset(id: id, unitId: id, cacheKey: "v", filename: "\(id).mov", mediaKind: .video,
+              takenAt: takenAt, addedAt: nil, width: 1920, height: 1080,
+              fileSize: nil, space: .personal, serverVersion: id)
+    }
+
     private func keyEvent(_ keyCode: UInt16) -> NSEvent {
         NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
@@ -125,5 +131,80 @@ struct PhotoGridSectioningTests {
         #expect(ds.dateSections == nil)
         #expect(controller.collectionView.numberOfSections == 1)
         #expect(controller.snapshotItemCount() == 3)
+    }
+
+    // MARK: - Quick Filter reconciliation (sectioned library <-> flat filter)
+
+    /// A library fixture spanning two calendar days, each mixing photos and
+    /// videos, so a Videos-only Quick Filter produces a strictly smaller,
+    /// differently-shaped result (2 rows) than the full library (5 rows across
+    /// 2 day sections). Newest-first so the fake's array order matches the
+    /// histogram's newest-first order.
+    private func mixedMediaFixture() -> [Asset] {
+        let dayA: Int64 = 1_480_032_000    // 2016-11-25 UTC
+        let dayB: Int64 = dayA - 86_400     // 2016-11-24
+        return [
+            asset(10, takenAt: dayA + 500),
+            videoAsset(11, takenAt: dayA + 100),
+            asset(20, takenAt: dayB + 700),
+            asset(21, takenAt: dayB + 300),
+            videoAsset(22, takenAt: dayB + 100),
+        ]
+    }
+
+    /// The reported bug: applying a Quick Filter (File Type = Videos) over the
+    /// date-sectioned library must switch the grid to the flat, videos-only
+    /// result. Before the fix the collection view kept showing the old
+    /// date-sectioned library (2 sections, 5 items) instead of the single flat
+    /// section of 2 videos, because the section geometry was not reconciled
+    /// when the source flipped from `.space` (dateSections set) to `.filter`
+    /// (dateSections nil).
+    @Test func applyingVideoFilterSwitchesGridToFlatVideosOnly() async {
+        let (controller, ds) = await makeSpaceController(mixedMediaFixture())
+        // Precondition: the plain library is date-sectioned (2 days, 5 items).
+        #expect(controller.collectionView.numberOfSections == 2)
+        #expect(controller.snapshotItemCount() == 5)
+
+        // Apply the Videos Quick Filter exactly as `RootView.applyQuickFilter`
+        // does: switch the source, load the first window, re-apply.
+        controller.clearSelection()
+        await ds.setFilter(space: .personal, query: FilterQuery(mediaKind: .video))
+        await ds.loadWindow(offset: 0, limit: 50)
+        await controller.applySnapshot()
+
+        // The grid must now be a single flat section of exactly the two videos,
+        // with none of the old day sections or photo rows lingering.
+        #expect(ds.dateSections == nil)
+        #expect(controller.collectionView.numberOfSections == 1)
+        #expect(controller.collectionView.numberOfItems(inSection: 0) == 2)
+        #expect(controller.snapshotItemCount() == 2)
+        controller.selection.selectAll(count: controller.snapshotItemCount())
+        #expect(controller.selectedAssetIds() == [11, 22])
+    }
+
+    /// Clearing the filter restores the plain, date-sectioned library: the grid
+    /// goes back from the flat 2-video result to the 2 day sections / 5 rows.
+    /// Proves the reconciliation is symmetric (flat -> sectioned as well as
+    /// sectioned -> flat).
+    @Test func clearingFilterRestoresTheSectionedLibrary() async {
+        let (controller, ds) = await makeSpaceController(mixedMediaFixture())
+
+        await ds.setFilter(space: .personal, query: FilterQuery(mediaKind: .video))
+        await ds.loadWindow(offset: 0, limit: 50)
+        await controller.applySnapshot()
+        #expect(controller.collectionView.numberOfSections == 1)
+        #expect(controller.snapshotItemCount() == 2)
+
+        // Clear back to the space source, as `RootView.clearQuickFilter` does.
+        controller.clearSelection()
+        await ds.setSpace(.personal)
+        await ds.loadWindow(offset: 0, limit: 50)
+        await controller.applySnapshot()
+
+        #expect(ds.dateSections?.sections.count == 2)
+        #expect(controller.collectionView.numberOfSections == 2)
+        #expect(controller.snapshotItemCount() == 5)
+        controller.selection.selectAll(count: controller.snapshotItemCount())
+        #expect(controller.selectedAssetIds() == [10, 11, 20, 21, 22])
     }
 }
