@@ -40,6 +40,12 @@ enum GridKeyMapper {
     /// replacing it. Shift is checked before the plain arrow cases so it
     /// always wins when held, regardless of Command also being down (there
     /// is no defined Cmd+Shift+Arrow grid behavior, so Shift alone decides).
+    ///
+    /// Cmd+Down (without Shift) opens the selected photo into the detail
+    /// viewer, the mirror of the detail viewer's own Cmd+Up "return to grid".
+    /// Shift still wins over Command on Down (Shift+Down, even with Command
+    /// also held, extends the selection) to keep the Shift-always-wins rule
+    /// above consistent across every arrow.
     static func action(for event: NSEvent) -> GridKeyAction? {
         let command = event.modifierFlags.contains(.command)
         let shift = event.modifierFlags.contains(.shift)
@@ -47,7 +53,9 @@ enum GridKeyMapper {
         case KeyCode.leftArrow: return shift ? .extendPrevious : .previous
         case KeyCode.rightArrow: return shift ? .extendNext : .next
         case KeyCode.upArrow: return shift ? .extendUp : .up
-        case KeyCode.downArrow: return shift ? .extendDown : .down
+        case KeyCode.downArrow:
+            if shift { return .extendDown }
+            return command ? .openDetail : .down
         case KeyCode.space: return .toggleQuickLook
         case KeyCode.returnKey, KeyCode.keypadEnter: return .openDetail
         case KeyCode.escape: return .clearSelectionOrClose

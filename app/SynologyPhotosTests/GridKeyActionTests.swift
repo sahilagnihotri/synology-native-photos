@@ -41,6 +41,17 @@ struct GridKeyActionTests {
         #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.space)) == .toggleQuickLook)
     }
 
+    @Test func cmdDownOpensDetailWhilePlainAndShiftDownAreUnchanged() {
+        // Cmd+Down opens the selected photo into the detail viewer.
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.downArrow, command: true)) == .openDetail)
+        // Plain Down still moves the selection down a row.
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.downArrow)) == .down)
+        // Shift+Down still extends the selection.
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.downArrow, shift: true)) == .extendDown)
+        // Shift wins over Command on Down, matching the Shift-always-wins rule.
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.downArrow, command: true, shift: true)) == .extendDown)
+    }
+
     @Test func returnAndKeypadEnterMapToOpenDetail() {
         #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.returnKey)) == .openDetail)
         #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.keypadEnter)) == .openDetail)
