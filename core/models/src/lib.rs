@@ -378,6 +378,29 @@ pub struct CrawlProgress {
     pub complete: bool,
 }
 
+/// One calendar-day bucket in a space's library date histogram, as produced
+/// by `persistence::Store::date_histogram` / `PhotosCore::date_histogram`.
+///
+/// `day_start` is the unix second at the start of the day the bucket covers,
+/// using the same UTC-day bucketing the histogram groups by (the day boundary
+/// falls at multiples of 86400 seconds). `count` is the number of non-trashed
+/// assets in that day. Buckets are returned newest day first, and their
+/// concatenation reproduces `fetch_assets`' global ordering exactly, so the
+/// grid can map a (section, row) coordinate to a flat absolute index purely
+/// from these counts without loading any asset.
+///
+/// Assets with no `taken_at` are collected into a single trailing bucket with
+/// `day_start = 0` ("Unknown Date"), which sorts last to match `fetch_assets`
+/// putting NULL-`taken_at` rows at the end. A real photo timestamped at the
+/// unix epoch (1970-01-01) would share `day_start = 0` with that bucket; such
+/// timestamps do not occur in practice, so the UI treats `day_start == 0` as
+/// the Unknown Date bucket by convention.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DayCount {
+    pub day_start: i64,
+    pub count: u32,
+}
+
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct ApiCapability {
     pub name: String,
@@ -519,6 +542,17 @@ mod tests {
         let p = CrawlProgress { space: Space::Shared, done: 10, total: 100, complete: false };
         assert!(!p.complete);
         assert_eq!(p.space, Space::Shared);
+    }
+
+    #[test]
+    fn day_count_holds_day_start_and_count() {
+        let d = DayCount { day_start: 1_479_513_600, count: 7 };
+        assert_eq!(d.day_start, 1_479_513_600);
+        assert_eq!(d.count, 7);
+        assert_eq!(d, DayCount { day_start: 1_479_513_600, count: 7 });
+        // The Unknown Date bucket convention: day_start 0.
+        let unknown = DayCount { day_start: 0, count: 3 };
+        assert_ne!(unknown, d);
     }
 
     #[test]

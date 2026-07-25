@@ -7,7 +7,7 @@
 
 use crate::schema::map_sql;
 use crate::Store;
-use models::{Asset, CoreError, MediaKind, Space};
+use models::{Asset, CoreError, DayCount, MediaKind, Space};
 use rusqlite::params;
 
 /// Converts `Space` to its storage representation (0 Personal, 1 Shared).
@@ -261,6 +261,66 @@ impl Store {
         let mut out = Vec::new();
         for row in rows {
             out.push(row.map_err(map_sql)?);
+        }
+        Ok(out)
+    }
+
+    /// Groups the non-trashed assets in `space` into one bucket per calendar
+    /// day of `taken_at`, newest day first, for the grid's date-section
+    /// headers and scrubber. A cheap `GROUP BY` (never loads the rows), so the
+    /// grid can build its section structure without paging the whole library.
+    ///
+    /// CRITICAL ordering invariant: the concatenation of the returned buckets,
+    /// and the counts within each, exactly reproduces `fetch_assets`' global
+    /// ordering, so section `s`, row `r` maps to the flat absolute index
+    /// `(sum of counts of all newer buckets) + r`. This holds because the
+    /// bucketing key (`taken_at / 86400`, the UTC day index) is monotonic with
+    /// `taken_at`: every row of a newer day has a strictly larger `taken_at`
+    /// than every row of an older day, so `fetch_assets`' `taken_at DESC`
+    /// order visits whole days in the same newest-first order this returns,
+    /// and within a day the counts line up regardless of the intra-day
+    /// `server_id DESC` tiebreak. (Integer division assumes `taken_at >= 0`,
+    /// true for every real photo timestamp.)
+    ///
+    /// Assets with a NULL `taken_at` are collected into a single trailing
+    /// bucket with `day_start = 0`, matching `fetch_assets` sorting NULL rows
+    /// last. The bucket is omitted entirely when the space has no such rows.
+    /// The returned counts sum to `asset_count(space)` (same filters).
+    pub fn date_histogram(&self, space: Space) -> Result<Vec<DayCount>, CoreError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT (taken_at / 86400) * 86400 AS day_start, COUNT(*) AS n
+                     FROM assets
+                     WHERE space = ?1 AND in_trash = 0 AND taken_at IS NOT NULL
+                     GROUP BY taken_at / 86400
+                     ORDER BY day_start DESC",
+            )
+            .map_err(map_sql)?;
+        let rows = stmt
+            .query_map(params![space_to_int(space)], |r| {
+                Ok(DayCount {
+                    day_start: r.get::<_, i64>(0)?,
+                    count: r.get::<_, i64>(1)? as u32,
+                })
+            })
+            .map_err(map_sql)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(map_sql)?);
+        }
+        // Trailing "Unknown Date" bucket for NULL taken_at rows (which
+        // fetch_assets orders last), appended only when there are any.
+        let null_count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM assets WHERE space = ?1 AND in_trash = 0 AND taken_at IS NULL",
+                params![space_to_int(space)],
+                |r| r.get(0),
+            )
+            .map_err(map_sql)?;
+        if null_count > 0 {
+            out.push(DayCount { day_start: 0, count: null_count as u32 });
         }
         Ok(out)
     }
@@ -794,6 +854,146 @@ mod tests {
         assert!(!store.all_in_trash(Space::Personal, &[1, 999]).unwrap(), "missing id fails closed");
         // Empty is vacuously true.
         assert!(store.all_in_trash(Space::Personal, &[]).unwrap());
+    }
+
+    // --- date_histogram --------------------------------------------------
+
+    /// Buckets one asset per distinct calendar day, newest day first, and the
+    /// counts sum to `asset_count`. Days are spaced far enough apart (one per
+    /// week) that each lands in its own UTC-day bucket regardless of the exact
+    /// time-of-day the epoch base falls on.
+    #[test]
+    fn date_histogram_buckets_by_day_newest_first() {
+        let store = Store::open_in_memory().unwrap();
+        let base = 1_479_513_600; // 2016-11-19 00:00:00 UTC
+        let day = 86_400;
+        // Three days, with 1, 2, and 3 assets respectively (ascending age).
+        store.upsert_asset(&asset(Space::Personal, 1, Some(base + 2 * 7 * day + 10), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 2, Some(base + 1 * 7 * day + 20), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 3, Some(base + 1 * 7 * day + 30), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 4, Some(base + 40), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 5, Some(base + 50), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 6, Some(base + 60), Some(1))).unwrap();
+
+        let hist = store.date_histogram(Space::Personal).unwrap();
+        assert_eq!(hist.len(), 3, "three distinct days");
+        // Newest day first.
+        assert_eq!(hist[0].count, 1);
+        assert_eq!(hist[1].count, 2);
+        assert_eq!(hist[2].count, 3);
+        assert!(hist[0].day_start > hist[1].day_start);
+        assert!(hist[1].day_start > hist[2].day_start);
+        // Every day_start is a UTC-midnight multiple of 86400.
+        for b in &hist {
+            assert_eq!(b.day_start % day, 0, "day_start must be a UTC-day boundary");
+        }
+        // Counts sum to asset_count.
+        let sum: u32 = hist.iter().map(|b| b.count).sum();
+        assert_eq!(u64::from(sum), store.asset_count(Space::Personal).unwrap());
+    }
+
+    /// The histogram is space-scoped and excludes trashed rows, exactly like
+    /// `fetch_assets`/`asset_count`.
+    #[test]
+    fn date_histogram_is_space_scoped_and_excludes_trash() {
+        let store = Store::open_in_memory().unwrap();
+        let base = 1_479_513_600;
+        store.upsert_asset(&asset(Space::Personal, 1, Some(base + 10), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 2, Some(base + 20), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Shared, 9, Some(base + 30), Some(1))).unwrap();
+        store.set_trash_flag(Space::Personal, &[2], true, Some(5000)).unwrap();
+
+        let hist = store.date_histogram(Space::Personal).unwrap();
+        let sum: u32 = hist.iter().map(|b| b.count).sum();
+        assert_eq!(sum, 1, "trashed row excluded, Shared row not counted");
+        assert_eq!(u64::from(sum), store.asset_count(Space::Personal).unwrap());
+    }
+
+    /// NULL-`taken_at` rows collapse into one trailing bucket with
+    /// `day_start = 0`, appearing after every dated bucket, mirroring
+    /// `fetch_assets` ordering those rows last.
+    #[test]
+    fn date_histogram_puts_null_taken_at_in_trailing_zero_bucket() {
+        let store = Store::open_in_memory().unwrap();
+        let base = 1_479_513_600;
+        store.upsert_asset(&asset(Space::Personal, 1, Some(base + 10), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 2, None, Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 3, None, Some(1))).unwrap();
+
+        let hist = store.date_histogram(Space::Personal).unwrap();
+        assert_eq!(hist.len(), 2);
+        assert_eq!(hist[0].count, 1, "the one dated row");
+        assert!(hist[0].day_start > 0);
+        assert_eq!(hist.last().unwrap().day_start, 0, "Unknown Date bucket is last");
+        assert_eq!(hist.last().unwrap().count, 2);
+    }
+
+    /// An empty (or all-dated) space produces no Unknown Date bucket, and an
+    /// empty space produces an empty histogram.
+    #[test]
+    fn date_histogram_omits_unknown_bucket_when_no_null_rows_and_is_empty_when_no_rows() {
+        let store = Store::open_in_memory().unwrap();
+        assert!(store.date_histogram(Space::Personal).unwrap().is_empty());
+        store.upsert_asset(&asset(Space::Personal, 1, Some(1_479_513_610), Some(1))).unwrap();
+        let hist = store.date_histogram(Space::Personal).unwrap();
+        assert_eq!(hist.len(), 1);
+        assert!(hist.iter().all(|b| b.day_start != 0), "no Unknown Date bucket when every row is dated");
+    }
+
+    /// THE load-bearing invariant for the grid's (section, row) -> absolute
+    /// index mapping: walking the histogram's prefix sums and reading each
+    /// absolute index back through `fetch_assets` must return rows in the same
+    /// day the bucket claims, with the bucket boundaries lining up exactly.
+    /// This pages `fetch_assets` one row at a time and checks that the r-th row
+    /// of bucket s lands at absolute index (prefix of s) + r and belongs to
+    /// that bucket's day (dated buckets) or has a NULL taken_at (Unknown
+    /// bucket). Uses ties within a day and multiple days to exercise the
+    /// server_id tiebreak alongside the day boundaries.
+    #[test]
+    fn date_histogram_boundaries_line_up_with_fetch_assets() {
+        let store = Store::open_in_memory().unwrap();
+        let base = 1_479_513_600; // a UTC midnight
+        let day = 86_400;
+        // Day A (newest): 3 assets, two sharing a taken_at to force the tiebreak.
+        store.upsert_asset(&asset(Space::Personal, 10, Some(base + 2 * day + 500), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 11, Some(base + 2 * day + 500), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 12, Some(base + 2 * day + 100), Some(1))).unwrap();
+        // Day B: 2 assets.
+        store.upsert_asset(&asset(Space::Personal, 20, Some(base + 1 * day + 700), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 21, Some(base + 1 * day + 10), Some(1))).unwrap();
+        // Day C (oldest dated): 1 asset.
+        store.upsert_asset(&asset(Space::Personal, 30, Some(base + 42), Some(1))).unwrap();
+        // Two undated rows -> the trailing Unknown bucket.
+        store.upsert_asset(&asset(Space::Personal, 40, None, Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 41, None, Some(1))).unwrap();
+
+        let hist = store.date_histogram(Space::Personal).unwrap();
+        let total = store.asset_count(Space::Personal).unwrap();
+        let sum: u32 = hist.iter().map(|b| b.count).sum();
+        assert_eq!(u64::from(sum), total, "counts sum to asset_count");
+
+        // Read the whole space back in one shot to index by absolute position.
+        let all = store.fetch_assets(Space::Personal, 0, total as u32).unwrap();
+        assert_eq!(all.len() as u64, total);
+
+        let mut prefix = 0u32;
+        for bucket in &hist {
+            for r in 0..bucket.count {
+                let absolute = (prefix + r) as usize;
+                let a = &all[absolute];
+                if bucket.day_start == 0 {
+                    assert!(a.taken_at.is_none(), "Unknown bucket row must have NULL taken_at");
+                } else {
+                    let row_day = (a.taken_at.unwrap() / day) * day;
+                    assert_eq!(
+                        row_day, bucket.day_start,
+                        "row at absolute {absolute} must fall in the bucket's day"
+                    );
+                }
+            }
+            prefix += bucket.count;
+        }
+        assert_eq!(prefix, sum, "prefix walk covered exactly every row");
     }
 
     #[test]

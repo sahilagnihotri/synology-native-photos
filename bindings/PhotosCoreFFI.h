@@ -296,6 +296,11 @@ RustBuffer uniffi_photoscore_fn_method_photoscore_crawl_progress(void*_Nonnull p
 uint64_t uniffi_photoscore_fn_method_photoscore_crawl_space(void*_Nonnull ptr, RustBuffer space, uint64_t observer
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DATE_HISTOGRAM
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DATE_HISTOGRAM
+RustBuffer uniffi_photoscore_fn_method_photoscore_date_histogram(void*_Nonnull ptr, RustBuffer space, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DELETE_ASSETS
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DELETE_ASSETS
 uint64_t uniffi_photoscore_fn_method_photoscore_delete_assets(void*_Nonnull ptr, RustBuffer space, RustBuffer asset_ids
@@ -768,6 +773,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_crawl_progress(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_CRAWL_SPACE
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_CRAWL_SPACE
 uint16_t uniffi_photoscore_checksum_method_photoscore_crawl_space(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DATE_HISTOGRAM
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DATE_HISTOGRAM
+uint16_t uniffi_photoscore_checksum_method_photoscore_date_histogram(void
     
 );
 #endif

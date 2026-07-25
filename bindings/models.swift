@@ -1385,6 +1385,95 @@ public func FfiConverterTypeCrawlProgress_lower(_ value: CrawlProgress) -> RustB
 
 
 /**
+ * One calendar-day bucket in a space's library date histogram, as produced
+ * by `persistence::Store::date_histogram` / `PhotosCore::date_histogram`.
+ *
+ * `day_start` is the unix second at the start of the day the bucket covers,
+ * using the same UTC-day bucketing the histogram groups by (the day boundary
+ * falls at multiples of 86400 seconds). `count` is the number of non-trashed
+ * assets in that day. Buckets are returned newest day first, and their
+ * concatenation reproduces `fetch_assets`' global ordering exactly, so the
+ * grid can map a (section, row) coordinate to a flat absolute index purely
+ * from these counts without loading any asset.
+ *
+ * Assets with no `taken_at` are collected into a single trailing bucket with
+ * `day_start = 0` ("Unknown Date"), which sorts last to match `fetch_assets`
+ * putting NULL-`taken_at` rows at the end. A real photo timestamped at the
+ * unix epoch (1970-01-01) would share `day_start = 0` with that bucket; such
+ * timestamps do not occur in practice, so the UI treats `day_start == 0` as
+ * the Unknown Date bucket by convention.
+ */
+public struct DayCount {
+    public var dayStart: Int64
+    public var count: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(dayStart: Int64, count: UInt32) {
+        self.dayStart = dayStart
+        self.count = count
+    }
+}
+
+#if compiler(>=6)
+extension DayCount: Sendable {}
+#endif
+
+
+extension DayCount: Equatable, Hashable {
+    public static func ==(lhs: DayCount, rhs: DayCount) -> Bool {
+        if lhs.dayStart != rhs.dayStart {
+            return false
+        }
+        if lhs.count != rhs.count {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(dayStart)
+        hasher.combine(count)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDayCount: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DayCount {
+        return
+            try DayCount(
+                dayStart: FfiConverterInt64.read(from: &buf), 
+                count: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DayCount, into buf: inout [UInt8]) {
+        FfiConverterInt64.write(value.dayStart, into: &buf)
+        FfiConverterUInt32.write(value.count, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDayCount_lift(_ buf: RustBuffer) throws -> DayCount {
+    return try FfiConverterTypeDayCount.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDayCount_lower(_ value: DayCount) -> RustBuffer {
+    return FfiConverterTypeDayCount.lower(value)
+}
+
+
+/**
  * One entry in a `SearchFacets` catalog: an id/name pair as returned by
  * `SYNO.Foto.Search.Filter`. Shared shape for `cameras`, `apertures`, and
  * `geocodings` (the geocoding tree is flattened -- see

@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use models::{
-    Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DiscoveryCollection, Person, Place,
-    RecycleItem, SearchFacets, SearchFilters, Session, SessionState, Space, Subject, Tag, ThumbnailData,
+    Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DayCount, DiscoveryCollection, Person,
+    Place, RecycleItem, SearchFacets, SearchFilters, Session, SessionState, Space, Subject, Tag, ThumbnailData,
     ThumbnailSize, VideoPlaybackSource,
 };
 use persistence::Store;
@@ -369,6 +369,18 @@ impl PhotosCore {
         let guard = self.store.lock().expect("store mutex poisoned");
         let store = guard.as_ref().ok_or_else(store_busy_err)?;
         store.fetch_assets(space, offset, limit)
+    }
+
+    /// Local-only date histogram for `space`: one bucket per calendar day
+    /// (newest first) plus a trailing Unknown Date bucket for undated rows,
+    /// with counts summing to `asset_count` and lining up with `fetch_assets`'
+    /// ordering exactly (see `persistence::Store::date_histogram`). No network
+    /// access; same lock discipline as `fetch_assets`/`asset_count`, so the
+    /// grid can read the section structure cheaply without paging the library.
+    pub fn date_histogram(&self, space: Space) -> Result<Vec<DayCount>, CoreError> {
+        let guard = self.store.lock().expect("store mutex poisoned");
+        let store = guard.as_ref().ok_or_else(store_busy_err)?;
+        store.date_histogram(space)
     }
 
     /// Local read of every album in `space`, ordered by name. No network

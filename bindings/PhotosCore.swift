@@ -571,6 +571,16 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func crawlSpace(space: Space, observer: FfiCrawlObserver) async throws  -> CrawlProgress
     
     /**
+     * Local-only date histogram for `space`: one bucket per calendar day
+     * (newest first) plus a trailing Unknown Date bucket for undated rows,
+     * with counts summing to `asset_count` and lining up with `fetch_assets`'
+     * ordering exactly (see `persistence::Store::date_histogram`). No network
+     * access; same lock discipline as `fetch_assets`/`asset_count`, so the
+     * grid can read the section structure cheaply without paging the library.
+     */
+    func dateHistogram(space: Space) throws  -> [DayCount]
+    
+    /**
      * EVERYDAY DELETE: permanently removes `asset_ids` from the Synology
      * Photos library via the real Foto delete verb, which lands each
      * original in the DSM home recycle bin (recoverable). On server success,
@@ -1195,6 +1205,22 @@ open func crawlSpace(space: Space, observer: FfiCrawlObserver)async throws  -> C
             liftFunc: FfiConverterTypeCrawlProgress_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
+}
+    
+    /**
+     * Local-only date histogram for `space`: one bucket per calendar day
+     * (newest first) plus a trailing Unknown Date bucket for undated rows,
+     * with counts summing to `asset_count` and lining up with `fetch_assets`'
+     * ordering exactly (see `persistence::Store::date_histogram`). No network
+     * access; same lock discipline as `fetch_assets`/`asset_count`, so the
+     * grid can read the section structure cheaply without paging the library.
+     */
+open func dateHistogram(space: Space)throws  -> [DayCount]  {
+    return try  FfiConverterSequenceTypeDayCount.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_photoscore_fn_method_photoscore_date_histogram(self.uniffiClonePointer(),
+        FfiConverterTypeSpace_lower(space),$0
+    )
+})
 }
     
     /**
@@ -2451,6 +2477,31 @@ fileprivate struct FfiConverterSequenceTypeAsset: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeDayCount: FfiConverterRustBuffer {
+    typealias SwiftType = [DayCount]
+
+    public static func write(_ value: [DayCount], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDayCount.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DayCount] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DayCount]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDayCount.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypePerson: FfiConverterRustBuffer {
     typealias SwiftType = [Person]
 
@@ -2654,6 +2705,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_crawl_space() != 58321) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_date_histogram() != 45142) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_delete_assets() != 9665) {
