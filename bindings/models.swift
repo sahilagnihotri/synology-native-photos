@@ -1693,6 +1693,116 @@ public func FfiConverterTypePlace_lower(_ value: Place) -> RustBuffer {
 
 
 /**
+ * One file recovered from the DSM home recycle bin under
+ * `/home/#recycle/Photos/...`, as surfaced by the "real delete" flow.
+ *
+ * The everyday delete now removes an item from the Photos library outright
+ * (`SYNO.Foto.Browse.Item` `method=delete`), which lands the physical
+ * original in the home recycle bin at the mirrored path. That recycle bin is
+ * browsed with DSM File Station, which knows nothing about the Photos index,
+ * so a recovered file is described here by its filesystem facts rather than
+ * by a Photos item id: `recycle_path` is the absolute path inside
+ * `#recycle` (the handle used to restore or permanently delete it),
+ * `filename` is the leaf name, `deleted_at` is the File Station `mtime`
+ * (which is when the file was moved into the recycle bin), `file_size` is
+ * the byte size, and `media_kind` is derived from the filename extension via
+ * `media_kind_from_filename` (photo unless it is obviously a video).
+ */
+public struct RecycleItem {
+    public var recyclePath: String
+    public var filename: String
+    public var deletedAt: Int64
+    public var fileSize: UInt64
+    public var mediaKind: MediaKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(recyclePath: String, filename: String, deletedAt: Int64, fileSize: UInt64, mediaKind: MediaKind) {
+        self.recyclePath = recyclePath
+        self.filename = filename
+        self.deletedAt = deletedAt
+        self.fileSize = fileSize
+        self.mediaKind = mediaKind
+    }
+}
+
+#if compiler(>=6)
+extension RecycleItem: Sendable {}
+#endif
+
+
+extension RecycleItem: Equatable, Hashable {
+    public static func ==(lhs: RecycleItem, rhs: RecycleItem) -> Bool {
+        if lhs.recyclePath != rhs.recyclePath {
+            return false
+        }
+        if lhs.filename != rhs.filename {
+            return false
+        }
+        if lhs.deletedAt != rhs.deletedAt {
+            return false
+        }
+        if lhs.fileSize != rhs.fileSize {
+            return false
+        }
+        if lhs.mediaKind != rhs.mediaKind {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(recyclePath)
+        hasher.combine(filename)
+        hasher.combine(deletedAt)
+        hasher.combine(fileSize)
+        hasher.combine(mediaKind)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecycleItem: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecycleItem {
+        return
+            try RecycleItem(
+                recyclePath: FfiConverterString.read(from: &buf), 
+                filename: FfiConverterString.read(from: &buf), 
+                deletedAt: FfiConverterInt64.read(from: &buf), 
+                fileSize: FfiConverterUInt64.read(from: &buf), 
+                mediaKind: FfiConverterTypeMediaKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RecycleItem, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.recyclePath, into: &buf)
+        FfiConverterString.write(value.filename, into: &buf)
+        FfiConverterInt64.write(value.deletedAt, into: &buf)
+        FfiConverterUInt64.write(value.fileSize, into: &buf)
+        FfiConverterTypeMediaKind.write(value.mediaKind, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecycleItem_lift(_ buf: RustBuffer) throws -> RecycleItem {
+    return try FfiConverterTypeRecycleItem.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecycleItem_lower(_ value: RecycleItem) -> RustBuffer {
+    return FfiConverterTypeRecycleItem.lower(value)
+}
+
+
+/**
  * The facet catalog from `SYNO.Foto.Search.Filter`, `method=list`.
  * `cameras`/`apertures`/`geocodings` are listed for display only (see
  * `Facet`'s doc comment: no working filter param exists for them yet).

@@ -296,6 +296,11 @@ RustBuffer uniffi_photoscore_fn_method_photoscore_crawl_progress(void*_Nonnull p
 uint64_t uniffi_photoscore_fn_method_photoscore_crawl_space(void*_Nonnull ptr, RustBuffer space, uint64_t observer
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DELETE_ASSETS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DELETE_ASSETS
+uint64_t uniffi_photoscore_fn_method_photoscore_delete_assets(void*_Nonnull ptr, RustBuffer space, RustBuffer asset_ids
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DELETE_TO_TRASH
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DELETE_TO_TRASH
 uint64_t uniffi_photoscore_fn_method_photoscore_delete_to_trash(void*_Nonnull ptr, RustBuffer space, RustBuffer asset_ids
@@ -304,6 +309,11 @@ uint64_t uniffi_photoscore_fn_method_photoscore_delete_to_trash(void*_Nonnull pt
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
 uint64_t uniffi_photoscore_fn_method_photoscore_download_original(void*_Nonnull ptr, RustBuffer space, int64_t unit_id, RustBuffer cache_key
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_EMPTY_RECENTLY_DELETED
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_EMPTY_RECENTLY_DELETED
+uint64_t uniffi_photoscore_fn_method_photoscore_empty_recently_deleted(void*_Nonnull ptr, RustBuffer recycle_paths
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_ENSURE_TRASH_ALBUM
@@ -344,6 +354,11 @@ uint64_t uniffi_photoscore_fn_method_photoscore_fetch_people(void*_Nonnull ptr, 
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_PLACES
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_PLACES
 uint64_t uniffi_photoscore_fn_method_photoscore_fetch_places(void*_Nonnull ptr, uint32_t offset, uint32_t limit
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_RECENTLY_DELETED
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_RECENTLY_DELETED
+uint64_t uniffi_photoscore_fn_method_photoscore_fetch_recently_deleted(void*_Nonnull ptr, uint32_t offset, uint32_t limit
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_SEARCH_FACETS
@@ -391,9 +406,19 @@ uint64_t uniffi_photoscore_fn_method_photoscore_reconcile_delta(void*_Nonnull pt
 uint64_t uniffi_photoscore_fn_method_photoscore_reconcile_trash(void*_Nonnull ptr, RustBuffer space
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RECYCLE_THUMBNAIL
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RECYCLE_THUMBNAIL
+uint64_t uniffi_photoscore_fn_method_photoscore_recycle_thumbnail(void*_Nonnull ptr, RustBuffer recycle_path, RustBuffer size
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_FROM_TRASH
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_FROM_TRASH
 uint64_t uniffi_photoscore_fn_method_photoscore_restore_from_trash(void*_Nonnull ptr, RustBuffer space, RustBuffer asset_ids
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_RECENTLY_DELETED
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_RECENTLY_DELETED
+uint64_t uniffi_photoscore_fn_method_photoscore_restore_recently_deleted(void*_Nonnull ptr, RustBuffer recycle_paths
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_SESSION
@@ -746,6 +771,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_crawl_space(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DELETE_ASSETS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DELETE_ASSETS
+uint16_t uniffi_photoscore_checksum_method_photoscore_delete_assets(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DELETE_TO_TRASH
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DELETE_TO_TRASH
 uint16_t uniffi_photoscore_checksum_method_photoscore_delete_to_trash(void
@@ -755,6 +786,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_delete_to_trash(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
 uint16_t uniffi_photoscore_checksum_method_photoscore_download_original(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_EMPTY_RECENTLY_DELETED
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_EMPTY_RECENTLY_DELETED
+uint16_t uniffi_photoscore_checksum_method_photoscore_empty_recently_deleted(void
     
 );
 #endif
@@ -803,6 +840,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_people(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_PLACES
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_PLACES
 uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_places(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_RECENTLY_DELETED
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_RECENTLY_DELETED
+uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_recently_deleted(void
     
 );
 #endif
@@ -860,9 +903,21 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_reconcile_trash(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RECYCLE_THUMBNAIL
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RECYCLE_THUMBNAIL
+uint16_t uniffi_photoscore_checksum_method_photoscore_recycle_thumbnail(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_FROM_TRASH
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_FROM_TRASH
 uint16_t uniffi_photoscore_checksum_method_photoscore_restore_from_trash(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_RECENTLY_DELETED
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_RECENTLY_DELETED
+uint16_t uniffi_photoscore_checksum_method_photoscore_restore_recently_deleted(void
     
 );
 #endif

@@ -492,6 +492,24 @@ fileprivate struct FfiConverterString: FfiConverter {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterData: FfiConverterRustBuffer {
+    typealias SwiftType = Data
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+        let len: Int32 = try readInt(&buf)
+        return Data(try readBytes(&buf, count: Int(len)))
+    }
+
+    public static func write(_ value: Data, into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        writeBytes(&buf, value)
+    }
+}
+
 
 
 
@@ -553,6 +571,27 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func crawlSpace(space: Space, observer: FfiCrawlObserver) async throws  -> CrawlProgress
     
     /**
+     * EVERYDAY DELETE: permanently removes `asset_ids` from the Synology
+     * Photos library via the real Foto delete verb, which lands each
+     * original in the DSM home recycle bin (recoverable). On server success,
+     * and only then, removes those rows from the local index so they leave
+     * the grid immediately.
+     *
+     * FAIL CLOSED: on any error from the server delete, the local mirror is
+     * left completely unchanged. An empty `asset_ids` is a no-op with no
+     * network call. Serialized with every other mutating operation via
+     * `trash_lock`. Requires a live session (fails closed with
+     * `CoreError::Auth`).
+     *
+     * ATOMICITY: the server delete and the local row removal are each
+     * transactional but not jointly atomic; the only failure window
+     * ("deleted on the NAS, local row still present") is the safe direction
+     * (the item lingers in the grid until the next reconcile/crawl drops it)
+     * and self-heals, never resurrecting a deleted asset.
+     */
+    func deleteAssets(space: Space, assetIds: [Int64]) async throws 
+    
+    /**
      * Everyday delete: moves `asset_ids` into the `Recently Deleted` album on
      * the NAS, then (ONLY on server success) flags them `in_trash` locally in
      * one transaction so they leave the library grid and appear in the trash
@@ -594,6 +633,15 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * Fails closed with `CoreError::Auth` if no session is held.
      */
     func downloadOriginal(space: Space, unitId: Int64, cacheKey: String) async throws  -> String
+    
+    /**
+     * EMPTY (permanent): unrecoverably deletes each of `recycle_paths` from
+     * the DSM recycle bin (File Station delete). This is the point of no
+     * return; the caller (UI) must confirm first. Stops and fails closed on
+     * the first error. An empty `recycle_paths` is a no-op. Serialized via
+     * `trash_lock`; requires a live session.
+     */
+    func emptyRecentlyDeleted(recyclePaths: [String]) async throws 
     
     /**
      * Resolves the app-owned `Recently Deleted` album for `space`, creating
@@ -690,6 +738,16 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * discipline as `fetch_people`.
      */
     func fetchPlaces(offset: UInt32, limit: UInt32) async throws  -> [Place]
+    
+    /**
+     * Lists the DSM home recycle bin's Photos tree (the "Recently Deleted"
+     * view), most-recently-deleted first, windowed by `offset`/`limit`. This
+     * is a File Station read against the live NAS (there is no local mirror
+     * of the recycle bin), so it needs a live session and makes network
+     * calls; an absent recycle folder returns an empty list, not an error.
+     * Fails closed with `CoreError::Auth` if no session is held.
+     */
+    func fetchRecentlyDeleted(offset: UInt32, limit: UInt32) async throws  -> [RecycleItem]
     
     /**
      * Fetches the search facet catalog (`SYNO.Foto.Search.Filter`,
@@ -832,6 +890,15 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func reconcileTrash(space: Space) async throws 
     
     /**
+     * Fetches a thumbnail for one recycled file (by its recycle path) for the
+     * Recently Deleted grid. Returns the raw image bytes; `size` is passed
+     * through to File Station's own scale keyword. A JSON error from the NAS
+     * maps to a `CoreError` (never returned as bogus image bytes), which the
+     * UI can treat as "show a placeholder". Requires a live session.
+     */
+    func recycleThumbnail(recyclePath: String, size: String) async throws  -> Data
+    
+    /**
      * Restore: removes `asset_ids` from the `Recently Deleted` album on the
      * NAS, then (ONLY on server success) clears their local `in_trash` flag
      * so they return to the library grid. Reverses `delete_to_trash` exactly.
@@ -847,6 +914,20 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * Requires a live session; fails closed with `CoreError::Auth`.
      */
     func restoreFromTrash(space: Space, assetIds: [Int64]) async throws 
+    
+    /**
+     * RESTORE: moves each of `recycle_paths` back out of the recycle bin to
+     * its original library location (File Station move), then triggers ONE
+     * Photos re-index so the restored files reappear in the library.
+     *
+     * FAIL CLOSED and stop on the first error: if a move fails, no re-index
+     * is triggered and the error is returned (reporting how many items were
+     * restored before the failure when partial progress was made). Any file
+     * already moved before the failure stays restored on disk and is picked
+     * up by the next successful re-index or crawl. An empty `recycle_paths`
+     * is a no-op. Serialized via `trash_lock`; requires a live session.
+     */
+    func restoreRecentlyDeleted(recyclePaths: [String]) async throws 
     
     /**
      * Rebuild `Live` state from a previously stored `Session` (e.g. loaded
@@ -1117,6 +1198,42 @@ open func crawlSpace(space: Space, observer: FfiCrawlObserver)async throws  -> C
 }
     
     /**
+     * EVERYDAY DELETE: permanently removes `asset_ids` from the Synology
+     * Photos library via the real Foto delete verb, which lands each
+     * original in the DSM home recycle bin (recoverable). On server success,
+     * and only then, removes those rows from the local index so they leave
+     * the grid immediately.
+     *
+     * FAIL CLOSED: on any error from the server delete, the local mirror is
+     * left completely unchanged. An empty `asset_ids` is a no-op with no
+     * network call. Serialized with every other mutating operation via
+     * `trash_lock`. Requires a live session (fails closed with
+     * `CoreError::Auth`).
+     *
+     * ATOMICITY: the server delete and the local row removal are each
+     * transactional but not jointly atomic; the only failure window
+     * ("deleted on the NAS, local row still present") is the safe direction
+     * (the item lingers in the grid until the next reconcile/crawl drops it)
+     * and self-heals, never resurrecting a deleted asset.
+     */
+open func deleteAssets(space: Space, assetIds: [Int64])async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_delete_assets(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeSpace_lower(space),FfiConverterSequenceInt64.lower(assetIds)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_void,
+            completeFunc: ffi_photoscore_rust_future_complete_void,
+            freeFunc: ffi_photoscore_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
      * Everyday delete: moves `asset_ids` into the `Recently Deleted` album on
      * the NAS, then (ONLY on server success) flags them `in_trash` locally in
      * one transaction so they leave the library grid and appear in the trash
@@ -1185,6 +1302,30 @@ open func downloadOriginal(space: Space, unitId: Int64, cacheKey: String)async t
             completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
             freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
             liftFunc: FfiConverterString.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * EMPTY (permanent): unrecoverably deletes each of `recycle_paths` from
+     * the DSM recycle bin (File Station delete). This is the point of no
+     * return; the caller (UI) must confirm first. Stops and fails closed on
+     * the first error. An empty `recycle_paths` is a no-op. Serialized via
+     * `trash_lock`; requires a live session.
+     */
+open func emptyRecentlyDeleted(recyclePaths: [String])async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_empty_recently_deleted(
+                    self.uniffiClonePointer(),
+                    FfiConverterSequenceString.lower(recyclePaths)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_void,
+            completeFunc: ffi_photoscore_rust_future_complete_void,
+            freeFunc: ffi_photoscore_rust_future_free_void,
+            liftFunc: { $0 },
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -1385,6 +1526,31 @@ open func fetchPlaces(offset: UInt32, limit: UInt32)async throws  -> [Place]  {
             completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
             freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypePlace.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Lists the DSM home recycle bin's Photos tree (the "Recently Deleted"
+     * view), most-recently-deleted first, windowed by `offset`/`limit`. This
+     * is a File Station read against the live NAS (there is no local mirror
+     * of the recycle bin), so it needs a live session and makes network
+     * calls; an absent recycle folder returns an empty list, not an error.
+     * Fails closed with `CoreError::Auth` if no session is held.
+     */
+open func fetchRecentlyDeleted(offset: UInt32, limit: UInt32)async throws  -> [RecycleItem]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_fetch_recently_deleted(
+                    self.uniffiClonePointer(),
+                    FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeRecycleItem.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -1658,6 +1824,30 @@ open func reconcileTrash(space: Space)async throws   {
 }
     
     /**
+     * Fetches a thumbnail for one recycled file (by its recycle path) for the
+     * Recently Deleted grid. Returns the raw image bytes; `size` is passed
+     * through to File Station's own scale keyword. A JSON error from the NAS
+     * maps to a `CoreError` (never returned as bogus image bytes), which the
+     * UI can treat as "show a placeholder". Requires a live session.
+     */
+open func recycleThumbnail(recyclePath: String, size: String)async throws  -> Data  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_recycle_thumbnail(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(recyclePath),FfiConverterString.lower(size)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterData.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
      * Restore: removes `asset_ids` from the `Recently Deleted` album on the
      * NAS, then (ONLY on server success) clears their local `in_trash` flag
      * so they return to the library grid. Reverses `delete_to_trash` exactly.
@@ -1679,6 +1869,35 @@ open func restoreFromTrash(space: Space, assetIds: [Int64])async throws   {
                 uniffi_photoscore_fn_method_photoscore_restore_from_trash(
                     self.uniffiClonePointer(),
                     FfiConverterTypeSpace_lower(space),FfiConverterSequenceInt64.lower(assetIds)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_void,
+            completeFunc: ffi_photoscore_rust_future_complete_void,
+            freeFunc: ffi_photoscore_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * RESTORE: moves each of `recycle_paths` back out of the recycle bin to
+     * its original library location (File Station move), then triggers ONE
+     * Photos re-index so the restored files reappear in the library.
+     *
+     * FAIL CLOSED and stop on the first error: if a move fails, no re-index
+     * is triggered and the error is returned (reporting how many items were
+     * restored before the failure when partial progress was made). Any file
+     * already moved before the failure stays restored on disk and is picked
+     * up by the next successful re-index or crawl. An empty `recycle_paths`
+     * is a no-op. Serialized via `trash_lock`; requires a live session.
+     */
+open func restoreRecentlyDeleted(recyclePaths: [String])async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_restore_recently_deleted(
+                    self.uniffiClonePointer(),
+                    FfiConverterSequenceString.lower(recyclePaths)
                 )
             },
             pollFunc: ffi_photoscore_rust_future_poll_void,
@@ -2132,6 +2351,31 @@ fileprivate struct FfiConverterSequenceInt64: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeAlbum: FfiConverterRustBuffer {
     typealias SwiftType = [Album]
 
@@ -2249,6 +2493,31 @@ fileprivate struct FfiConverterSequenceTypePlace: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypePlace.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRecycleItem: FfiConverterRustBuffer {
+    typealias SwiftType = [RecycleItem]
+
+    public static func write(_ value: [RecycleItem], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRecycleItem.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RecycleItem] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RecycleItem]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRecycleItem.read(from: &buf))
         }
         return seq
     }
@@ -2387,10 +2656,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_crawl_space() != 58321) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_photoscore_checksum_method_photoscore_delete_assets() != 9665) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_photoscore_checksum_method_photoscore_delete_to_trash() != 16481) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_download_original() != 35832) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_empty_recently_deleted() != 29716) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_ensure_trash_album() != 39040) {
@@ -2415,6 +2690,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_places() != 23273) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_recently_deleted() != 27036) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_search_facets() != 30002) {
@@ -2444,7 +2722,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_reconcile_trash() != 26236) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_photoscore_checksum_method_photoscore_recycle_thumbnail() != 29421) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_photoscore_checksum_method_photoscore_restore_from_trash() != 6217) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_restore_recently_deleted() != 33694) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 22452) {
