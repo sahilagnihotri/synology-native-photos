@@ -4,7 +4,7 @@ uniffi::setup_scaffolding!();
 
 pub const CRATE_MARKER: &str = "models";
 
-#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Space { Personal, Shared }
 
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
