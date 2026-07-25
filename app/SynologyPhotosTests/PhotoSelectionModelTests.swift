@@ -121,4 +121,56 @@ struct PhotoSelectionModelTests {
         model.toggle(5)
         #expect(model.sortedIndices == [2, 5, 9])
     }
+
+    // MARK: Shift+arrow extension (the same shiftClick calls handleKey makes
+    // for `.extendNext`/`.extendPrevious`/`.extendUp`/`.extendDown`, driven
+    // here with the exact indices `GridNavigation.target` would compute for
+    // a Shift+Right/Shift+Left sequence starting from anchor 4).
+
+    @Test func shiftRightFromAnchorExtendsByOne() {
+        let model = PhotoSelectionModel()
+        model.click(4)
+        model.shiftClick(5) // Shift+Right target
+        #expect(model.selected == Set(4...5))
+        #expect(model.anchor == 4)
+    }
+
+    @Test func secondShiftRightExtendsFurther() {
+        let model = PhotoSelectionModel()
+        model.click(4)
+        model.shiftClick(5)
+        model.shiftClick(6) // second Shift+Right target
+        #expect(model.selected == Set(4...6))
+        #expect(model.anchor == 4)
+    }
+
+    @Test func shiftLeftBackTowardTheAnchorContractsTheRange() {
+        let model = PhotoSelectionModel()
+        model.click(4)
+        model.shiftClick(5)
+        model.shiftClick(6)
+        model.shiftClick(5) // Shift+Left target: back off by one
+        #expect(model.selected == Set(4...5))
+        #expect(model.anchor == 4)
+    }
+
+    @Test func shiftLeftPastTheAnchorFlipsTheRangeToTheOtherSide() {
+        let model = PhotoSelectionModel()
+        model.click(4)
+        model.shiftClick(5)
+        model.shiftClick(6)
+        model.shiftClick(3) // Shift+Left three times past the anchor
+        #expect(model.selected == Set(3...4))
+        #expect(model.anchor == 4)
+    }
+
+    @Test func shiftArrowExtensionFromAFreshAnchorInEitherDirection() {
+        let model = PhotoSelectionModel()
+        model.click(10)
+        model.shiftClick(9) // Shift+Left target
+        #expect(model.selected == Set(9...10))
+        model.shiftClick(11) // Shift+Right re-ranges to the other side
+        #expect(model.selected == Set(10...11))
+        #expect(model.anchor == 10)
+    }
 }

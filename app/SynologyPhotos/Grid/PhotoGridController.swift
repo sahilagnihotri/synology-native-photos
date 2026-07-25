@@ -196,10 +196,26 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
             onOpenDetail?(index)
             return true
 
-        case .previous, .next, .up, .down:
+        case .previous, .next, .up, .down, .extendPrevious, .extendNext, .extendUp, .extendDown:
             guard count > 0 else { return false }
+            let isExtend: Bool
+            switch action {
+            case .extendPrevious, .extendNext, .extendUp, .extendDown: isExtend = true
+            default: isExtend = false
+            }
             let target: Int
-            if let current = currentIndex() {
+            // A plain arrow always steps from the anchor (there is at most
+            // one selected item on that path). A Shift+arrow must instead
+            // step from the current range's far edge, the end away from the
+            // anchor, e.g. after Shift+Right takes {4,5} the very next
+            // Shift+Right has to step from 5, not from the anchor 4 again,
+            // or every extend press would just toggle between the anchor and
+            // one neighbor instead of growing the range. `farEdge()` returns
+            // the anchor itself for a single-item (non-extended) selection,
+            // so the very first Shift+arrow press still steps one away from
+            // the anchor, matching shift-click's own first-press behavior.
+            let origin = isExtend ? farEdge() : currentIndex()
+            if let current = origin {
                 let perRow = GridNavigation.itemsPerRow(
                     availableWidth: collectionView.bounds.width,
                     itemSize: itemSize,
@@ -213,18 +229,31 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
                 // first item, matching Finder/Photos (pressing an arrow key
                 // with nothing selected selects item 0 regardless of
                 // direction, rather than doing nothing or requiring Right
-                // specifically).
+                // specifically). A Shift+arrow with nothing selected has no
+                // anchor to extend from either, so it starts fresh the same
+                // way a plain arrow does.
                 target = 0
             }
-            selection.click(target)
+            // Shift+arrow extends the existing range from the anchor
+            // (`shiftClick`, the exact same range logic shift-click already
+            // uses), a plain arrow replaces the selection with just the
+            // target (`click`, which also moves the anchor). This mirrors
+            // Finder/Photos: Shift+arrow keeps growing/shrinking one range
+            // from a fixed anchor; a plain arrow starts a fresh single
+            // selection and a fresh anchor at wherever it lands.
+            if isExtend {
+                selection.shiftClick(target)
+            } else {
+                selection.click(target)
+            }
             syncSelectionHighlight()
             if target < snapshotItemCount() {
                 collectionView.scrollToItems(at: [IndexPath(item: target, section: Self.section)], scrollPosition: .nearestHorizontalEdge)
             }
-            // Arrow keys MOVE the selection only; they never open the detail
-            // viewer (Apple Photos: arrows walk the grid, Return/double-click
-            // open). Report the change through the selection-changed path,
-            // NOT onOpenDetail.
+            // Arrow keys (plain or Shift-extended) MOVE/EXTEND the selection
+            // only; they never open the detail viewer (Apple Photos: arrows
+            // walk the grid, Return/double-click open). Report the change
+            // through the selection-changed path, NOT onOpenDetail.
             onSelectionChanged?(target)
             return true
         }
@@ -263,6 +292,30 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         // viewer on a stale, out-of-range row. All keyboard paths (arrow nav,
         // QuickLook, open detail) funnel through here. See GridNavigation.
         let candidate = selection.anchor ?? selection.sortedIndices.first
+        return GridNavigation.clampedCurrent(candidate, count: snapshotItemCount())
+    }
+
+    /// The end of the current selection range farthest from the anchor, the
+    /// index a Shift+arrow press should step from next so consecutive
+    /// presses keep growing the range instead of bouncing between the
+    /// anchor and its immediate neighbor.
+    ///
+    /// With no selection at all, behaves exactly like `currentIndex()`
+    /// (falls through to `selection.anchor`, then `nil`), so a bare
+    /// Shift+arrow with nothing selected still starts fresh at item 0 via
+    /// `handleKey`'s own no-selection branch. With a single-item selection
+    /// (no extended range yet), the far edge and the anchor are the same
+    /// index, so the very first Shift+arrow press correctly steps one away
+    /// from the anchor, matching a fresh shift-click's own behavior.
+    private func farEdge() -> Int? {
+        guard let anchor = selection.anchor else { return currentIndex() }
+        let sorted = selection.sortedIndices
+        guard let first = sorted.first, let last = sorted.last else { return anchor }
+        // The far edge is whichever bound of the sorted range is NOT the
+        // anchor's own side: if the anchor sits at or before the range's
+        // start, the range extends rightward and the far edge is the max;
+        // otherwise the range extends leftward and the far edge is the min.
+        let candidate = anchor <= first ? last : first
         return GridNavigation.clampedCurrent(candidate, count: snapshotItemCount())
     }
 

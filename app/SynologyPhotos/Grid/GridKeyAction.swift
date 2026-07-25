@@ -8,6 +8,16 @@ enum GridKeyAction: Equatable {
     case next
     case up
     case down
+    /// Shift+Left: extend the selection from the anchor to the previous
+    /// item, the keyboard equivalent of shift-click. Kept distinct from
+    /// `.previous` (not a shift flag riding along on the same case) so
+    /// `handleKey` can route it through `PhotoSelectionModel.shiftClick`
+    /// instead of `click`, without re-deriving the shift flag from the raw
+    /// event a second time.
+    case extendPrevious
+    case extendNext
+    case extendUp
+    case extendDown
     case toggleQuickLook
     case openDetail
     case clearSelectionOrClose
@@ -23,13 +33,21 @@ enum GridKeyMapper {
     /// Delete is recognized both as the plain Delete/Backspace key and as
     /// Cmd-Delete, matching the brief's "Delete or Cmd-Delete" wording and
     /// Finder's own convention of accepting either.
+    ///
+    /// Shift on an arrow key maps to the corresponding `.extend*` action
+    /// rather than the plain move action, matching Finder/Photos: holding
+    /// Shift while pressing an arrow key extends the selection instead of
+    /// replacing it. Shift is checked before the plain arrow cases so it
+    /// always wins when held, regardless of Command also being down (there
+    /// is no defined Cmd+Shift+Arrow grid behavior, so Shift alone decides).
     static func action(for event: NSEvent) -> GridKeyAction? {
         let command = event.modifierFlags.contains(.command)
+        let shift = event.modifierFlags.contains(.shift)
         switch event.keyCode {
-        case KeyCode.leftArrow: return .previous
-        case KeyCode.rightArrow: return .next
-        case KeyCode.upArrow: return .up
-        case KeyCode.downArrow: return .down
+        case KeyCode.leftArrow: return shift ? .extendPrevious : .previous
+        case KeyCode.rightArrow: return shift ? .extendNext : .next
+        case KeyCode.upArrow: return shift ? .extendUp : .up
+        case KeyCode.downArrow: return shift ? .extendDown : .down
         case KeyCode.space: return .toggleQuickLook
         case KeyCode.returnKey, KeyCode.keypadEnter: return .openDetail
         case KeyCode.escape: return .clearSelectionOrClose

@@ -34,14 +34,20 @@ enum GridNavigation {
     /// The index Left/Right/Up/Down should move focus to, or `nil` if the
     /// move would go out of range (`0..<count`), in which case the caller
     /// should leave the current selection untouched.
+    ///
+    /// The four `.extend*` actions (Shift+arrow) share the exact same row
+    /// arithmetic as their plain counterparts: Shift only changes what the
+    /// caller does with the resulting index (extend the selection rather
+    /// than replace it), not where that index points, so they fold into the
+    /// same cases here instead of duplicating the deltas.
     static func target(for action: GridKeyAction, from current: Int, itemsPerRow: Int, count: Int) -> Int? {
         guard count > 0 else { return nil }
         let proposed: Int
         switch action {
-        case .previous: proposed = current - 1
-        case .next: proposed = current + 1
-        case .up: proposed = current - itemsPerRow
-        case .down: proposed = current + itemsPerRow
+        case .previous, .extendPrevious: proposed = current - 1
+        case .next, .extendNext: proposed = current + 1
+        case .up, .extendUp: proposed = current - itemsPerRow
+        case .down, .extendDown: proposed = current + itemsPerRow
         default: return nil
         }
         guard proposed >= 0, proposed < count else { return nil }

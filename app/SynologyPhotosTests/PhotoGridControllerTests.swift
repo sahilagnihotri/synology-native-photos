@@ -436,11 +436,14 @@ struct PhotoGridControllerTests {
 
     // MARK: - Keyboard map integration (handleKey)
 
-    private func keyEvent(_ keyCode: UInt16, command: Bool = false) -> NSEvent {
-        NSEvent.keyEvent(
+    private func keyEvent(_ keyCode: UInt16, command: Bool = false, shift: Bool = false) -> NSEvent {
+        var flags: NSEvent.ModifierFlags = []
+        if command { flags.insert(.command) }
+        if shift { flags.insert(.shift) }
+        return NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
-            modifierFlags: command ? .command : [],
+            modifierFlags: flags,
             timestamp: 0,
             windowNumber: 0,
             context: nil,
@@ -582,6 +585,74 @@ struct PhotoGridControllerTests {
         // Selection itself is untouched: Delete never mutates state on its
         // own, it only reports the count for the caller's confirm affordance.
         #expect(controller.selection.selected == [0, 2])
+    }
+
+    // MARK: - Shift+arrow selection extension
+
+    /// The brief's exact scenario: from anchor 4, Shift+Right extends to
+    /// {4,5}, a second Shift+Right extends to {4,5,6}, and it never opens
+    /// the detail viewer (Shift+arrow is still a selection-only gesture,
+    /// same as a plain arrow).
+    @Test func shiftRightExtendsSelectionFromAnchor() async {
+        let (controller, _) = await makeController(count: 10)
+        controller.selection.click(4)
+
+        var opened: Int?
+        controller.onOpenDetail = { opened = $0 }
+
+        #expect(controller.handleKey(keyEvent(KeyCode.rightArrow, shift: true)) == true)
+        #expect(controller.selection.selected == Set(4...5))
+        #expect(controller.selection.anchor == 4)
+
+        #expect(controller.handleKey(keyEvent(KeyCode.rightArrow, shift: true)) == true)
+        #expect(controller.selection.selected == Set(4...6))
+        #expect(controller.selection.anchor == 4)
+        #expect(opened == nil)
+    }
+
+    /// Shift+Left back across the anchor contracts, then flips the range to
+    /// the other side, exactly like Finder/Photos shift-click.
+    @Test func shiftLeftContractsThenFlipsAcrossTheAnchor() async {
+        let (controller, _) = await makeController(count: 10)
+        controller.selection.click(4)
+        controller.handleKey(keyEvent(KeyCode.rightArrow, shift: true)) // {4,5}
+        controller.handleKey(keyEvent(KeyCode.rightArrow, shift: true)) // {4,5,6}
+
+        #expect(controller.handleKey(keyEvent(KeyCode.leftArrow, shift: true)) == true)
+        #expect(controller.selection.selected == Set(4...5)) // contracts
+
+        #expect(controller.handleKey(keyEvent(KeyCode.leftArrow, shift: true)) == true)
+        #expect(controller.selection.selected == [4]) // back to just the anchor
+
+        #expect(controller.handleKey(keyEvent(KeyCode.leftArrow, shift: true)) == true)
+        #expect(controller.selection.selected == Set(3...4)) // flips past the anchor
+        #expect(controller.selection.anchor == 4)
+    }
+
+    /// A plain arrow after an extended selection drops the range and starts
+    /// a fresh single selection/anchor stepping from the anchor (not the
+    /// far edge of the just-abandoned range), matching Finder/Photos:
+    /// releasing Shift and pressing a plain arrow again moves the original
+    /// single-item focus by one, it does not continue on from wherever the
+    /// extended range happened to reach.
+    @Test func plainArrowAfterExtendReplacesTheRangeWithASingleSelection() async {
+        let (controller, _) = await makeController(count: 10)
+        controller.selection.click(4)
+        controller.handleKey(keyEvent(KeyCode.rightArrow, shift: true)) // {4,5}
+        controller.handleKey(keyEvent(KeyCode.rightArrow, shift: true)) // {4,5,6}
+
+        #expect(controller.handleKey(keyEvent(KeyCode.rightArrow)) == true)
+        #expect(controller.selection.selected == [5])
+        #expect(controller.selection.anchor == 5)
+    }
+
+    /// Shift+arrow with nothing selected yet has no anchor to extend from,
+    /// so it starts fresh at item 0 the same way a plain arrow would.
+    @Test func shiftArrowWithNoSelectionStartsAtFirstItem() async {
+        let (controller, _) = await makeController(count: 10)
+
+        #expect(controller.handleKey(keyEvent(KeyCode.rightArrow, shift: true)) == true)
+        #expect(controller.selection.selected == [0])
     }
 
     @Test func unrecognizedKeyIsNotConsumed() async {

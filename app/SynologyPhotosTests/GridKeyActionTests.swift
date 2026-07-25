@@ -5,11 +5,14 @@ import AppKit
 /// Exercises the pure key-event-to-action mapping behind the keyboard map,
 /// independent of any live `NSResponder`.
 struct GridKeyActionTests {
-    private func event(keyCode: UInt16, command: Bool = false) -> NSEvent {
-        NSEvent.keyEvent(
+    private func event(keyCode: UInt16, command: Bool = false, shift: Bool = false) -> NSEvent {
+        var flags: NSEvent.ModifierFlags = []
+        if command { flags.insert(.command) }
+        if shift { flags.insert(.shift) }
+        return NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
-            modifierFlags: command ? .command : [],
+            modifierFlags: flags,
             timestamp: 0,
             windowNumber: 0,
             context: nil,
@@ -25,6 +28,13 @@ struct GridKeyActionTests {
         #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.rightArrow)) == .next)
         #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.upArrow)) == .up)
         #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.downArrow)) == .down)
+    }
+
+    @Test func shiftArrowKeysMapToExtendActionsNotPlainNavigation() {
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.leftArrow, shift: true)) == .extendPrevious)
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.rightArrow, shift: true)) == .extendNext)
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.upArrow, shift: true)) == .extendUp)
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.downArrow, shift: true)) == .extendDown)
     }
 
     @Test func spaceMapsToToggleQuickLook() {
@@ -80,6 +90,18 @@ struct GridNavigationTests {
     @Test func upAndDownMoveByAFullRow() {
         #expect(GridNavigation.target(for: .up, from: 8, itemsPerRow: 4, count: 20) == 4)
         #expect(GridNavigation.target(for: .down, from: 8, itemsPerRow: 4, count: 20) == 12)
+    }
+
+    @Test func extendActionsUseTheSameArithmeticAsTheirPlainCounterparts() {
+        #expect(GridNavigation.target(for: .extendPrevious, from: 5, itemsPerRow: 4, count: 20) == 4)
+        #expect(GridNavigation.target(for: .extendNext, from: 5, itemsPerRow: 4, count: 20) == 6)
+        #expect(GridNavigation.target(for: .extendUp, from: 8, itemsPerRow: 4, count: 20) == 4)
+        #expect(GridNavigation.target(for: .extendDown, from: 8, itemsPerRow: 4, count: 20) == 12)
+    }
+
+    @Test func extendActionsClampAtTheEdgesLikeTheirPlainCounterparts() {
+        #expect(GridNavigation.target(for: .extendPrevious, from: 0, itemsPerRow: 4, count: 20) == nil)
+        #expect(GridNavigation.target(for: .extendNext, from: 19, itemsPerRow: 4, count: 20) == nil)
     }
 
     @Test func previousAtFirstIndexReturnsNil() {
