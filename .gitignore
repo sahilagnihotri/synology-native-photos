@@ -7,6 +7,9 @@ Cargo.lock.orig
 /PhotosCore.xcframework
 /build
 
+# Generated at build time (short git SHA for the About window)
+app/Generated/
+
 # Xcode
 app/DerivedData/
 app/**/xcuserdata/

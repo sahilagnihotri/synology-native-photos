@@ -54,6 +54,28 @@ targets:
     platform: macOS
     sources:
       - path: SynologyPhotos
+      # Generated at build time by the preBuildScript below. Referenced by
+      # an explicit path (not a directory glob) and marked optional so
+      # `xcodegen generate` still succeeds on a clean checkout where this
+      # gitignored file is absent. It lives in app/Generated (outside the
+      # globbed SynologyPhotos dir) so it is never a duplicate file ref.
+      - path: Generated/GitVersion.swift
+        optional: true
+    preBuildScripts:
+      - name: "Generate GitVersion.swift"
+        script: |
+          "${SRCROOT}/../scripts/xcodegen/generate-git-version.sh" "${SRCROOT}/Generated/GitVersion.swift"
+        shell: /bin/bash
+        # outputFiles makes the new build system treat the compile of
+        # GitVersion.swift as depending on this phase, so the phase runs
+        # before Compile Sources and the build does not pre-fail when the
+        # generated file is missing on a fresh checkout.
+        outputFiles:
+          - "$(SRCROOT)/Generated/GitVersion.swift"
+        # Always run so the SHA stays fresh across commits; the script itself
+        # only rewrites the file (and thus triggers a recompile) when the SHA
+        # actually changed.
+        basedOnDependencyAnalysis: false
     dependencies:
       - target: PhotosCore
         embed: true
@@ -61,6 +83,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: se.agnihotri.synologyphotos
+        # Explicit so the About window shows deterministic values instead of
+        # relying on GENERATE_INFOPLIST_FILE defaults.
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         ENABLE_HARDENED_RUNTIME: YES

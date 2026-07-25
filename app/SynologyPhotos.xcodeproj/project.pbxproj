@@ -56,6 +56,7 @@
 		94260F0FC0643CE368E6F2FD /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5FC30BA732D8B3CBC757EE /* RootView.swift */; };
 		95D528A305471E65390D3F57 /* ImportProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24E700BE934BC17C20A127A /* ImportProgressView.swift */; };
 		9B7E62A39CDAD710563060AD /* DiscoveryTileGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF50C704ABAE92E624DAE426 /* DiscoveryTileGridView.swift */; };
+		9DAB76C72D6F90182C84CDF1 /* GitVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C5E5DC0623F2A3A12A54D91 /* GitVersion.swift */; };
 		9EC064131BB27458E2DFD5FE /* RootRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1B1528D3D458F8C696F52A /* RootRouterTests.swift */; };
 		A0336627776762D4B7072519 /* ThumbnailCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C220E6EFABA5E50B72BF6CD9 /* ThumbnailCacheTests.swift */; };
 		A1EB8E595E96192495218215 /* DetailZoomModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48DC21E7E1699CD7AD4A5400 /* DetailZoomModelTests.swift */; };
@@ -153,7 +154,8 @@
 		271D63AA455C96290DFEF262 /* FakePhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakePhotosCore.swift; sourceTree = "<group>"; };
 		2A06C5754F8669A8D883CA53 /* PhotoGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridView.swift; sourceTree = "<group>"; };
 		31BC99794475619316AE36D9 /* SynologyPhotosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SynologyPhotosTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		32261FB0D2010F3CDA46C270 /* PhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PhotosCore.swift; path = ../bindings/PhotosCore.swift; sourceTree = "<group>"; };
+		32261FB0D2010F3CDA46C270 /* PhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PhotosCore.swift; path = ../../bindings/PhotosCore.swift; sourceTree = "<group>"; };
+		3C5E5DC0623F2A3A12A54D91 /* GitVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitVersion.swift; sourceTree = "<group>"; };
 		3E449A40273884351B64A8B8 /* GridNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridNavigation.swift; sourceTree = "<group>"; };
 		40F28C05A900845C4AD4649A /* AuthStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStateMachine.swift; sourceTree = "<group>"; };
 		47572CC4B55567ECBC59B0AE /* CertApprovalViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertApprovalViewModel.swift; sourceTree = "<group>"; };
@@ -178,7 +180,7 @@
 		7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreBridgeSmokeTests.swift; sourceTree = "<group>"; };
 		804A84AD11D123A39E1E6B09 /* LoginPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginPreferences.swift; sourceTree = "<group>"; };
 		810D3F9B5AB534061DBC3FE1 /* GridKeyAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridKeyAction.swift; sourceTree = "<group>"; };
-		857A71F880766524090BB89F /* models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = models.swift; path = ../bindings/models.swift; sourceTree = "<group>"; };
+		857A71F880766524090BB89F /* models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = models.swift; path = ../../bindings/models.swift; sourceTree = "<group>"; };
 		8667BF98AE3EE89E3D3D1E2A /* LoginViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModelTests.swift; sourceTree = "<group>"; };
 		89AD5885314385A5C5FAA5A8 /* PhotosCoreClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosCoreClient.swift; sourceTree = "<group>"; };
 		8FB877BDAFA0CCD4FB422FB8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -386,10 +388,11 @@
 		AC8C890F47C1247FF5C8CC2B /* Generated */ = {
 			isa = PBXGroup;
 			children = (
+				3C5E5DC0623F2A3A12A54D91 /* GitVersion.swift */,
 				857A71F880766524090BB89F /* models.swift */,
 				32261FB0D2010F3CDA46C270 /* PhotosCore.swift */,
 			);
-			name = Generated;
+			path = Generated;
 			sourceTree = "<group>";
 		};
 		BDCB5FD72D7D338B21DEB2D8 = {
@@ -530,6 +533,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = DD42724C6280FA72BBB0FFCF /* Build configuration list for PBXNativeTarget "SynologyPhotos" */;
 			buildPhases = (
+				D55E102E0217C80B5B2063BA /* Generate GitVersion.swift */,
 				490D990DD0E07C9E2A9E0151 /* Sources */,
 				AAD8340B9F4AC820FCB915C8 /* Resources */,
 				81268E7672CE74519FE8BCA4 /* Frameworks */,
@@ -628,6 +632,26 @@
 			shellPath = /bin/bash;
 			shellScript = "\"${SRCROOT}/../scripts/xcodegen/ensure-xcframework.sh\"\n";
 		};
+		D55E102E0217C80B5B2063BA /* Generate GitVersion.swift */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Generate GitVersion.swift";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Generated/GitVersion.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/../scripts/xcodegen/generate-git-version.sh\" \"${SRCROOT}/Generated/GitVersion.swift\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -659,6 +683,7 @@
 				9B7E62A39CDAD710563060AD /* DiscoveryTileGridView.swift in Sources */,
 				66D97B44589E1C9E91BC69FD /* DiscoveryTilesModel.swift in Sources */,
 				EA884F70294FA80457254F90 /* EmptyLibraryView.swift in Sources */,
+				9DAB76C72D6F90182C84CDF1 /* GitVersion.swift in Sources */,
 				7D86191A02CEF2321018FFFD /* GridKeyAction.swift in Sources */,
 				5B707E4A5BF50FD0E9CBBA61 /* GridNavigation.swift in Sources */,
 				C3BC073AC8C193F9DA1A7DA5 /* GridZoomModel.swift in Sources */,
@@ -982,6 +1007,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5W67TF3579;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -991,6 +1017,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.synologyphotos;
 				SDKROOT = macosx;
 			};
@@ -1003,6 +1030,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5W67TF3579;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1012,6 +1040,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = se.agnihotri.synologyphotos;
 				SDKROOT = macosx;
 			};
