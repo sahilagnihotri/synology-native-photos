@@ -27,6 +27,10 @@ actor PhotosCoreClient {
         try core.fetchAssets(space: space, offset: offset, limit: limit)
     }
     func assetCount(space: Space) throws -> UInt64 { try core.assetCount(space: space) }
+    /// Local-only per-day histogram for `space` (newest day first), for the
+    /// grid's date-section headers and scroll scrubber. Cheap local read, no
+    /// network; counts sum to `assetCount` and line up with `fetchAssets`.
+    func dateHistogram(space: Space) throws -> [DayCount] { try core.dateHistogram(space: space) }
     func fetchLocalAlbums(space: Space) throws -> [Album] { try core.fetchLocalAlbums(space: space) }
     func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize) async throws -> ThumbnailData {
         try await core.thumbnail(space: space, unitId: unitId, cacheKey: cacheKey, size: size)

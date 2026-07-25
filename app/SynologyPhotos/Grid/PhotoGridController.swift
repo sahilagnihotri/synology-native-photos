@@ -27,7 +27,7 @@ final class KeyHandlingCollectionView: NSCollectionView {
 /// `ThumbnailCache`; the controller's job is identity and layout, not image
 /// loading.
 @MainActor
-final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, NSCollectionViewDelegate {
+final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout {
     private let dataSource: WindowedDataSource
     private let cache: ThumbnailCache
     /// Used only to fulfill a drag-to-Finder export promise (downloading
@@ -41,11 +41,15 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// on why retention is needed at all), cleared once the drag session
     /// ends.
     private var pendingExportDelegates: [PhotoExportPromiseDelegate] = []
-    private var diffable: NSCollectionViewDiffableDataSource<Int, AssetItemID>?
+    private var diffable: NSCollectionViewDiffableDataSource<GridSectionID, AssetItemID>?
     /// Small, fixed inter-item gap, matching Photos' tight justified grid.
     /// Item size itself is variable (driven by `applyZoom`); the gap stays
     /// constant across zoom levels.
     private static let interItemGap: CGFloat = 4
+    /// Height of a date-section header. Applied only to `.day` sections (the
+    /// space-backed library grid); the flat fallback (discovery/search) gets a
+    /// zero-height header so those grids look exactly as they did before.
+    private static let headerHeight: CGFloat = 34
 
     /// Set when `applySnapshot()` is called before `viewDidLoad()` has set up
     /// `diffable` (e.g. the SwiftUI `.task` in `LibraryView` calls it right
@@ -109,22 +113,58 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// to close). Lets the caller know the grid consumed the key.
     var onClearSelection: (() -> Void)?
 
-    /// A single fixed section. The grid does not (yet) group by day/month.
-    ///
-    /// TODO(date sections): rows are already sorted taken_at DESC by the
-    /// core (see core/persistence/src/assets.rs), so grouping the currently
-    /// loaded window into day buckets is cheap on its own. The blocker is
-    /// the windowed/sparse loading model this grid relies on: an unloaded
-    /// row is a placeholder identifier with no taken_at yet, so its section
-    /// membership is unknown until its page loads, which would mean moving
-    /// a row from an "unresolved" pseudo-section into a real date section
-    /// once it loads, on top of the existing placeholder-to-real identity
-    /// swap applySnapshot() already does. That is a second axis of churn on
-    /// a 20k-100k item diffable snapshot, on the same code path the flicker
-    /// fix just stabilized, so it did not ship in this pass. Logged here
-    /// (also tracked in TODO.md) rather than faked with headers that would
-    /// be wrong until every page finishes loading.
-    private static let section = 0
+    /// Maps an item's `IndexPath` (its section plus its position within that
+    /// section) to the flat absolute index the data source pages by. For the
+    /// date-sectioned library grid this walks the histogram prefix sums
+    /// (`dataSource.dateSections`); for the flat fallback (discovery/search,
+    /// or a space whose histogram has not loaded) the section is 0 and the
+    /// absolute index is just the item. A coordinate outside the known
+    /// sections falls back to `indexPath.item`, which cannot make an
+    /// out-of-range read worse than the flat case already could.
+    private func absoluteIndex(for indexPath: IndexPath) -> Int {
+        if let sections = dataSource.dateSections,
+           let absolute = sections.absoluteIndex(section: indexPath.section, item: indexPath.item) {
+            return absolute
+        }
+        return indexPath.item
+    }
+
+    /// The inverse of `absoluteIndex(for:)`: the `IndexPath` for a flat
+    /// absolute index under the current section geometry (or section 0 when
+    /// flat). Used to push a keyboard/selection change made in absolute-index
+    /// space back into the collection view's own `(section, item)` coordinates
+    /// for scrolling and highlighting.
+    private func indexPath(forAbsolute absolute: Int) -> IndexPath {
+        if let sections = dataSource.dateSections,
+           let pos = sections.position(forAbsolute: absolute) {
+            return IndexPath(item: pos.item, section: pos.section)
+        }
+        return IndexPath(item: absolute, section: 0)
+    }
+
+    /// The identifier for the item at a flat absolute index: the real
+    /// `(space, serverId)` pair when its row is already resident, or a stable
+    /// negative placeholder derived from the absolute index when it is not.
+    /// Reads through `residentItem(at:)`, which NEVER schedules a page load,
+    /// so building the whole snapshot's identity list (one per row, across
+    /// every section) touches no paging at all -- cells load lazily through
+    /// the item provider and `prefetchItemsAt` as they scroll into view. The
+    /// placeholder id is derived from the ABSOLUTE index (not a per-section
+    /// one) so it stays globally unique across sections, the same property the
+    /// single-section grid relied on.
+    private func identifier(forAbsolute absolute: Int) -> AssetItemID {
+        if let asset = dataSource.residentItem(at: absolute) {
+            return AssetItemID(space: asset.space, serverId: asset.id)
+        }
+        return AssetItemID(space: dataSource.space, serverId: -Int64(absolute) - 1)
+    }
+
+    /// The formatted date title for a section, read from the current section
+    /// geometry. Empty for the flat fallback (which shows no header at all).
+    private func headerTitle(forSection section: Int) -> String {
+        guard let sections = dataSource.dateSections, section < sections.sections.count else { return "" }
+        return DateSectionFormatter.headerTitle(dayStart: sections.sections[section].dayStart)
+    }
 
     init(dataSource: WindowedDataSource, cache: ThumbnailCache, client: PhotosCoreClient) {
         self.dataSource = dataSource
@@ -143,12 +183,21 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         layout.itemSize = NSSize(width: GridZoomModel.defaultItemSize, height: GridZoomModel.defaultItemSize)
         layout.minimumInteritemSpacing = Self.interItemGap
         layout.minimumLineSpacing = Self.interItemGap
+        // Day headers stay pinned to the top of the viewport as their section
+        // scrolls, matching Photos' sticky date headers. Header size is
+        // per-section (see referenceSizeForHeaderInSection), so this is inert
+        // for the flat discovery/search grids, whose header height is zero.
+        layout.sectionHeadersPinToVisibleBounds = true
         collectionView.collectionViewLayout = layout
         collectionView.isSelectable = true
         collectionView.allowsMultipleSelection = true
         collectionView.prefetchDataSource = self
         collectionView.delegate = self
         collectionView.register(PhotoCellView.self, forItemWithIdentifier: PhotoCellView.reuseIdentifier)
+        collectionView.register(
+            DateSectionHeaderView.self,
+            forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader,
+            withIdentifier: DateSectionHeaderView.reuseIdentifier)
         collectionView.setAccessibilityIdentifier("grid.collection")
         // Drag-to-Finder export (read-only): registering the file-promise
         // pasteboard type is what lets AppKit treat a drag started from
@@ -276,7 +325,7 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
             }
             syncSelectionHighlight()
             if target < snapshotItemCount() {
-                collectionView.scrollToItems(at: [IndexPath(item: target, section: Self.section)], scrollPosition: .nearestHorizontalEdge)
+                collectionView.scrollToItems(at: [indexPath(forAbsolute: target)], scrollPosition: .nearestHorizontalEdge)
             }
             // Arrow keys (plain or Shift-extended) MOVE/EXTEND the selection
             // only; they never open the detail viewer (Apple Photos: arrows
@@ -329,7 +378,7 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     @objc private func handleDoubleClick(_ gesture: NSClickGestureRecognizer) {
         let point = gesture.location(in: collectionView)
         guard let indexPath = collectionView.indexPathForItem(at: point) else { return }
-        let index = indexPath.item
+        let index = absoluteIndex(for: indexPath)
         guard index < snapshotItemCount() else { return }
         selection.click(index)
         syncSelectionHighlight()
@@ -390,15 +439,33 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        diffable = NSCollectionViewDiffableDataSource<Int, AssetItemID>(
+        diffable = NSCollectionViewDiffableDataSource<GridSectionID, AssetItemID>(
             collectionView: collectionView
         ) { [weak self] collectionView, indexPath, itemID in
             let item = collectionView.makeItem(withIdentifier: PhotoCellView.reuseIdentifier, for: indexPath)
             guard let cell = item as? PhotoCellView, let self else { return item }
-            if let asset = self.dataSource.item(at: indexPath.item) {
+            // Map the (section, item) coordinate to the flat absolute index
+            // before reading the data source. `item(at:)` here (unlike the
+            // snapshot builder's `residentItem(at:)`) intentionally schedules
+            // the covering page's load: the item provider only runs for cells
+            // the collection view actually realizes, so this is exactly the
+            // lazy "this cell is coming into view, load its page" signal.
+            let absolute = self.absoluteIndex(for: indexPath)
+            if let asset = self.dataSource.item(at: absolute) {
                 cell.configure(asset: asset, space: itemID.space, cache: self.cache)
             }
             return cell
+        }
+        // Section headers: the date title for a `.day` section, nothing for
+        // the flat fallback (whose header height is zero, so this is never
+        // asked for it). Kept on the same diffable data source so header and
+        // cell lifetimes stay in sync across snapshot applies.
+        diffable?.supplementaryViewProvider = { [weak self] collectionView, kind, indexPath in
+            let header = collectionView.makeSupplementaryView(
+                ofKind: kind, withIdentifier: DateSectionHeaderView.reuseIdentifier, for: indexPath)
+                as? DateSectionHeaderView
+            header?.configure(title: self?.headerTitle(forSection: indexPath.section) ?? "")
+            return header
         }
         // A caller may have asked for a snapshot before this view ever
         // loaded (see `pendingSnapshotNeeded`). `diffable` now exists, so
@@ -411,8 +478,11 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         }
     }
 
-    /// Rebuilds the snapshot from `dataSource.totalCount` rows, one item
-    /// identifier per index the space is expected to have.
+    /// Rebuilds the snapshot with one item identifier per row the current
+    /// source is expected to have. For the space-backed library grid the rows
+    /// are split into one section per histogram day (`dataSource.dateSections`,
+    /// see the sectioning logic below); every other grid stays a single flat
+    /// section.
     ///
     /// This intentionally still renders whatever rows exist while
     /// `dataSource.isReady` is false: the initial crawl can take a long time
@@ -454,10 +524,9 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// method unconditionally. Re-applying an identical snapshot makes the
     /// diffable data source re-run its item provider for the visible cells,
     /// which reconfigures them for no reason, so the fix computes the
-    /// proposed identifier list first and skips `diffable.apply(...)`
-    /// entirely when it exactly matches what is already applied
-    /// (`Self.identifiersChanged`, a pure comparison kept separate from
-    /// AppKit so it is directly testable). `snapshotIsComplete` is still
+    /// proposed sections and their item-id lists first and skips
+    /// `diffable.apply(...)` entirely when they exactly match what is already
+    /// applied. `snapshotIsComplete` is still
     /// updated on every call regardless of that guard: the crawl barrier
     /// can flip between two calls that happen to propose the same row
     /// identifiers, and callers must see that transition without needing a
@@ -483,30 +552,69 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         // then never refreshed after the barrier flips would otherwise keep
         // reporting stale readiness forever.
         snapshotIsComplete = dataSource.isReady
-        var snapshot = NSDiffableDataSourceSnapshot<Int, AssetItemID>()
-        snapshot.appendSections([Self.section])
-        var identifiers: [AssetItemID] = []
-        identifiers.reserveCapacity(dataSource.totalCount)
-        for index in 0..<dataSource.totalCount {
-            if let asset = dataSource.item(at: index) {
-                identifiers.append(AssetItemID(space: asset.space, serverId: asset.id))
-            } else {
-                identifiers.append(AssetItemID(space: dataSource.space, serverId: -Int64(index) - 1))
+
+        // Compute the proposed section identifiers and, per section, its item
+        // identity list. For the space-backed library grid the section
+        // structure comes from the histogram (`dataSource.dateSections`): one
+        // `.day` section per bucket, whose absolute-index range is filled with
+        // resident asset ids or index-derived placeholders. Every other grid,
+        // and a space whose histogram has not loaded yet, stays a single
+        // `.flat` section, exactly the original unsectioned layout.
+        //
+        // Identity is read through `identifier(forAbsolute:)`, which uses the
+        // non-scheduling `residentItem(at:)`: building the whole structure for
+        // a 100k library allocates one id per row but triggers no page loads,
+        // so sections stay lazy. Rows load on demand through the item provider
+        // and `prefetchItemsAt` as they scroll into view.
+        var proposedSections: [GridSectionID] = []
+        var proposedItems: [[AssetItemID]] = []
+        if let sections = dataSource.dateSections, sections.totalCount > 0 {
+            proposedSections.reserveCapacity(sections.sections.count)
+            proposedItems.reserveCapacity(sections.sections.count)
+            for section in sections.sections {
+                proposedSections.append(.day(section.dayStart))
+                var ids: [AssetItemID] = []
+                ids.reserveCapacity(section.count)
+                for offset in 0..<section.count {
+                    ids.append(identifier(forAbsolute: section.base + offset))
+                }
+                proposedItems.append(ids)
             }
+        } else {
+            proposedSections.append(.flat)
+            var ids: [AssetItemID] = []
+            ids.reserveCapacity(dataSource.totalCount)
+            for index in 0..<dataSource.totalCount {
+                ids.append(identifier(forAbsolute: index))
+            }
+            proposedItems.append(ids)
         }
-        // `itemIdentifiers(inSection:)` traps if the section is not present
-        // in the snapshot yet, which is exactly the state of a brand new
-        // `diffable` before the very first `apply(...)` call, so that case
-        // must short-circuit straight to applying rather than querying a
-        // section that does not exist.
-        let existingSnapshot = diffable.snapshot()
-        let currentIdentifiers = existingSnapshot.sectionIdentifiers.contains(Self.section)
-            ? existingSnapshot.itemIdentifiers(inSection: Self.section)
-            : []
-        guard Self.identifiersChanged(current: currentIdentifiers, proposed: identifiers) else {
-            return
+
+        // No-op guard (the original flicker fix, now section-aware): skip the
+        // apply entirely when the section identifiers AND every section's item
+        // list are byte-for-byte what is already applied. `NSCollectionView`
+        // fires `prefetchItemsAt` even while fully idle, and re-applying an
+        // identical snapshot would needlessly reconfigure the visible cells.
+        // `itemIdentifiers(inSection:)` traps on an absent section, so it is
+        // only ever queried after confirming the section lists match.
+        let existing = diffable.snapshot()
+        if existing.sectionIdentifiers == proposedSections {
+            var changed = false
+            for (i, sectionID) in proposedSections.enumerated()
+            where existing.itemIdentifiers(inSection: sectionID) != proposedItems[i] {
+                changed = true
+                break
+            }
+            if !changed { return }
         }
-        snapshot.appendItems(identifiers, toSection: Self.section)
+
+        // `animatingDifferences: false` is deliberate: an animated diff over a
+        // 100k-item collection is expensive and pointless here.
+        var snapshot = NSDiffableDataSourceSnapshot<GridSectionID, AssetItemID>()
+        snapshot.appendSections(proposedSections)
+        for (i, sectionID) in proposedSections.enumerated() {
+            snapshot.appendItems(proposedItems[i], toSection: sectionID)
+        }
         diffable.apply(snapshot, animatingDifferences: false)
     }
 
@@ -546,7 +654,10 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// asks for, avoiding even the pointless `Task` hop and identifier
     /// rebuild on the common idle tick where the page was already resident.
     func collectionView(_ collectionView: NSCollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-        guard let minIndex = indexPaths.map(\.item).min() else { return }
+        // Index paths arrive in per-section coordinates; page against the
+        // lowest ABSOLUTE index they cover so the covering window is loaded
+        // regardless of which day sections the upcoming cells fall in.
+        guard let minIndex = indexPaths.map({ absoluteIndex(for: $0) }).min() else { return }
         let offset = (minIndex / dataSource.pageSize) * dataSource.pageSize
         Task {
             let rows = await dataSource.loadWindow(offset: offset, limit: dataSource.pageSize)
@@ -561,7 +672,7 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// `unit_id`/`cache_key` to download from yet, so it must not start a
     /// drag that would only ever fail to fulfill.
     func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexPaths: Set<IndexPath>) -> Bool {
-        indexPaths.contains { dataSource.item(at: $0.item) != nil }
+        indexPaths.contains { dataSource.item(at: absoluteIndex(for: $0)) != nil }
     }
 
     /// `NSCollectionViewDelegate`: the drag-to-Finder export itself. Builds
@@ -578,7 +689,7 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// for the promise to be fulfilled, which can be well after this
     /// method returns.
     func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
-        guard let asset = dataSource.item(at: indexPath.item) else { return nil }
+        guard let asset = dataSource.item(at: absoluteIndex(for: indexPath)) else { return nil }
         let delegate = PhotoExportPromiseDelegate(asset: asset, space: dataSource.space, client: client)
         pendingExportDelegates.append(delegate)
         let provider = NSFilePromiseProvider(fileType: PhotoDragExport.fileType(for: asset), delegate: delegate)
@@ -604,7 +715,7 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// `onSelectionChanged`, none of them opens detail.
     func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
         guard let indexPath = indexPaths.first else { return }
-        let index = indexPath.item
+        let index = absoluteIndex(for: indexPath)
         let flags = NSApp.currentEvent?.modifierFlags ?? []
         if flags.contains(.shift) {
             selection.shiftClick(index)
@@ -623,8 +734,9 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// once nothing at all remains selected (e.g. the user dismisses the
     /// sheet, which deselects the underlying cell).
     func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
-        for indexPath in indexPaths where selection.isSelected(indexPath.item) {
-            selection.toggle(indexPath.item)
+        for indexPath in indexPaths {
+            let index = absoluteIndex(for: indexPath)
+            if selection.isSelected(index) { selection.toggle(index) }
         }
         if collectionView.selectionIndexPaths.isEmpty {
             onSelectionChanged?(nil)
@@ -644,7 +756,21 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// path it has no item for is an assertion crash, not a graceful no-op.
     func syncSelectionHighlight() {
         let itemCount = snapshotItemCount()
-        let indexPaths = Set(selection.selected.filter { $0 < itemCount }.map { IndexPath(item: $0, section: Self.section) })
+        let indexPaths = Set(selection.selected.filter { $0 < itemCount }.map { indexPath(forAbsolute: $0) })
         collectionView.selectionIndexPaths = indexPaths
+    }
+
+    /// `NSCollectionViewDelegateFlowLayout`: only the date-sectioned library
+    /// grid shows day headers. A `.zero` header for the flat fallback
+    /// (discovery/search, or a space before its histogram loads) keeps those
+    /// grids pixel-identical to the pre-sectioning layout, and lets the same
+    /// pinned-header layout be inert there.
+    func collectionView(
+        _ collectionView: NSCollectionView,
+        layout collectionViewLayout: NSCollectionViewLayout,
+        referenceSizeForHeaderInSection section: Int
+    ) -> NSSize {
+        guard dataSource.dateSections != nil else { return .zero }
+        return NSSize(width: collectionView.bounds.width, height: Self.headerHeight)
     }
 }

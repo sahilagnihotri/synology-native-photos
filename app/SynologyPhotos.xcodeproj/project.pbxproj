@@ -45,6 +45,7 @@
 		61CC623CDC49327F80B4350D /* WindowedDataSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E196A12DA01B778895850A5D /* WindowedDataSourceTests.swift */; };
 		6658C7192B890A51A6210904 /* SidebarSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F449EF8CA22C5A332666ABD3 /* SidebarSelection.swift */; };
 		66D97B44589E1C9E91BC69FD /* DiscoveryTilesModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0B6D9E309B5E02566F5E0FE /* DiscoveryTilesModel.swift */; };
+		714748615172F164BE20D4CC /* GridDateSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F97F4945A3A1716BCDBF15 /* GridDateSections.swift */; };
 		7181F256F5EEB4EB7E34FF80 /* DetailZoomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A916BF5C0864E0825725A4A /* DetailZoomModel.swift */; };
 		721BE53CAA3551576B98CD33 /* PhotoGridController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B1A20932069EDAAD2273F9 /* PhotoGridController.swift */; };
 		7435135F98987C66EF634068 /* SidebarItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51E9C5B96AF099209E7654A2 /* SidebarItemTests.swift */; };
@@ -61,6 +62,7 @@
 		922C8EB11F7D863637BEC46E /* AssetInfoFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8F23F7D2E1C87BC4C8C287 /* AssetInfoFormatter.swift */; };
 		94260F0FC0643CE368E6F2FD /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5FC30BA732D8B3CBC757EE /* RootView.swift */; };
 		95D528A305471E65390D3F57 /* ImportProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24E700BE934BC17C20A127A /* ImportProgressView.swift */; };
+		97A47CF001D87D84F8F7C2AE /* DateSectionFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6584BDCF8C663451725DB36C /* DateSectionFormatterTests.swift */; };
 		9B7E62A39CDAD710563060AD /* DiscoveryTileGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF50C704ABAE92E624DAE426 /* DiscoveryTileGridView.swift */; };
 		9DAB76C72D6F90182C84CDF1 /* GitVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C5E5DC0623F2A3A12A54D91 /* GitVersion.swift */; };
 		9EC064131BB27458E2DFD5FE /* RootRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1B1528D3D458F8C696F52A /* RootRouterTests.swift */; };
@@ -73,6 +75,7 @@
 		A761D411E8F16EF7E0139F37 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8FB877BDAFA0CCD4FB422FB8 /* Assets.xcassets */; };
 		A7A72C7D31845839A0601251 /* PhotoCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FE6EEC887786D958567A7A5 /* PhotoCellView.swift */; };
 		AA6D030A3FB6D6E1686E94AD /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A3AD8613F314C51F3D8B05 /* ThumbnailCache.swift */; };
+		AEFC5CDDB5DA08D705AA310E /* DateSectionHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17A82A3CFA2887C73CB1D530 /* DateSectionHeaderView.swift */; };
 		AF9D611DD72060B0A806A94C /* RecentlyDeletedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A186D12EB472CF95DA656C88 /* RecentlyDeletedView.swift */; };
 		AFD9BAEB7A9F3570D0DD396E /* DiscoveryTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8EC346BF2A19118203B197A /* DiscoveryTile.swift */; };
 		B134008E092B23F8AAF88C33 /* PhotosCoreLinkSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 963BFD800ADD8A86EE152301 /* PhotosCoreLinkSmokeUITests.swift */; };
@@ -86,6 +89,7 @@
 		C72304EA5C01DEDC6BF2188D /* DeleteControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA036309E0A1E4B0B947CD4C /* DeleteControllerTests.swift */; };
 		CC6D77248580CE50A4C86747 /* SpaceToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D47EE427A3E9626140AF79FE /* SpaceToggle.swift */; };
 		CCADB18E2CA7EEE7B9375C23 /* TempCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61C8C541A89432E18AE11C26 /* TempCacheTests.swift */; };
+		D05DC7233D5407CBDFBEF995 /* PhotoGridSectioningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CF3E95C19E38AF8CB9E5E94 /* PhotoGridSectioningTests.swift */; };
 		D28B4EA5BCBE0BD4E371B0AE /* PhotosCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53B72A98A95BA7BB8F096A38 /* PhotosCore.framework */; };
 		D6FB7A30E06BBD83C545E601 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0B0A4D1B27EC5396E257724 /* SidebarView.swift */; };
 		E8936FC2A8E25821FDA0ED64 /* ImageDownsample.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B5A556BC6D75D787EC6353 /* ImageDownsample.swift */; };
@@ -95,6 +99,7 @@
 		EE3AE0B10B309928F5FD360F /* DetailVideoPlayerViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271B14DD1E9AA0D7D465F877 /* DetailVideoPlayerViewTests.swift */; };
 		F06F24C5903CADBB0E2CF0E0 /* AssetInfoFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B73ADCAA1B227B90E3B1AA /* AssetInfoFormatterTests.swift */; };
 		F3DF81EDC7A33D114986BE0D /* CoreBridgeSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */; };
+		F5A96C3F7F659B66F7DE3911 /* GridDateSectionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ED7BE589F9EAC160E9D5CF2 /* GridDateSectionsTests.swift */; };
 		F6E0B0C7401716BE5DF838C4 /* WindowedDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8A7EB2843B1889B47AA6DA /* WindowedDataSource.swift */; };
 		F96DBEA44C5C1026B35AA13B /* SpaceToggleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 943F182991480AA732E73857 /* SpaceToggleTests.swift */; };
 /* End PBXBuildFile section */
@@ -156,10 +161,12 @@
 		08D6B4D9A2B9E36DA1A58399 /* SignOutController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignOutController.swift; sourceTree = "<group>"; };
 		096746CDFF6A253E76BAF96F /* FakePhotosCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakePhotosCoreTests.swift; sourceTree = "<group>"; };
 		148A77DD8DD39D08CECC497B /* SynologyPhotosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SynologyPhotosUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		17A82A3CFA2887C73CB1D530 /* DateSectionHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateSectionHeaderView.swift; sourceTree = "<group>"; };
 		19BBC4E1F7A1058D8DB5711F /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		1D65797EEE04B6F9658674A2 /* SynologyPhotosApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynologyPhotosApp.swift; sourceTree = "<group>"; };
 		1EF3205B25839B5C3B86CE9E /* AuthStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStateMachineTests.swift; sourceTree = "<group>"; };
 		21B73ADCAA1B227B90E3B1AA /* AssetInfoFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetInfoFormatterTests.swift; sourceTree = "<group>"; };
+		22F97F4945A3A1716BCDBF15 /* GridDateSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridDateSections.swift; sourceTree = "<group>"; };
 		26622FE9B92A0DFCF2A7EDBE /* PhotosCoreClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosCoreClientTests.swift; sourceTree = "<group>"; };
 		271B14DD1E9AA0D7D465F877 /* DetailVideoPlayerViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailVideoPlayerViewTests.swift; sourceTree = "<group>"; };
 		271D63AA455C96290DFEF262 /* FakePhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakePhotosCore.swift; sourceTree = "<group>"; };
@@ -185,6 +192,7 @@
 		59F1BB6F6BF79ADE6403C562 /* DetailPagingModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailPagingModelTests.swift; sourceTree = "<group>"; };
 		5C5E25DCDDB5F134220A9E7F /* GridZoomModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridZoomModelTests.swift; sourceTree = "<group>"; };
 		61C8C541A89432E18AE11C26 /* TempCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TempCacheTests.swift; sourceTree = "<group>"; };
+		6584BDCF8C663451725DB36C /* DateSectionFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateSectionFormatterTests.swift; sourceTree = "<group>"; };
 		66AAF71547574AB2C70C51D8 /* CrawlProgressModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrawlProgressModelTests.swift; sourceTree = "<group>"; };
 		69F68D25C32F775956648EF0 /* DiscoveryCoverCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryCoverCache.swift; sourceTree = "<group>"; };
 		7054BFA3764B1896AF8A6B21 /* DetailVideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailVideoPlayerView.swift; sourceTree = "<group>"; };
@@ -196,6 +204,7 @@
 		857A71F880766524090BB89F /* models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = models.swift; path = ../../bindings/models.swift; sourceTree = "<group>"; };
 		8667BF98AE3EE89E3D3D1E2A /* LoginViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModelTests.swift; sourceTree = "<group>"; };
 		89AD5885314385A5C5FAA5A8 /* PhotosCoreClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosCoreClient.swift; sourceTree = "<group>"; };
+		8CF3E95C19E38AF8CB9E5E94 /* PhotoGridSectioningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridSectioningTests.swift; sourceTree = "<group>"; };
 		8FB877BDAFA0CCD4FB422FB8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8FE6EEC887786D958567A7A5 /* PhotoCellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCellView.swift; sourceTree = "<group>"; };
 		935811E0F479F10FB1C713F0 /* KeychainSID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSID.swift; sourceTree = "<group>"; };
@@ -204,6 +213,7 @@
 		99DAD0641E501BF3262C208F /* GridZoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridZoomModel.swift; sourceTree = "<group>"; };
 		9A916BF5C0864E0825725A4A /* DetailZoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailZoomModel.swift; sourceTree = "<group>"; };
 		9B32E43E3703CB875694B637 /* AboutInfoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutInfoTests.swift; sourceTree = "<group>"; };
+		9ED7BE589F9EAC160E9D5CF2 /* GridDateSectionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridDateSectionsTests.swift; sourceTree = "<group>"; };
 		A186D12EB472CF95DA656C88 /* RecentlyDeletedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentlyDeletedView.swift; sourceTree = "<group>"; };
 		A24005987A18E578A801F215 /* PhotoGridControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridControllerTests.swift; sourceTree = "<group>"; };
 		A835170953E9904490F46983 /* RecentlyDeletedModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentlyDeletedModel.swift; sourceTree = "<group>"; };
@@ -282,6 +292,7 @@
 				1EF3205B25839B5C3B86CE9E /* AuthStateMachineTests.swift */,
 				7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */,
 				66AAF71547574AB2C70C51D8 /* CrawlProgressModelTests.swift */,
+				6584BDCF8C663451725DB36C /* DateSectionFormatterTests.swift */,
 				FA036309E0A1E4B0B947CD4C /* DeleteControllerTests.swift */,
 				E0B9EC3A0740CA414B5E1CE0 /* DetailKeyActionTests.swift */,
 				59F1BB6F6BF79ADE6403C562 /* DetailPagingModelTests.swift */,
@@ -291,6 +302,7 @@
 				4C2AE4FDB73A0F3C890F411E /* DiscoveryTileTests.swift */,
 				271D63AA455C96290DFEF262 /* FakePhotosCore.swift */,
 				096746CDFF6A253E76BAF96F /* FakePhotosCoreTests.swift */,
+				9ED7BE589F9EAC160E9D5CF2 /* GridDateSectionsTests.swift */,
 				FBC08BF9E087DFEE34A34C92 /* GridKeyActionTests.swift */,
 				5C5E25DCDDB5F134220A9E7F /* GridZoomModelTests.swift */,
 				5261051EEA590BD7268673F8 /* ImageDownsampleTests.swift */,
@@ -299,6 +311,7 @@
 				4FE5C177E3FA3BAFB7092CF5 /* PathMonitorTests.swift */,
 				CD16534B767D75BABB81D242 /* PhotoDragExportTests.swift */,
 				A24005987A18E578A801F215 /* PhotoGridControllerTests.swift */,
+				8CF3E95C19E38AF8CB9E5E94 /* PhotoGridSectioningTests.swift */,
 				26622FE9B92A0DFCF2A7EDBE /* PhotosCoreClientTests.swift */,
 				E8E0A72BB4ED0B2A01AEB8A1 /* PhotoSelectionModelTests.swift */,
 				54EAFFFD6B7908F1F0C558AF /* RecentlyDeletedModelTests.swift */,
@@ -348,8 +361,10 @@
 		2224556009F95DC904618E01 /* Grid */ = {
 			isa = PBXGroup;
 			children = (
+				17A82A3CFA2887C73CB1D530 /* DateSectionHeaderView.swift */,
 				2C144C63E25191E61F49FD9B /* DeleteController.swift */,
 				D2AA11CEC5270A0AB58CE575 /* EmptyLibraryView.swift */,
+				22F97F4945A3A1716BCDBF15 /* GridDateSections.swift */,
 				810D3F9B5AB534061DBC3FE1 /* GridKeyAction.swift */,
 				3E449A40273884351B64A8B8 /* GridNavigation.swift */,
 				99DAD0641E501BF3262C208F /* GridZoomModel.swift */,
@@ -721,6 +736,7 @@
 				8656CA2D10EC4D2F489CE3E3 /* CertApprovalViewModel.swift in Sources */,
 				37C315EB053CA2E9B258A359 /* CoreError+Swift.swift in Sources */,
 				5A412877FD01F2FC4261DAE0 /* CrawlProgressModel.swift in Sources */,
+				AEFC5CDDB5DA08D705AA310E /* DateSectionHeaderView.swift in Sources */,
 				912C7859315AA128647C5865 /* DeleteController.swift in Sources */,
 				A38AA53D0527EC725635CF7E /* DetailKeyAction.swift in Sources */,
 				22F37A1CC8E27E165F8C2B8C /* DetailPagingModel.swift in Sources */,
@@ -733,6 +749,7 @@
 				66D97B44589E1C9E91BC69FD /* DiscoveryTilesModel.swift in Sources */,
 				EA884F70294FA80457254F90 /* EmptyLibraryView.swift in Sources */,
 				9DAB76C72D6F90182C84CDF1 /* GitVersion.swift in Sources */,
+				714748615172F164BE20D4CC /* GridDateSections.swift in Sources */,
 				7D86191A02CEF2321018FFFD /* GridKeyAction.swift in Sources */,
 				5B707E4A5BF50FD0E9CBBA61 /* GridNavigation.swift in Sources */,
 				C3BC073AC8C193F9DA1A7DA5 /* GridZoomModel.swift in Sources */,
@@ -775,6 +792,7 @@
 				BCB21063765E6F5A0842D854 /* AuthStateMachineTests.swift in Sources */,
 				F3DF81EDC7A33D114986BE0D /* CoreBridgeSmokeTests.swift in Sources */,
 				A263DC9AA52F72AAD703B803 /* CrawlProgressModelTests.swift in Sources */,
+				97A47CF001D87D84F8F7C2AE /* DateSectionFormatterTests.swift in Sources */,
 				C72304EA5C01DEDC6BF2188D /* DeleteControllerTests.swift in Sources */,
 				32EB71DB136A38F404D21F6E /* DetailKeyActionTests.swift in Sources */,
 				45E5DCBBDF63BFFA1A2F186F /* DetailPagingModelTests.swift in Sources */,
@@ -784,6 +802,7 @@
 				B4C757FA589B8EF1BAA728BA /* DiscoveryTilesModelTests.swift in Sources */,
 				24D0A816AC4835369675B6A2 /* FakePhotosCore.swift in Sources */,
 				7A1544430BEC8AB2DB36D464 /* FakePhotosCoreTests.swift in Sources */,
+				F5A96C3F7F659B66F7DE3911 /* GridDateSectionsTests.swift in Sources */,
 				34BAA55F3126C5D0B2B7289C /* GridKeyActionTests.swift in Sources */,
 				49342E84F94410F6FF29C43D /* GridZoomModelTests.swift in Sources */,
 				4A102FE0D8B5ED56831E327C /* ImageDownsampleTests.swift in Sources */,
@@ -792,6 +811,7 @@
 				18CECECE9EEAB167F3D61DBF /* PathMonitorTests.swift in Sources */,
 				18A20A3A03F424DFAA8EECAE /* PhotoDragExportTests.swift in Sources */,
 				55C7B0D64234966CC0AD8971 /* PhotoGridControllerTests.swift in Sources */,
+				D05DC7233D5407CBDFBEF995 /* PhotoGridSectioningTests.swift in Sources */,
 				0825F1C50486990199C76C50 /* PhotoSelectionModelTests.swift in Sources */,
 				2BBAB8C2D95BF845B1E8691F /* PhotosCoreClientTests.swift in Sources */,
 				1B9C503B1691E76C75F5AE70 /* RecentlyDeletedModelTests.swift in Sources */,

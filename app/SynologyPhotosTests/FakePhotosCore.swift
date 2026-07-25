@@ -311,6 +311,31 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         UInt64((assets[space] ?? []).count)
     }
 
+    /// Buckets `assets[space]` by UTC calendar day, newest day first, with a
+    /// trailing `dayStart = 0` bucket for undated rows, mirroring the real
+    /// core's `date_histogram` so the grid's sectioning behaves the same
+    /// against the fake. Counts sum to `assetCount` (the fake models trash in
+    /// a separate `trash` map, so nothing here is double-counted).
+    func dateHistogram(space: Space) throws -> [DayCount] {
+        var counts: [Int64: UInt32] = [:]
+        var nullCount: UInt32 = 0
+        for asset in assets[space] ?? [] {
+            if let takenAt = asset.takenAt {
+                let dayStart = (takenAt / 86_400) * 86_400
+                counts[dayStart, default: 0] += 1
+            } else {
+                nullCount += 1
+            }
+        }
+        var buckets = counts
+            .map { DayCount(dayStart: $0.key, count: $0.value) }
+            .sorted { $0.dayStart > $1.dayStart }
+        if nullCount > 0 {
+            buckets.append(DayCount(dayStart: 0, count: nullCount))
+        }
+        return buckets
+    }
+
     func fetchLocalAlbums(space: Space) throws -> [Album] {
         albums[space] ?? []
     }

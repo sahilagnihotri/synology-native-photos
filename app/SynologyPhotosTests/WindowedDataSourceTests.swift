@@ -117,6 +117,46 @@ struct WindowedDataSourceTests {
         #expect(ds.item(at: 349)?.id == 349)
     }
 
+    // MARK: - Date sections (space grid only)
+
+    @Test func refreshCountPopulatesDateSectionsForSpace() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.refreshCount()
+        // The whole fixture shares one taken_at day, so it is a single section
+        // whose total matches the flat count the grid pages by.
+        #expect(ds.dateSections != nil)
+        #expect(ds.dateSections?.totalCount == 10)
+        #expect(ds.dateSections?.totalCount == ds.totalCount)
+    }
+
+    @Test func setSearchClearsDateSections() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        fake.assetsForKeyword["food"] = (0..<3).map { asset(Int64($0) + 100) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.refreshCount()
+        #expect(ds.dateSections != nil)
+        // Switching to a live search drops the space's section geometry, so the
+        // grid falls back to a single flat section for search results.
+        await ds.setSearch("food")
+        #expect(ds.dateSections == nil)
+    }
+
+    @Test func setCollectionClearsDateSections() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.refreshCount()
+        #expect(ds.dateSections != nil)
+        await ds.setCollection(.favorites)
+        #expect(ds.dateSections == nil)
+    }
+
     // MARK: - Discovery collection windowing
 
     @Test func setCollectionLoadsFromFetchAssetsForNotFetchAssets() async {

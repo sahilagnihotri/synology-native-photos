@@ -62,6 +62,17 @@ final class WindowedDataSource {
     private(set) var totalCount: Int = 0
     private(set) var isReady: Bool = false
 
+    /// The date-section geometry for the current source, or `nil` when the
+    /// grid is not date-sectioned (a discovery collection or a live search,
+    /// which stay a single flat section). Only a `.space` source populates
+    /// this, from the core's per-day histogram read in `refreshCount`; it is
+    /// cleared the moment the source switches away from a space. The grid's
+    /// controller reads it to build one section per day and to map a grid
+    /// `(section, item)` coordinate to the flat absolute index this data
+    /// source pages by. Rebuilt on every `refreshCount`, so it tracks the
+    /// space's real state across a crawl, a delete, or a manual refresh.
+    private(set) var dateSections: GridDateSections?
+
     /// The space rows in the current window belong to, for `AssetItemID`
     /// purposes. For a `.space` source this is that space; for a
     /// `.collection` or `.search` source it is always `.personal`, since
@@ -104,9 +115,16 @@ final class WindowedDataSource {
                 totalCount = Int(count)
                 let progress = try await client.crawlProgress(space: space)
                 isReady = progress.complete
+                // Same DB snapshot as the count above: the histogram's counts
+                // sum to `assetCount`, so `dateSections.totalCount` matches
+                // `totalCount` and the grid's section geometry stays in step
+                // with the flat count it pages by.
+                let histogram = try await client.dateHistogram(space: space)
+                dateSections = GridDateSections(histogram: histogram)
             } catch {
                 totalCount = 0
                 isReady = false
+                dateSections = nil
             }
         case .collection, .search:
             break
@@ -206,6 +224,10 @@ final class WindowedDataSource {
         resetResident()
         totalCount = 0
         isReady = false
+        // A discovery collection is never date-sectioned (no local histogram);
+        // drop any section geometry left over from a `.space` source so the
+        // grid falls back to a single flat section.
+        dateSections = nil
     }
 
     /// Switches to windowing a live keyword `search` instead of a space's
@@ -221,6 +243,9 @@ final class WindowedDataSource {
         resetResident()
         totalCount = 0
         isReady = false
+        // Live search results are never date-sectioned; drop any section
+        // geometry from a prior `.space` source (see `setCollection`).
+        dateSections = nil
     }
 
     private func resetResident() {
