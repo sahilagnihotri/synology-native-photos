@@ -23,6 +23,9 @@ enum GridKeyAction: Equatable {
     case clearSelectionOrClose
     case selectAll
     case delete
+    /// Cmd-Z: undo the most recent delete, bringing the just-deleted photos
+    /// back from the recycle bin.
+    case undoDelete
 }
 
 enum GridKeyMapper {
@@ -61,6 +64,10 @@ enum GridKeyMapper {
         case KeyCode.escape: return .clearSelectionOrClose
         case KeyCode.delete, KeyCode.forwardDelete: return .delete
         case KeyCode.a where command: return .selectAll
+        // Cmd-Z undoes the last delete. Guarded against Shift so
+        // Cmd-Shift-Z (redo, which is not implemented) falls through rather
+        // than being misread as another undo.
+        case KeyCode.z where command && !shift: return .undoDelete
         default: return nil
         }
     }
@@ -82,6 +89,8 @@ enum KeyCode {
     static let downArrow: UInt16 = 0x7D
     static let upArrow: UInt16 = 0x7E
     static let a: UInt16 = 0x00
+    /// The "Z" key, used by the grid's Cmd-Z undo-delete.
+    static let z: UInt16 = 0x06
     /// The "I" key, used by the detail viewer's Cmd-I info panel toggle.
     static let i: UInt16 = 0x22
 }

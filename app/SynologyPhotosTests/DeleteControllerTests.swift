@@ -128,4 +128,103 @@ struct DeleteControllerTests {
         controller.selection.shiftClick(2)   // selects rows 0,1,2
         #expect(controller.selectedAssetIds() == [100, 101, 102])
     }
+
+    // MARK: - Undo the last delete (Cmd-Z)
+
+    private func recycle(_ path: String, _ name: String, _ deletedAt: Int64) -> RecycleItem {
+        RecycleItem(recyclePath: path, filename: name, deletedAt: deletedAt, fileSize: 0, mediaKind: .photo)
+    }
+
+    @Test func canUndoDeleteIsFalseUntilADeleteSucceeds() async {
+        let (controller, _) = makeController()
+        #expect(!controller.canUndoDelete)
+        controller.requestDelete(ids: [1], filenames: ["a.jpg"])
+        // Still nothing to undo while the confirm is merely up.
+        #expect(!controller.canUndoDelete)
+        await controller.confirmDelete(space: .personal) {}
+        #expect(controller.canUndoDelete)
+    }
+
+    /// The core scenario from the brief: a last delete of [a, b] with a
+    /// recycle bin holding the newest matching entries plus older same-named
+    /// ones (and an unrelated file). Undo must restore exactly the two newest
+    /// matching paths, in the delete's own filename order, and clear the
+    /// pending undo.
+    @Test func undoLastDeleteRestoresTheNewestMatchingPathsThenClearsPendingUndo() async {
+        let (controller, fake) = makeController()
+        controller.requestDelete(ids: [1, 2], filenames: ["a.jpg", "b.jpg"])
+        await controller.confirmDelete(space: .personal) {}
+        #expect(controller.canUndoDelete)
+
+        fake.recentlyDeleted = [
+            recycle("#recycle/a-new", "a.jpg", 200),
+            recycle("#recycle/b-new", "b.jpg", 190),
+            recycle("#recycle/a-old", "a.jpg", 100),
+            recycle("#recycle/b-old", "b.jpg", 90),
+            recycle("#recycle/c", "c.jpg", 210),
+        ]
+
+        var didRefresh = false
+        await controller.undoLastDelete { didRefresh = true }
+
+        #expect(fake.restoreRecentlyDeletedCallCount == 1)
+        #expect(fake.lastRestoreRecentlyDeletedPaths == ["#recycle/a-new", "#recycle/b-new"])
+        #expect(didRefresh)
+        #expect(!controller.canUndoDelete)
+    }
+
+    @Test func undoLastDeleteWithNothingToUndoIsAZeroCoreCallNoOp() async {
+        let (controller, fake) = makeController()
+        var didRefresh = false
+        await controller.undoLastDelete { didRefresh = true }
+        #expect(fake.fetchRecentlyDeletedCallCount == 0)
+        #expect(fake.restoreRecentlyDeletedCallCount == 0)
+        #expect(!didRefresh)
+    }
+
+    @Test func undoLastDeleteWithNoMatchingRecycleEntryRestoresNothingAndClearsUndo() async {
+        let (controller, fake) = makeController()
+        controller.requestDelete(ids: [1], filenames: ["a.jpg"])
+        await controller.confirmDelete(space: .personal) {}
+        fake.recentlyDeleted = [recycle("#recycle/x", "x.jpg", 1)]
+
+        var didRefresh = false
+        await controller.undoLastDelete { didRefresh = true }
+
+        #expect(fake.fetchRecentlyDeletedCallCount == 1)
+        #expect(fake.restoreRecentlyDeletedCallCount == 0)
+        #expect(!didRefresh)
+        // No point offering the same failing undo again.
+        #expect(!controller.canUndoDelete)
+    }
+
+    @Test func undoLastDeleteKeepsPendingUndoOnAThrownError() async {
+        let (controller, fake) = makeController()
+        controller.requestDelete(ids: [1], filenames: ["a.jpg"])
+        await controller.confirmDelete(space: .personal) {}
+        fake.recentlyDeleted = [recycle("#recycle/a", "a.jpg", 1)]
+        fake.restoreRecentlyDeletedResult = .failure(.Network(message: "dropped"))
+
+        await controller.undoLastDelete {}
+        #expect(controller.errorMessage != nil)
+        // The restore failed, so the undo is still available to retry.
+        #expect(controller.canUndoDelete)
+    }
+
+    /// Duplicate deleted filenames must each claim a distinct (next-newest)
+    /// recycle entry rather than the same path twice.
+    @Test func recyclePathsToRestoreMatchesDuplicateNamesToDistinctNewestEntries() {
+        let items = [
+            recycle("#recycle/a1", "a.jpg", 300),
+            recycle("#recycle/a2", "a.jpg", 200),
+            recycle("#recycle/a3", "a.jpg", 100),
+        ]
+        let paths = DeleteController.recyclePathsToRestore(forFilenames: ["a.jpg", "a.jpg"], in: items)
+        #expect(paths == ["#recycle/a1", "#recycle/a2"])
+    }
+
+    @Test func recyclePathsToRestoreReturnsEmptyWhenNothingMatches() {
+        let items = [recycle("#recycle/x", "x.jpg", 1)]
+        #expect(DeleteController.recyclePathsToRestore(forFilenames: ["a.jpg"], in: items).isEmpty)
+    }
 }

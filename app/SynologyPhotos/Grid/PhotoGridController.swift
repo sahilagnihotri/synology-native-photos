@@ -98,6 +98,12 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// selection to asset ids and runs the `DeleteController` confirm flow.
     var onDeleteRequested: ((Int) -> Void)?
 
+    /// Invoked on Cmd-Z, asking the caller to undo the most recent delete.
+    /// The controller holds no undo state itself; the caller (which owns the
+    /// `DeleteController` that remembers the last delete) decides whether
+    /// there is anything to undo and performs the restore.
+    var onUndoDelete: (() -> Void)?
+
     /// Invoked on Escape when there is nothing to clear at the grid level
     /// beyond the selection itself (detail already handles its own Escape
     /// to close). Lets the caller know the grid consumed the key.
@@ -204,6 +210,10 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
             onDeleteRequested?(selection.count)
             return true
 
+        case .undoDelete:
+            onUndoDelete?()
+            return true
+
         case .toggleQuickLook:
             guard let index = currentIndex() else { return true }
             onToggleQuickLook?(index)
@@ -299,7 +309,16 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// is deterministic (matching the grid's own row order) rather than the
     /// selection set's arbitrary iteration order.
     func selectedAssetIds() -> [Int64] {
-        selection.sortedIndices.compactMap { dataSource.residentItem(at: $0)?.id }
+        selectedAssets().map(\.id)
+    }
+
+    /// The resident `Asset`s behind the current selection, in grid row order.
+    /// Same resolution discipline as `selectedAssetIds()` (only rows already
+    /// loaded, never scheduling a fetch), used by the delete flow to capture
+    /// both the ids to delete and the filenames a later Cmd-Z undo matches
+    /// against the recycle bin.
+    func selectedAssets() -> [Asset] {
+        selection.sortedIndices.compactMap { dataSource.residentItem(at: $0) }
     }
 
     /// Double-click opens the detail viewer on the clicked cell. Maps the

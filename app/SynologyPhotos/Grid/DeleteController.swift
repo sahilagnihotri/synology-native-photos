@@ -29,6 +29,19 @@ final class DeleteController {
     /// `confirmDelete`. Never acted on until the user confirms.
     private(set) var pendingDeleteIds: [Int64] = []
     var pendingDeleteCount: Int { pendingDeleteIds.count }
+    /// The filenames captured alongside `pendingDeleteIds`, index-aligned to
+    /// them, so a confirmed delete can remember which files to look for in
+    /// the recycle bin if the user immediately hits Cmd-Z to undo. Empty when
+    /// the caller did not supply names (nothing to undo in that case).
+    private(set) var pendingDeleteFilenames: [String] = []
+
+    /// The filenames of the most recent SUCCESSFUL delete, kept so a single
+    /// Cmd-Z can restore them from the recycle bin. Overwritten by the next
+    /// successful delete and cleared once an undo runs, so only ever the
+    /// single most-recent delete is undoable (matching Apple Photos).
+    private(set) var lastDeletedFilenames: [String] = []
+    /// Whether there is a just-deleted set the next Cmd-Z can bring back.
+    var canUndoDelete: Bool { !lastDeletedFilenames.isEmpty }
 
     /// Surfaced to the user when the delete throws (e.g. auth expiry mid
     /// action). Nil while there is nothing to report.
@@ -40,9 +53,15 @@ final class DeleteController {
     /// call the core. A no-op on an empty selection so an empty confirm can
     /// never appear. Shared verbatim by the grid and the full-photo detail
     /// viewer: both resolve their target to asset ids and call this.
-    func requestDelete(ids: [Int64]) {
+    ///
+    /// `filenames` (index-aligned to `ids`) is optional so existing call
+    /// sites keep compiling; when supplied it is what a later Cmd-Z undo
+    /// matches against the recycle bin. Undo is simply unavailable when it is
+    /// omitted.
+    func requestDelete(ids: [Int64], filenames: [String] = []) {
         guard !ids.isEmpty else { return }
         pendingDeleteIds = ids
+        pendingDeleteFilenames = filenames
         isShowingDeleteConfirm = true
     }
 
@@ -50,14 +69,18 @@ final class DeleteController {
     /// (recoverable via the recycle bin), clears the confirm, then runs
     /// `onDone` (the caller's grid refresh / viewer close) only after the
     /// delete succeeds. On failure nothing is refreshed and `errorMessage`
-    /// is set.
+    /// is set. On success the captured filenames become the pending undo,
+    /// replacing any earlier one.
     func confirmDelete(space: Space, onDone: () async -> Void) async {
         let ids = pendingDeleteIds
+        let filenames = pendingDeleteFilenames
         isShowingDeleteConfirm = false
         pendingDeleteIds = []
+        pendingDeleteFilenames = []
         guard !ids.isEmpty else { return }
         do {
             try await client.deleteAssets(space: space, assetIds: ids)
+            lastDeletedFilenames = filenames
             await onDone()
         } catch {
             errorMessage = (error as? CoreError)?.userMessage ?? "Could not delete the selected items."
@@ -68,6 +91,66 @@ final class DeleteController {
     func cancelDelete() {
         isShowingDeleteConfirm = false
         pendingDeleteIds = []
+        pendingDeleteFilenames = []
+    }
+
+    // MARK: - Undo the last delete (best-effort, via the recycle bin)
+
+    /// Brings back the most recently deleted set (Cmd-Z): reads the recycle
+    /// bin, finds the newest entries matching the remembered filenames, and
+    /// restores exactly those. A safe no-op when there is nothing to undo or
+    /// nothing in the bin matches (e.g. the entries were restored or purged
+    /// elsewhere). Runs `onDone` (the caller's library refresh) only after a
+    /// restore actually happened. The pending undo is cleared on success and
+    /// on a no-match, but kept on a thrown error so the user can retry.
+    func undoLastDelete(onDone: () async -> Void) async {
+        let filenames = lastDeletedFilenames
+        guard !filenames.isEmpty else { return }
+        do {
+            // The just-deleted entries are the newest in the bin, so the
+            // first page more than covers them; a little headroom over the
+            // deleted count guards against unrelated concurrent deletes
+            // pushing them down slightly.
+            let fetchLimit = UInt32(max(filenames.count * 2, 200))
+            let recycled = try await client.fetchRecentlyDeleted(offset: 0, limit: fetchLimit)
+            let paths = Self.recyclePathsToRestore(forFilenames: filenames, in: recycled)
+            guard !paths.isEmpty else {
+                lastDeletedFilenames = []
+                return
+            }
+            try await client.restoreRecentlyDeleted(recyclePaths: paths)
+            lastDeletedFilenames = []
+            await onDone()
+        } catch {
+            errorMessage = (error as? CoreError)?.userMessage ?? "Could not undo the last delete."
+        }
+    }
+
+    /// Pure matcher (kept static so it is directly unit-testable): given the
+    /// filenames of the last delete and the current recycle-bin contents,
+    /// returns the recycle paths to restore. For each just-deleted filename
+    /// it picks the newest matching entry by `deletedAt`; when the same
+    /// filename was deleted N times, the N newest DISTINCT matching entries
+    /// are claimed rather than the same path N times. Result order follows
+    /// the delete's own filename order for determinism.
+    static func recyclePathsToRestore(forFilenames filenames: [String], in items: [RecycleItem]) -> [String] {
+        var byName: [String: [RecycleItem]] = [:]
+        for item in items {
+            byName[item.filename, default: []].append(item)
+        }
+        for name in byName.keys {
+            byName[name]?.sort { $0.deletedAt > $1.deletedAt }
+        }
+        var consumed: [String: Int] = [:]
+        var paths: [String] = []
+        for name in filenames {
+            let candidates = byName[name] ?? []
+            let index = consumed[name, default: 0]
+            guard index < candidates.count else { continue }
+            paths.append(candidates[index].recyclePath)
+            consumed[name] = index + 1
+        }
+        return paths
     }
 }
 
@@ -86,9 +169,14 @@ struct DeleteConfirmModifier: ViewModifier {
             controller.pendingDeleteCount == 1 ? "Delete Photo" : "Delete Photos",
             isPresented: $controller.isShowingDeleteConfirm
         ) {
+            // Delete is the alert's default action so pressing Return/Enter
+            // confirms the delete (the user explicitly wants Enter to
+            // confirm). The Cancel button keeps its `.cancel` role, so
+            // Escape still dismisses without deleting.
             Button("Delete", role: .destructive) {
                 Task { await controller.confirmDelete(space: space, onDone: onDone) }
             }
+            .keyboardShortcut(.defaultAction)
             .accessibilityIdentifier("delete.confirm")
             Button("Cancel", role: .cancel) { controller.cancelDelete() }
                 .accessibilityIdentifier("delete.cancel")

@@ -72,6 +72,14 @@ struct GridKeyActionTests {
         #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.a, command: false)) == nil)
     }
 
+    @Test func cmdZMapsToUndoDeleteButPlainZAndCmdShiftZDoNot() {
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.z, command: true)) == .undoDelete)
+        // Plain Z is not a grid action.
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.z)) == nil)
+        // Cmd+Shift+Z is redo (not implemented); it must not undo.
+        #expect(GridKeyMapper.action(for: event(keyCode: KeyCode.z, command: true, shift: true)) == nil)
+    }
+
     @Test func unrecognizedKeyMapsToNil() {
         #expect(GridKeyMapper.action(for: event(keyCode: 0xFF)) == nil)
     }
