@@ -175,7 +175,18 @@ struct LibraryView: View {
         NavigationSplitView {
             SidebarView(selection: $sidebarSelection)
         } detail: {
-            content
+            // The detail viewer renders INLINE in the split view's detail
+            // column (not in a `.sheet`), so it fills the pane with the
+            // sidebar still visible instead of collapsing to a small centered
+            // modal. The grid (`content`) stays mounted underneath the whole
+            // time, so returning from a photo is instant with no re-query.
+            ZStack {
+                content
+                if detailIndex != nil {
+                    detailViewer
+                        .transition(.opacity)
+                }
+            }
         }
         .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search Photos")
         .task {
@@ -231,26 +242,46 @@ struct LibraryView: View {
                 await runSearch(trimmed)
             }
         }
-        .sheet(isPresented: Binding(
-            get: { detailIndex != nil },
-            set: { isPresented in if !isPresented { detailIndex = nil } }
-        )) {
-            DetailViewerHost(
-                assetCount: env.dataSource.totalCount,
-                assetAt: { env.dataSource.item(at: $0) },
-                space: env.dataSource.space,
-                client: env.client,
-                cache: env.tempCache,
-                synoToken: currentSynoToken(),
-                currentIndex: Binding(
-                    get: { detailIndex ?? 0 },
-                    set: { detailIndex = $0 }
-                ),
-                onClose: { detailIndex = nil }
-            )
-            .frame(minWidth: 640, minHeight: 480)
+        .onChange(of: detailIndex) { _, newValue in
+            // When the viewer closes, hand keyboard focus back to the grid so
+            // arrow keys, Space, and Cmd+Down keep working without a click.
+            // The inline viewer's KeyCatcher grabbed first responder while it
+            // was up; nothing else reclaims it on the same window otherwise.
+            if newValue == nil { restoreGridFocus() }
         }
         .deleteComingSoonAlert(deleteComingSoon)
+    }
+
+    /// The inline detail viewer shown over the grid when `detailIndex` is set.
+    /// Reads assets lazily through the same windowed data source the grid
+    /// uses (never materializing the whole space) and writes paging back into
+    /// `detailIndex` so the grid selection can stay in sync.
+    @ViewBuilder
+    private var detailViewer: some View {
+        DetailViewerHost(
+            assetCount: env.dataSource.totalCount,
+            assetAt: { env.dataSource.item(at: $0) },
+            space: env.dataSource.space,
+            client: env.client,
+            cache: env.tempCache,
+            synoToken: currentSynoToken(),
+            currentIndex: Binding(
+                get: { detailIndex ?? 0 },
+                set: { detailIndex = $0 }
+            ),
+            onClose: { detailIndex = nil }
+        )
+    }
+
+    /// Returns keyboard first responder to the grid's collection view. Run on
+    /// the next main-actor turn so SwiftUI has removed the viewer's own
+    /// KeyCatcher first; otherwise the makeFirstResponder would race the
+    /// teardown and the grid could end up with no responder at all.
+    private func restoreGridFocus() {
+        Task { @MainActor in
+            let collectionView = controller.collectionView
+            collectionView.window?.makeFirstResponder(collectionView)
+        }
     }
 
     /// Wires the grid controller's keyboard/selection callbacks to this
