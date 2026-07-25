@@ -146,6 +146,16 @@ fn parse_media_kind(kind: &str, live_type: Option<&str>) -> MediaKind {
 const ITEM_ADDITIONAL: &str =
     "[\"thumbnail\",\"resolution\",\"exif\",\"description\",\"rating\",\"video_meta\"]";
 
+/// The `additional` keys requested on `SYNO.Foto.Search.Search list_item`.
+/// Deliberately leaner than `ITEM_ADDITIONAL`: `Search.Search` rejects the
+/// enriched EXIF/description/rating/video_meta keys below version 3 (it answers
+/// error 120 with `additional`/`condition`), and search shipped and was
+/// verified on version 1, so it keeps the minimal thumbnail/resolution set and
+/// stays on its verified version rather than moving just to satisfy metadata.
+/// The crawl (`list_items`) still captures the richer metadata for every item,
+/// so the library index has full info regardless of how an item was found.
+const SEARCH_ADDITIONAL: &str = "[\"thumbnail\",\"resolution\"]";
+
 #[derive(Debug, Deserialize)]
 struct ItemList {
     // Deserialized as raw JSON values, not `Vec<RawItem>` directly: see the
@@ -582,11 +592,11 @@ async fn list_items_inner(
 /// `{"data":{"list":[...]}}` envelope as `Browse.Item`, not grouped into
 /// people/places/tags sections.
 ///
-/// The shared `ITEM_ADDITIONAL` key set is honored identically to
-/// `list_items`: `cache_key`/`unit_id` under `additional.thumbnail`,
-/// `width`/`height` under `additional.resolution`, and the EXIF/description/
-/// rating/video metadata under their respective `additional` blocks. Reuses
-/// `RawItem`/`Asset` end to end -- search rows have the exact same shape as
+/// Uses the lean `SEARCH_ADDITIONAL` key set: `cache_key`/`unit_id` under
+/// `additional.thumbnail` and `width`/`height` under `additional.resolution`.
+/// The enriched EXIF/rating/video_meta keys are omitted here on purpose (see
+/// `SEARCH_ADDITIONAL`), so search stays on its verified version 1. Reuses
+/// `RawItem`/`Asset` end to end: search rows have the exact same shape as
 /// browse rows, so no new model or decoder was needed. Live Photos surface
 /// here with
 /// `type="live"` and are classified by their sibling `live_type` exactly as
@@ -647,7 +657,7 @@ pub async fn search_filtered(
         ("keyword", keyword.to_string()),
         ("offset", offset.to_string()),
         ("limit", limit.to_string()),
-        ("additional", ITEM_ADDITIONAL.to_string()),
+        ("additional", SEARCH_ADDITIONAL.to_string()),
         ("_sid", sid.to_string()),
     ];
     if let Some(start) = filters.start_time {

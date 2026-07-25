@@ -1020,9 +1020,12 @@ impl PhotosCore {
     fn page_source_for(&self, _space: Space) -> Result<ApiPageSource, CoreError> {
         let guard = self.live.lock().expect("live mutex poisoned");
         let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
-        let version = synology_api::pin_version(&live.capabilities, "SYNO.Foto.Browse.Item", 1)
-            .or_else(|_| synology_api::pin_version(&live.capabilities, "SYNO.FotoTeam.Browse.Item", 1))
-            .unwrap_or(1);
+        // Browse.Item list must be version 2 or higher: the enriched
+        // ITEM_ADDITIONAL (exif/description/rating/video_meta) is rejected with
+        // error 120 at version 1 (verified against the real NAS).
+        let version = synology_api::pin_version(&live.capabilities, "SYNO.Foto.Browse.Item", 2)
+            .or_else(|_| synology_api::pin_version(&live.capabilities, "SYNO.FotoTeam.Browse.Item", 2))
+            .unwrap_or(2);
         Ok(ApiPageSource {
             transport: Transport::new(&live.connection)?,
             sid: live.session.sid.clone(),
@@ -1048,7 +1051,12 @@ impl PhotosCore {
     fn discovery_call_context(&self, api: &str) -> Result<(Transport, String, u32, Option<String>), CoreError> {
         let guard = self.live.lock().expect("live mutex poisoned");
         let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
-        let version = synology_api::pin_version(&live.capabilities, api, 1).unwrap_or(1);
+        // Browse.Item list carries the enriched ITEM_ADDITIONAL, which needs
+        // version 2 or higher (version 1 answers error 120). The discovery
+        // collection APIs (Person/Geocoding/Concept/GeneralTag/Album) and
+        // Search.Search keep version 1, matching their shipped, verified path.
+        let desired = if api.ends_with(".Browse.Item") { 2 } else { 1 };
+        let version = synology_api::pin_version(&live.capabilities, api, desired).unwrap_or(desired);
         Ok((
             Transport::new(&live.connection)?,
             live.session.sid.clone(),
