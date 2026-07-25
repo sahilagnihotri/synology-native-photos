@@ -53,6 +53,13 @@ actor PhotosCoreClient {
     func videoPlaybackSource(space: Space, asset: Asset) async throws -> VideoPlaybackSource {
         try await core.videoPlaybackSource(space: space, asset: asset)
     }
+    /// Uploads an already-rendered edited JPEG as a NEW photo in the library (a
+    /// dedicated Edited folder) and reindexes so it appears. NON-DESTRUCTIVE:
+    /// the original asset the edit was derived from is never modified, moved,
+    /// or deleted; this only ever adds a new file.
+    func saveEditedPhoto(filename: String, jpeg: Data) async throws {
+        try await core.saveEditedPhoto(filename: filename, jpeg: jpeg)
+    }
 
     // MARK: - Delete + Recently Deleted (recycle bin)
 

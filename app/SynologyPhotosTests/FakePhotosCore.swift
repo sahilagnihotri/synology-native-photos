@@ -26,6 +26,11 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     var videoPlaybackSourceResult: Result<VideoPlaybackSource, CoreError> = .success(
         .localFile(path: "/tmp/original.mov"))
 
+    /// Result for `saveEditedPhoto` (the non-destructive edit save). Defaults
+    /// to success so a test that only checks it was called with the right
+    /// filename/bytes need not script it.
+    var saveEditedPhotoResult: Result<Void, CoreError> = .success(())
+
     /// Result for `fetchCertificate`. Defaults to a plausible TOFU-approval
     /// payload so a test that never touches this still gets something
     /// sensible if it happens to call the method.
@@ -193,6 +198,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var thumbnailCallCount = 0
     private(set) var downloadOriginalCallCount = 0
     private(set) var videoPlaybackSourceCallCount = 0
+    private(set) var saveEditedPhotoCallCount = 0
     private(set) var fetchCertificateCallCount = 0
 
     private(set) var lastOtpCode: String??
@@ -204,6 +210,8 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var lastThumbnailRequest: (space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize)?
     private(set) var lastDownloadRequest: (space: Space, unitId: Int64, cacheKey: String)?
     private(set) var lastVideoPlaybackRequest: (space: Space, asset: Asset)?
+    private(set) var lastSaveEditedPhotoFilename: String?
+    private(set) var lastSaveEditedPhotoJpeg: Data?
 
     // MARK: - Trash call tracking
 
@@ -456,6 +464,13 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         videoPlaybackSourceCallCount += 1
         lastVideoPlaybackRequest = (space, asset)
         return try videoPlaybackSourceResult.get()
+    }
+
+    func saveEditedPhoto(filename: String, jpeg: Data) async throws {
+        saveEditedPhotoCallCount += 1
+        lastSaveEditedPhotoFilename = filename
+        lastSaveEditedPhotoJpeg = jpeg
+        try saveEditedPhotoResult.get()
     }
 
     // MARK: - Trash (hybrid safe-delete)

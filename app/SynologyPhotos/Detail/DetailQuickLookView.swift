@@ -552,6 +552,10 @@ struct DetailViewerHost: View {
     /// delete from full-photo view shows the identical confirm and, on
     /// success, removes the item from the library and closes the viewer.
     let onDelete: (Asset) -> Void
+    /// Opens the non-destructive editor for the currently shown photo. Wired by
+    /// `LibraryView` to present `PhotoEditorView`; saving there uploads a NEW
+    /// photo and leaves the original untouched.
+    let onEdit: (Asset) -> Void
 
     /// Info panel visibility, toggled by the "i" button or Cmd-I. Not reset
     /// on paging: Photos keeps the info panel open across Left/Right moves.
@@ -648,6 +652,24 @@ struct DetailViewerHost: View {
             }
 
             Spacer()
+
+            // Edit is offered for still photos only; a true video has no crop/
+            // rotate editor. Saving an edit uploads a NEW photo and never
+            // changes the original (see `PhotoEditorView`).
+            if asset.mediaKind != .video {
+                Button {
+                    onEdit(asset)
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(.black.opacity(0.35), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("detail.edit")
+                .accessibilityLabel("Edit")
+            }
 
             Button {
                 requestDeleteCurrent()

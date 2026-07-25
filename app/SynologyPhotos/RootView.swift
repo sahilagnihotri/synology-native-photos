@@ -143,6 +143,15 @@ extension LibraryContentRoute {
 /// Library scene: sidebar + content split, importing progress + grid +
 /// detail.
 ///
+/// Identifiable wrapper so the photo editor can be presented with
+/// `.sheet(item:)`. `Asset` itself is not `Identifiable` (the generated
+/// binding only derives Equatable/Hashable), and its `id` is stable and unique
+/// per asset, which is exactly what `.sheet(item:)` needs.
+private struct EditorTarget: Identifiable {
+    let asset: Asset
+    var id: Int64 { asset.id }
+}
+
 /// Grid item selection opens `DetailViewerHost` in a sheet: `detailIndex`
 /// is populated from `PhotoGridController.onOpenDetail`, which the
 /// controller invokes with the relevant absolute grid index on a
@@ -164,6 +173,9 @@ struct LibraryView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var controller: PhotoGridController
     @State private var detailIndex: Int?
+    /// The photo currently open in the non-destructive editor sheet, or `nil`
+    /// when the editor is closed. Set from the detail viewer's Edit button.
+    @State private var editorTarget: EditorTarget?
     /// When the last space reconcile ran (manual Refresh, activation auto-sync,
     /// or the periodic timer), so `AutoSyncGate` can debounce the automatic
     /// paths against each other and against a manual Refresh. Nil until the
@@ -351,6 +363,19 @@ struct LibraryView: View {
             detailIndex = nil
             await refreshCurrentGrid()
         }
+        // The non-destructive crop/rotate editor. Saving there uploads a NEW
+        // photo (the original is never touched); on save the sheet dismisses
+        // itself and this refreshes the library so the new photo shows up (it
+        // may lag until the NAS finishes re-indexing).
+        .sheet(item: $editorTarget) { target in
+            PhotoEditorView(
+                asset: target.asset,
+                space: env.dataSource.space,
+                client: env.client,
+                cache: env.tempCache,
+                onClose: { editorTarget = nil },
+                onSaved: { await reconcileAndReloadGrid() })
+        }
     }
 
     /// The inline detail viewer shown over the grid when `detailIndex` is set.
@@ -375,7 +400,11 @@ struct LibraryView: View {
             // the grid uses: raise the confirm for just this asset (with its
             // filename, so Cmd-Z can undo it); the shared `.deleteConfirm`
             // modifier closes the viewer and refreshes on a confirmed success.
-            onDelete: { asset in deleteController.requestDelete(ids: [asset.id], filenames: [asset.filename]) }
+            onDelete: { asset in deleteController.requestDelete(ids: [asset.id], filenames: [asset.filename]) },
+            // Edit opens the non-destructive crop/rotate editor for this photo.
+            // Saving there uploads a NEW photo and leaves the original
+            // untouched; the sheet's onSaved refreshes the library.
+            onEdit: { asset in editorTarget = EditorTarget(asset: asset) }
         )
     }
 
