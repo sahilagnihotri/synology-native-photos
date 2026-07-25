@@ -2,6 +2,33 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-07-25: keyword search
+
+Read-only toolbar search reusing the existing browse item decoder end to
+end, verified against the real NAS. Brief: `.superpowers/sdd/feature-search-brief.md`.
+Plan + probe transcript: `documentation/plans/done/2026-07-25-search.md`.
+Report: `.superpowers/sdd/feature-search-report.md`.
+
+- Core: `search()` in `synology-api` (`75da3eb`) calling `SYNO.Foto.Search.Search`
+  with the confirmed real method `list_item` and param `keyword` (both `list`/
+  `search` and `query` were tried and rejected by the real NAS). Reuses the
+  existing `RawItem`/`Asset` decoder unchanged, since search results are flat
+  and the same shape as `Browse.Item`. `search_assets` facade in photoscore
+  (`c505c34`); bindings regenerated (`dcdedb0`).
+- App: toolbar `.searchable` field, debounced 300ms, wired into
+  `WindowedDataSource` as a third fetch source alongside space and discovery
+  collection (`3af55b7`). Empty query returns to whatever the sidebar was
+  showing; a genuine no-match shows a clean "No Results" empty state.
+- Confirmed against the real NAS: keyword "food" returned 2 real photos
+  (IMG_1619.JPG, IMG_1570.JPG) through the full app path (`PhotosCore::
+  restore_session` -> `search_assets`, no OTP needed via saved device token);
+  a nonsense keyword returned a clean empty list.
+- Deferred, logged rather than guessed at: `SYNO.Foto.Search.Filter` facets
+  (camera, geocoding, time buckets, etc.) are confirmed present and working
+  but not wired into the UI this pass; plain keyword search shipped instead.
+- cargo test --workspace: 213 passed, 0 failed. Xcode: BUILD SUCCEEDED;
+  unit tests 225 passed in 25 suites.
+
 ## Session 2026-07-25: discovery browse (People, Places, Subjects, Tags, Favorites)
 
 Read-only sidebar destinations reusing the existing pipeline end to end,

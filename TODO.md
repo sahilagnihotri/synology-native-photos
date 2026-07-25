@@ -21,7 +21,7 @@ Only pending work. Completed items live in `Fixed.md`. Live scratch progress in 
 
 - [ ] Safe-delete (trash-move) + confirm; wire the stubbed Delete keyboard action to it. Gated on the delete-semantics probe.
 - [ ] Albums (browse, create, add/remove); replace the sidebar Albums placeholder.
-- [ ] Search.
+- [ ] Search filter facets (`SYNO.Foto.Search.Filter`): confirmed present and working (camera, geocoding, time buckets, folder_filter, etc.) but deferred this pass; plain keyword search shipped instead (see `Fixed.md`).
 - [ ] Favoriting/naming mutations: read-only People/Places/Tags/Favorites browsing shipped (see `Fixed.md`); toggling a favorite, naming a person, and creating/editing tags are still not implemented (mutations, gated separately).
 - [ ] Plan: `documentation/plans/2026-07-25-phase2-manage-implementation.md`.
 
