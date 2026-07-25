@@ -9,7 +9,7 @@ space (`SYNO.FotoTeam.*`) is not enabled on this account and returns error
 801, so the `FotoTeam` ranges could not be captured live and are inferred to
 mirror their `Foto` counterparts.
 
-DSM version: `<fill in>` (to be provided; captured 2026-07-25).
+DSM version: DSM 7.3.2-86009 Update 4, model DS925+ (captured 2026-07-25).
 
 ## How versions are chosen at runtime
 
