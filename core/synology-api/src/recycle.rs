@@ -280,11 +280,16 @@ fn json_path_array(path: &str) -> Result<String, CoreError> {
     })
 }
 
-/// Restore one recycled file to its original library location by moving it out
+/// Restore one recycled file to its original library location by MOVING it out
 /// of `#recycle` with `SYNO.FileStation.CopyMove` (`method=start`,
 /// `overwrite=false`). The destination is derived by `original_parent_folder`.
-/// Fails closed on a non-success envelope. `CopyMove start` returns a `taskid`;
-/// a success envelope is treated as OK (no status poll).
+///
+/// `remove_src=true` is REQUIRED (verified against the real NAS): CopyMove
+/// defaults to a copy, which leaves the file duplicated in `#recycle` after a
+/// restore (so a restored item keeps showing in Recently Deleted).
+/// `remove_src=true` makes it a true move, deleting the source once the copy
+/// lands. Fails closed on a non-success envelope. `CopyMove start` returns a
+/// `taskid`; a success envelope is treated as OK (no status poll).
 pub async fn restore_recycle_item(
     transport: &Transport,
     sid: &str,
@@ -300,6 +305,7 @@ pub async fn restore_recycle_item(
         ("path", &path_array),
         ("dest_folder_path", &dest),
         ("overwrite", "false"),
+        ("remove_src", "true"),
         ("_sid", sid),
     ];
     let body = transport.post_form_text(&form, syno_token).await?;

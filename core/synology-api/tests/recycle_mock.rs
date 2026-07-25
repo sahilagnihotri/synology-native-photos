@@ -143,6 +143,8 @@ async fn restore_recycle_item_moves_file_to_its_original_parent() {
             // Derived destination: the mirrored original parent directory.
             Matcher::UrlEncoded("dest_folder_path".into(), "/home/Photos/iPhone/2016/09".into()),
             Matcher::UrlEncoded("overwrite".into(), "false".into()),
+            // Must be a MOVE, not a copy, so the file leaves #recycle.
+            Matcher::UrlEncoded("remove_src".into(), "true".into()),
             Matcher::UrlEncoded("path".into(), r#"["/home/#recycle/Photos/iPhone/2016/09/IMG_0924.JPG"]"#.into()),
         ]))
         .with_status(200)
