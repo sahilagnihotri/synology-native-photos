@@ -38,42 +38,37 @@ actor PhotosCoreClient {
         try await core.videoPlaybackSource(space: space, asset: asset)
     }
 
-    // MARK: - Trash (hybrid safe-delete)
+    // MARK: - Delete + Recently Deleted (recycle bin)
 
-    /// Resolves (creating if needed) the app-owned Recently Deleted album.
-    /// Not called on the everyday path (the core's own delete/reconcile
-    /// manage the album), exposed for completeness and future admin use.
-    func ensureTrashAlbum(space: Space) async throws -> Album {
-        try await core.ensureTrashAlbum(space: space)
+    /// The everyday delete: removes `assetIds` from the library on the NAS
+    /// (gone from the Synology web app and phone too) and drops the local
+    /// rows on success. Recoverable from the DSM recycle bin via the Recently
+    /// Deleted view, never permanent on its own.
+    func deleteAssets(space: Space, assetIds: [Int64]) async throws {
+        try await core.deleteAssets(space: space, assetIds: assetIds)
     }
-    /// Everyday delete: moves `assetIds` into the Recently Deleted album,
-    /// fully reversible. NEVER calls the raw destructive verb.
-    func deleteToTrash(space: Space, assetIds: [Int64]) async throws {
-        try await core.deleteToTrash(space: space, assetIds: assetIds)
+    /// Reads the DSM recycle bin, newest first, windowed by `offset`/`limit`.
+    /// A live File Station read (there is no local mirror of the recycle
+    /// bin), so it needs a session and makes network calls.
+    func fetchRecentlyDeleted(offset: UInt32, limit: UInt32) async throws -> [RecycleItem] {
+        try await core.fetchRecentlyDeleted(offset: offset, limit: limit)
     }
-    /// Moves `assetIds` back out of Recently Deleted into the library.
-    func restoreFromTrash(space: Space, assetIds: [Int64]) async throws {
-        try await core.restoreFromTrash(space: space, assetIds: assetIds)
+    /// Moves each recycle-bin entry in `recyclePaths` back to its original
+    /// library location and re-indexes so the files reappear. Reversible;
+    /// no confirm needed.
+    func restoreRecentlyDeleted(recyclePaths: [String]) async throws {
+        try await core.restoreRecentlyDeleted(recyclePaths: recyclePaths)
     }
-    /// Windowed local read of the Recently Deleted album (sync, no network),
-    /// mirroring `fetchAssets`'s own local-read discipline.
-    func fetchTrash(space: Space, offset: UInt32, limit: UInt32) throws -> [Asset] {
-        try core.fetchTrash(space: space, offset: offset, limit: limit)
+    /// Permanently deletes each recycle-bin entry in `recyclePaths`. The point
+    /// of no return, gated behind a dedicated, always-shown confirm in the UI.
+    func emptyRecentlyDeleted(recyclePaths: [String]) async throws {
+        try await core.emptyRecentlyDeleted(recyclePaths: recyclePaths)
     }
-    /// Local count of trashed items (sync, no network), mirroring `assetCount`.
-    func trashCount(space: Space) throws -> UInt32 {
-        try core.trashCount(space: space)
-    }
-    /// The only path that calls the raw destructive verb. Gated behind a
-    /// dedicated, always-shown confirm in the UI; never reachable from the
-    /// everyday delete flow.
-    func permanentlyDelete(space: Space, assetIds: [Int64]) async throws {
-        try await core.permanentlyDelete(space: space, assetIds: assetIds)
-    }
-    /// Re-derives local trash flags from the album's real membership, so a
-    /// restore done on another Synology client is reflected here.
-    func reconcileTrash(space: Space) async throws {
-        try await core.reconcileTrash(space: space)
+    /// JPEG bytes for one recycle-bin entry, for the Recently Deleted grid.
+    /// A JSON error from the NAS surfaces as a thrown `CoreError` (never bogus
+    /// image bytes), which the UI treats as "show a placeholder".
+    func recycleThumbnail(recyclePath: String, size: String) async throws -> Data {
+        try await core.recycleThumbnail(recyclePath: recyclePath, size: size)
     }
 
     // MARK: - Discovery browse

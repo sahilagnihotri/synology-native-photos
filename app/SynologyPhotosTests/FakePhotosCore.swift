@@ -48,6 +48,21 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     /// way `assets` is windowed by `fetchAssets`.
     var trash: [Space: [Asset]] = [:]
 
+    // MARK: - Real delete + recycle bin scripted results
+
+    var deleteAssetsResult: Result<Void, CoreError> = .success(())
+    var restoreRecentlyDeletedResult: Result<Void, CoreError> = .success(())
+    var emptyRecentlyDeletedResult: Result<Void, CoreError> = .success(())
+    /// Result for `recycleThumbnail`. Defaults to a tiny non-empty payload so
+    /// a test that never scripts it still gets bytes rather than an error.
+    var recycleThumbnailResult: Result<Data, CoreError> = .success(Data([0xFF, 0xD8, 0xFF]))
+    /// Canned recycle-bin contents, newest first, windowed by
+    /// `fetchRecentlyDeleted` exactly the way `assets` is by `fetchAssets`.
+    var recentlyDeleted: [RecycleItem] = []
+    /// Overrides `fetchRecentlyDeleted` entirely when set (e.g. to simulate a
+    /// load failure), taking precedence over `recentlyDeleted`.
+    var fetchRecentlyDeletedResult: Result<[RecycleItem], CoreError>?
+
     /// When set, `login` only succeeds (skipping the `OtpRequired` path)
     /// when the caller's `deviceToken` exactly matches this value; any
     /// other token (including `nil`) is treated as if none had been given
@@ -199,6 +214,20 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var lastRestoreFromTrashSpace: Space?
     private(set) var lastPermanentlyDeleteSpace: Space?
     private(set) var lastReconciledTrashSpace: Space?
+
+    // MARK: - Real delete + recycle bin call tracking
+
+    private(set) var deleteAssetsCallCount = 0
+    private(set) var fetchRecentlyDeletedCallCount = 0
+    private(set) var restoreRecentlyDeletedCallCount = 0
+    private(set) var emptyRecentlyDeletedCallCount = 0
+    private(set) var recycleThumbnailCallCount = 0
+
+    private(set) var lastDeleteAssetsIds: [Int64]?
+    private(set) var lastDeleteAssetsSpace: Space?
+    private(set) var lastRestoreRecentlyDeletedPaths: [String]?
+    private(set) var lastEmptyRecentlyDeletedPaths: [String]?
+    private(set) var lastRecycleThumbnailRequest: (recyclePath: String, size: String)?
 
     init() {}
 
@@ -375,6 +404,41 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         reconcileTrashCallCount += 1
         lastReconciledTrashSpace = space
         try reconcileTrashResult.get()
+    }
+
+    // MARK: - Real delete + recycle bin
+
+    func deleteAssets(space: Space, assetIds: [Int64]) async throws {
+        deleteAssetsCallCount += 1
+        lastDeleteAssetsSpace = space
+        lastDeleteAssetsIds = assetIds
+        try deleteAssetsResult.get()
+    }
+
+    func fetchRecentlyDeleted(offset: UInt32, limit: UInt32) async throws -> [RecycleItem] {
+        fetchRecentlyDeletedCallCount += 1
+        if let fetchRecentlyDeletedResult {
+            return try window(try fetchRecentlyDeletedResult.get(), offset: offset, limit: limit)
+        }
+        return try window(recentlyDeleted, offset: offset, limit: limit)
+    }
+
+    func restoreRecentlyDeleted(recyclePaths: [String]) async throws {
+        restoreRecentlyDeletedCallCount += 1
+        lastRestoreRecentlyDeletedPaths = recyclePaths
+        try restoreRecentlyDeletedResult.get()
+    }
+
+    func emptyRecentlyDeleted(recyclePaths: [String]) async throws {
+        emptyRecentlyDeletedCallCount += 1
+        lastEmptyRecentlyDeletedPaths = recyclePaths
+        try emptyRecentlyDeletedResult.get()
+    }
+
+    func recycleThumbnail(recyclePath: String, size: String) async throws -> Data {
+        recycleThumbnailCallCount += 1
+        lastRecycleThumbnailRequest = (recyclePath, size)
+        return try recycleThumbnailResult.get()
     }
 
     // MARK: - Discovery browse
