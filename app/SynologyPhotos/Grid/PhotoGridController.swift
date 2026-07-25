@@ -51,6 +51,22 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// zero-height header so those grids look exactly as they did before.
     private static let headerHeight: CGFloat = 34
 
+    /// The floating date scrubber shown near the right scroll edge while the
+    /// date-sectioned grid scrolls (Part F). Read-only: it reports the date of
+    /// the topmost visible cell and fades out when scrolling stops.
+    private let scrubber = DateScrubberView()
+    /// The enclosing scroll view, retained so scroll-notification handling and
+    /// scrubber layout do not have to re-cast `view` each time.
+    private weak var scrollView: NSScrollView?
+    /// Pending fade-out of the scrubber, cancelled and rescheduled on every
+    /// scroll tick so the indicator stays visible while scrolling continues.
+    private var scrubberHideWorkItem: DispatchWorkItem?
+    /// Inset of the scrubber from the scroll view's trailing/top edges. The
+    /// extra trailing gap leaves room for the vertical scroller.
+    private static let scrubberMargin: CGFloat = 10
+    /// How long after the last scroll tick the scrubber fades out.
+    private static let scrubberIdleFade: TimeInterval = 0.9
+
     /// Set when `applySnapshot()` is called before `viewDidLoad()` has set up
     /// `diffable` (e.g. the SwiftUI `.task` in `LibraryView` calls it right
     /// after the crawl finishes, while the grid is still gated out of the
@@ -218,7 +234,27 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         collectionView.addGestureRecognizer(doubleClick)
         scroll.documentView = collectionView
         scroll.hasVerticalScroller = true
+
+        // Floating date scrubber (Part F): a subview that stays fixed over the
+        // viewport as the content scrolls under it. Starts hidden and only
+        // appears while scrolling. `addFloatingSubview` is the AppKit-blessed
+        // way to overlay a non-scrolling control on a scroll view.
+        scrubber.alphaValue = 0
+        scroll.addFloatingSubview(scrubber, for: .vertical)
+        // Observe every scroll change (user drags, wheel, and programmatic
+        // `scrollToItems` from keyboard nav all move the clip view's bounds),
+        // so the scrubber tracks keyboard navigation too, not just live drags.
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(scrollDidChange),
+            name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+        self.scrollView = scroll
+
         self.view = scroll
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     /// Handles one key event per the Apple Photos keyboard map (see the
@@ -772,5 +808,76 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     ) -> NSSize {
         guard dataSource.dateSections != nil else { return .zero }
         return NSSize(width: collectionView.bounds.width, height: Self.headerHeight)
+    }
+
+    // MARK: - Date scrubber (Part F)
+
+    /// Every scroll change (user drag, wheel, or a programmatic
+    /// `scrollToItems` from keyboard nav) ticks through here. Only the
+    /// date-sectioned library grid has dates to show; on the flat
+    /// discovery/search grids the indicator never appears.
+    @objc private func scrollDidChange() {
+        guard dataSource.dateSections != nil else { return }
+        if updateScrubber() {
+            showScrubberThenScheduleFade()
+        }
+    }
+
+    /// Names the topmost visible cell's day on the scrubber and positions the
+    /// indicator to track the scroll position. Returns `false` (and shows
+    /// nothing) when there is no visible cell or no section geometry yet.
+    @discardableResult
+    private func updateScrubber() -> Bool {
+        guard let sections = dataSource.dateSections,
+              let scroll = scrollView,
+              let top = topmostVisibleAbsoluteIndex(),
+              let dayStart = sections.dayStart(forAbsolute: top) else { return false }
+        scrubber.setText(DateSectionFormatter.scrubberLabel(dayStart: dayStart))
+        positionScrubber(in: scroll)
+        return true
+    }
+
+    /// The lowest ABSOLUTE index among the currently visible cells, i.e. the
+    /// top-left of the viewport in the grid's newest-first order, or `nil`
+    /// when nothing is laid out yet.
+    private func topmostVisibleAbsoluteIndex() -> Int? {
+        collectionView.indexPathsForVisibleItems().map { absoluteIndex(for: $0) }.min()
+    }
+
+    /// Places the scrubber at the trailing edge, vertically proportional to
+    /// the scroll position so it tracks the scroller thumb. The scroll view is
+    /// not flipped (origin bottom-left), so fraction 0 (content top) sits near
+    /// the top edge and fraction 1 near the bottom.
+    private func positionScrubber(in scroll: NSScrollView) {
+        let size = scrubber.fittingSize
+        let clip = scroll.contentView
+        let maxOffset = max(collectionView.bounds.height - clip.bounds.height, 1)
+        let fraction = min(max(clip.bounds.origin.y / maxOffset, 0), 1)
+        let available = max(scroll.bounds.height - size.height - 2 * Self.scrubberMargin, 0)
+        let y = Self.scrubberMargin + (1 - fraction) * available
+        let x = scroll.bounds.width - size.width - Self.scrubberMargin - 4
+        scrubber.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    /// Shows the scrubber immediately (no fade-in, so it keeps up with a fast
+    /// scroll) and schedules a fade-out after a short idle, cancelling any
+    /// previously scheduled fade so it stays up while scrolling continues.
+    private func showScrubberThenScheduleFade() {
+        scrubberHideWorkItem?.cancel()
+        scrubber.alphaValue = 1
+        let work = DispatchWorkItem { [weak self] in
+            self?.scrubber.animator().alphaValue = 0
+        }
+        scrubberHideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.scrubberIdleFade, execute: work)
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        // Keep the indicator pinned to the trailing edge across window resizes
+        // while it is on screen (it is fixed during layout, not scrolled).
+        if scrubber.alphaValue > 0, let scroll = scrollView {
+            positionScrubber(in: scroll)
+        }
     }
 }

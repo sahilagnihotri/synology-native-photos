@@ -55,6 +55,7 @@
 		81E1E0367711A5C5B9873DF9 /* models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857A71F880766524090BB89F /* models.swift */; };
 		8564012B2713C3D67FBAE433 /* SignOutControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED40FEE968B41906C8B464D7 /* SignOutControllerTests.swift */; };
 		8656CA2D10EC4D2F489CE3E3 /* CertApprovalViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47572CC4B55567ECBC59B0AE /* CertApprovalViewModel.swift */; };
+		868FE374C296372F1C450970 /* DateScrubberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C75D1D30931D4263736E0D6E /* DateScrubberView.swift */; };
 		86DB0E0DF2F5341B0064EF03 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 516C70ED26B5432FC290A9B0 /* LoginView.swift */; };
 		87B7884FEC6264C47145DAE7 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E84465BAF841B56DF58EE499 /* AboutView.swift */; };
 		8E6AC06CAA7CF3A875BCE82B /* PathMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AB2048962505837D9708B9 /* PathMonitor.swift */; };
@@ -228,6 +229,7 @@
 		C220E6EFABA5E50B72BF6CD9 /* ThumbnailCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCacheTests.swift; sourceTree = "<group>"; };
 		C4AB2048962505837D9708B9 /* PathMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathMonitor.swift; sourceTree = "<group>"; };
 		C5A3AD8613F314C51F3D8B05 /* ThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCache.swift; sourceTree = "<group>"; };
+		C75D1D30931D4263736E0D6E /* DateScrubberView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateScrubberView.swift; sourceTree = "<group>"; };
 		CD16534B767D75BABB81D242 /* PhotoDragExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoDragExportTests.swift; sourceTree = "<group>"; };
 		CE8F23F7D2E1C87BC4C8C287 /* AssetInfoFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetInfoFormatter.swift; sourceTree = "<group>"; };
 		D2AA11CEC5270A0AB58CE575 /* EmptyLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyLibraryView.swift; sourceTree = "<group>"; };
@@ -361,6 +363,7 @@
 		2224556009F95DC904618E01 /* Grid */ = {
 			isa = PBXGroup;
 			children = (
+				C75D1D30931D4263736E0D6E /* DateScrubberView.swift */,
 				17A82A3CFA2887C73CB1D530 /* DateSectionHeaderView.swift */,
 				2C144C63E25191E61F49FD9B /* DeleteController.swift */,
 				D2AA11CEC5270A0AB58CE575 /* EmptyLibraryView.swift */,
@@ -736,6 +739,7 @@
 				8656CA2D10EC4D2F489CE3E3 /* CertApprovalViewModel.swift in Sources */,
 				37C315EB053CA2E9B258A359 /* CoreError+Swift.swift in Sources */,
 				5A412877FD01F2FC4261DAE0 /* CrawlProgressModel.swift in Sources */,
+				868FE374C296372F1C450970 /* DateScrubberView.swift in Sources */,
 				AEFC5CDDB5DA08D705AA310E /* DateSectionHeaderView.swift in Sources */,
 				912C7859315AA128647C5865 /* DeleteController.swift in Sources */,
 				A38AA53D0527EC725635CF7E /* DetailKeyAction.swift in Sources */,
