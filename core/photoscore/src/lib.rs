@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use models::{
     Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DiscoveryCollection, Person, Place,
-    Session, SessionState, Space, Subject, Tag, ThumbnailData, ThumbnailSize,
+    SearchFacets, SearchFilters, Session, SessionState, Space, Subject, Tag, ThumbnailData, ThumbnailSize,
 };
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
@@ -431,6 +431,43 @@ impl PhotosCore {
     pub async fn search_assets(&self, keyword: String, offset: u32, limit: u32) -> Result<Vec<Asset>, CoreError> {
         let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Search.Search")?;
         synology_api::search(&transport, &sid, &keyword, offset, limit, version, syno_token.as_deref()).await
+    }
+
+    /// Same as `search_assets`, but additionally narrows results to
+    /// `filters.start_time`/`filters.end_time` (unix seconds), the one
+    /// confirmed-working facet filter on `Search.Search list_item` -- see
+    /// `models::SearchFilters`'s doc comment for the probe that ruled every
+    /// camera/aperture/geocoding/media-type candidate out. A default
+    /// `SearchFilters` (both fields `None`) behaves exactly like
+    /// `search_assets`.
+    ///
+    /// Requires a live session; fails closed with `CoreError::Auth`
+    /// otherwise.
+    pub async fn search_assets_filtered(
+        &self,
+        keyword: String,
+        filters: SearchFilters,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Asset>, CoreError> {
+        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Search.Search")?;
+        synology_api::search_filtered(&transport, &sid, &keyword, &filters, offset, limit, version, syno_token.as_deref()).await
+    }
+
+    /// Fetches the search facet catalog (`SYNO.Foto.Search.Filter`,
+    /// `method=list`): camera, aperture, and geocoding facets for display,
+    /// plus the media-type list. See `models::SearchFacets`'s doc comment
+    /// for why these are shown but not (yet) filterable -- only the date
+    /// range on `search_assets_filtered` is a real working filter on this
+    /// NAS.
+    ///
+    /// A live network call every time, same discipline as
+    /// `fetch_people`/`fetch_places`/etc: no local index for the facet
+    /// catalog. Requires a live session; fails closed with `CoreError::Auth`
+    /// otherwise.
+    pub async fn fetch_search_facets(&self) -> Result<SearchFacets, CoreError> {
+        let (transport, sid, _version, syno_token) = self.discovery_call_context("SYNO.Foto.Search.Filter")?;
+        synology_api::search_facets(&transport, &sid, syno_token.as_deref()).await
     }
 
     /// Fetches a thumbnail for `unit_id` at `size`, served from a
@@ -1831,6 +1868,99 @@ mod core_tests {
         let core = logged_in_core("search-assets-empty", &server).await;
         let assets = core.search_assets("zzzznosuchthing123".to_string(), 0, 50).await.expect("search_assets ok");
         assert!(assets.is_empty(), "a keyword with no matches must decode to an empty list, not error");
+    }
+
+    #[tokio::test]
+    async fn search_assets_filtered_sends_start_and_end_time() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _search = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Search.Search".into()),
+                mockito::Matcher::UrlEncoded("keyword".into(), "IMG".into()),
+                mockito::Matcher::UrlEncoded("start_time".into(), "1400000000".into()),
+                mockito::Matcher::UrlEncoded("end_time".into(), "1500000000".into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[{"id":73459,"filename":"IMG_1910.JPG","type":"photo","additional":{"thumbnail":{"cache_key":"CK1","unit_id":1001}}}]}}"#)
+            .create_async().await;
+        let core = logged_in_core("search-assets-filtered", &server).await;
+        let filters = SearchFilters { start_time: Some(1_400_000_000), end_time: Some(1_500_000_000) };
+        let assets = core
+            .search_assets_filtered("IMG".to_string(), filters, 0, 50)
+            .await
+            .expect("search_assets_filtered ok");
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].unit_id, 1001);
+    }
+
+    #[tokio::test]
+    async fn search_assets_filtered_with_default_filters_matches_plain_search() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _search = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("keyword".into(), "IMG".into()),
+            ]))
+            .match_request(|req| !req.path_and_query().contains("start_time") && !req.path_and_query().contains("end_time"))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[]}}"#)
+            .create_async().await;
+        let core = logged_in_core("search-assets-filtered-default", &server).await;
+        let assets = core
+            .search_assets_filtered("IMG".to_string(), SearchFilters::default(), 0, 50)
+            .await
+            .expect("search_assets_filtered ok");
+        assert!(assets.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_assets_filtered_without_login_returns_auth_error() {
+        let core = core_at("search-assets-filtered-no-login");
+        let err = core
+            .search_assets_filtered("IMG".to_string(), SearchFilters::default(), 0, 50)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn fetch_search_facets_hits_the_nas_and_returns_real_shape() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server.mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+        let _filter = server.mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Search.Filter".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "list".into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{
+                "aperture":[{"id":1,"name":"F1.8"}],
+                "camera":[{"id":23,"name":"iPhone 6s"}],
+                "geocoding":[{"children":[],"id":1,"level":1,"name":"Norway"}],
+                "item_type":[{"id":0,"name":"photo"}]
+            }}"#)
+            .create_async().await;
+        let core = logged_in_core("fetch-search-facets", &server).await;
+        let facets = core.fetch_search_facets().await.expect("fetch_search_facets ok");
+        assert_eq!(facets.cameras.len(), 1);
+        assert_eq!(facets.cameras[0].name, "iPhone 6s");
+        assert_eq!(facets.apertures[0].name, "F1.8");
+        assert_eq!(facets.geocodings[0].name, "Norway");
+        assert_eq!(facets.media_types[0].name, "photo");
+    }
+
+    #[tokio::test]
+    async fn fetch_search_facets_without_login_returns_auth_error() {
+        let core = core_at("fetch-search-facets-no-login");
+        let err = core.fetch_search_facets().await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
     #[tokio::test]
