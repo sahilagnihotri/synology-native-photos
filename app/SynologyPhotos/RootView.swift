@@ -67,6 +67,9 @@ final class AppEnvironment {
     let spaceSelection: SpaceSelection
     let discoveryCoverCache: DiscoveryCoverCache
     let searchFilters: SearchFilterModel
+    /// The library grid's Quick Filter selection (file type, date taken,
+    /// rating). Local-only, so unlike `searchFilters` it needs no client.
+    let quickFilter: QuickFilterModel
     let host: String
     let accountCacheDir: URL
 
@@ -82,6 +85,7 @@ final class AppEnvironment {
         self.spaceSelection = SpaceSelection(current: .personal)
         self.discoveryCoverCache = DiscoveryCoverCache(client: c)
         self.searchFilters = SearchFilterModel(client: c)
+        self.quickFilter = QuickFilterModel()
         self.host = host
         self.accountCacheDir = accountCacheDir
     }
@@ -205,6 +209,14 @@ struct LibraryView: View {
     /// this once the user pauses typing.
     @State private var activeSearch: String?
     @State private var searchTask: Task<Void, Never>?
+    /// The Quick Filter currently applied to the library grid, or `nil` when
+    /// none is active. Set by Apply in the filter popover; when non-nil the
+    /// content area shows the filtered (flat) grid, overlaying the plain
+    /// library exactly the way `activeSearch` overlays it for search. Mutually
+    /// exclusive with `activeSearch` (the filter button is hidden during a
+    /// search) and cleared whenever the sidebar selection changes or a search
+    /// starts, so it only ever applies to the library grid it was set from.
+    @State private var activeFilter: FilterQuery?
 
     init(env: AppEnvironment) {
         self.env = env
@@ -242,6 +254,10 @@ struct LibraryView: View {
         .onChange(of: sidebarSelection) { _, newValue in
             guard let newValue else { return }
             drilledInCollection = nil
+            // A Quick Filter only ever applies to the library grid it was set
+            // from; leaving that grid (to another space, discovery, or the
+            // recycle bin) drops it so it never lingers over an unrelated view.
+            activeFilter = nil
             switch newValue.route(currentSpace: env.spaceSelection.current) {
             case .grid(let space):
                 tilesModel = nil
@@ -416,8 +432,21 @@ struct LibraryView: View {
                 // at all (they are fetched live), so showing "Importing..."
                 // over a tile grid, a discovery photo grid, or search
                 // results would be a meaningless, permanently-stuck status.
-                if activeSearch == nil, case .grid = currentRoute, !env.crawl.isComplete {
+                if activeSearch == nil, activeFilter == nil, case .grid = currentRoute, !env.crawl.isComplete {
                     Text(env.crawl.statusText).accessibilityIdentifier("crawl.status")
+                }
+                // The Quick Filter applies only to the space-backed library
+                // grid: the facets it filters (file type, date taken, rating)
+                // are local-index columns. People/Places/Tags/Favorites are
+                // server-side clusters with their own sidebar destinations, so
+                // they are intentionally not folded in here. Hidden while a
+                // search is active, which has its own filter bar.
+                if activeSearch == nil, isLibraryGridRoute {
+                    QuickFilterBarView(model: env.quickFilter, onApply: {
+                        Task { await applyQuickFilter() }
+                    }, onClear: {
+                        Task { await clearQuickFilter() }
+                    })
                 }
                 // Filters only make sense once a keyword search is active:
                 // the NAS has no way to run a date-only search (see
@@ -494,6 +523,27 @@ struct LibraryView: View {
                         await runSearch(activeSearch)
                     }
                 }
+            } else if let activeFilter {
+                // A Quick Filter overlays the plain library the same way an
+                // active search does. The filtered read is local and its count
+                // is exact, so `isReady` is true immediately and this only ever
+                // resolves to the grid (nonzero) or the empty state (no match),
+                // never a lingering spinner.
+                switch LibraryContentRoute.route(
+                    isComplete: env.dataSource.isReady,
+                    itemCount: env.dataSource.totalCount
+                ) {
+                case .importing:
+                    ProgressView("Filtering...").accessibilityIdentifier("quickfilter.progressview")
+                case .empty:
+                    FilterEmptyView(summary: activeFilter.summary)
+                case .grid:
+                    PhotoGridView(controller: controller)
+                case .failed(let message):
+                    CrawlFailedView(message: message) {
+                        await applyQuickFilter()
+                    }
+                }
             } else {
                 switch currentRoute {
                 case .grid:
@@ -565,6 +615,9 @@ struct LibraryView: View {
     /// a person's page.
     private var headerTitle: String {
         if let activeSearch { return "Search: \(activeSearch)" }
+        if let activeFilter {
+            return activeFilter.summary.isEmpty ? "Filtered" : "Filtered: \(activeFilter.summary)"
+        }
         if let drilledInCollection, drilledInCollection != .favorites,
            let tile = tilesModel?.tiles.first(where: { $0.collection == drilledInCollection }) {
             return tile.displayName.isEmpty ? currentSpaceRoute.title : tile.displayName
@@ -752,10 +805,49 @@ struct LibraryView: View {
     /// be pressed while a keyword is already active.
     private func runSearch(_ keyword: String) async {
         controller.clearSelection()
+        // Search and the Quick Filter are mutually exclusive overlays; a
+        // search takes over, so drop any active filter first.
+        activeFilter = nil
         await env.dataSource.setSearch(keyword, filters: env.searchFilters.currentFilters)
         await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
         await controller.applySnapshot()
         activeSearch = keyword
+    }
+
+    /// Applies the current Quick Filter selection to the library grid: switches
+    /// the data source over to a `.filter` source for the current space and the
+    /// built `FilterQuery`, loads its first window, and sets `activeFilter` so
+    /// the content area shows the filtered (flat) grid. Same reset/reload/
+    /// snapshot sequence as `runSearch`, so the grid never briefly shows the
+    /// unfiltered library under the filtered header. An empty (all-`nil`)
+    /// selection clears instead, so pressing Apply with nothing chosen returns
+    /// to the plain library rather than switching to a no-op filter source.
+    private func applyQuickFilter() async {
+        let query = env.quickFilter.currentQuery
+        guard query.isActive else {
+            await clearQuickFilter()
+            return
+        }
+        controller.clearSelection()
+        await env.dataSource.setFilter(space: env.spaceSelection.current, query: query)
+        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+        await controller.applySnapshot()
+        activeFilter = query
+    }
+
+    /// Clears the Quick Filter and returns the grid to the plain, date-
+    /// sectioned library for the current space. Switches the data source back
+    /// to a `.space` source (which restores the date-section geometry) and
+    /// reloads, mirroring how clearing a search returns to `currentRoute`. A
+    /// Quick Filter is only ever active over the library grid, so restoring the
+    /// current space is always the right destination.
+    private func clearQuickFilter() async {
+        env.quickFilter.clear()
+        activeFilter = nil
+        controller.clearSelection()
+        await env.dataSource.setSpace(env.spaceSelection.current)
+        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+        await controller.applySnapshot()
     }
 
     /// Re-windows the data source against whatever `currentRoute` points at
@@ -868,6 +960,31 @@ struct SearchEmptyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("search.empty")
+    }
+}
+
+/// Shown when an active Quick Filter matched nothing in the current space.
+/// Mirrors `DiscoveryGridEmptyView`/`SearchEmptyView`'s visual language, worded
+/// so the user understands an empty result is the filter narrowing things down,
+/// not an error, and can widen or clear it.
+struct FilterEmptyView: View {
+    let summary: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 64))
+                .foregroundStyle(.tertiary)
+            Text("No Matches")
+                .font(.title2)
+                .fontWeight(.medium)
+            Text(summary.isEmpty ? "No photos match this filter." : "No photos match \(summary).")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("quickfilter.empty")
     }
 }
 

@@ -308,4 +308,106 @@ struct WindowedDataSourceTests {
         await ds.setSearch("food")
         #expect(ds.space == .personal, "the search API is personal-space-only")
     }
+
+    // MARK: - Quick Filter windowing
+
+    /// Builds a photo/video asset at a given rating on top of `asset(_:)`,
+    /// mutating the `var` fields the base helper leaves at photo/rating-0.
+    private func kindedAsset(_ id: Int64, kind: MediaKind, rating: Int32 = 0) -> Asset {
+        var a = asset(id)
+        a.mediaKind = kind
+        a.rating = rating
+        return a
+    }
+
+    @Test func setFilterLoadsFromFilterAssetsNotFetchAssets() async {
+        let fake = FakePhotosCore()
+        // A mix of photos and videos in the personal space.
+        fake.assets[.personal] = [
+            kindedAsset(0, kind: .photo),
+            kindedAsset(1, kind: .video),
+            kindedAsset(2, kind: .photo),
+            kindedAsset(3, kind: .video),
+        ]
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setFilter(space: .personal, query: FilterQuery(mediaKind: .video, takenAfter: nil, takenBefore: nil, minRating: nil))
+        // The exact local count seeds totalCount/isReady up front, unlike a
+        // live collection/search source.
+        #expect(ds.totalCount == 2)
+        #expect(ds.isReady == true)
+        #expect(fake.filterCountCallCount == 1)
+        #expect(fake.lastFilterMediaKind == .video)
+
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.map(\.id) == [1, 3], "only the videos, in the source's order")
+        #expect(fake.filterAssetsCallCount == 1)
+        #expect(fake.fetchAssetsForCallCount == 0, "a filter is a local read, never the discovery path")
+    }
+
+    @Test func setFilterStaysASingleFlatSection() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.refreshCount()
+        #expect(ds.dateSections != nil, "the plain library is date-sectioned")
+
+        await ds.setFilter(space: .personal, query: FilterQuery(mediaKind: .photo, takenAfter: nil, takenBefore: nil, minRating: nil))
+        #expect(ds.dateSections == nil, "a filtered grid is a single flat section, no date headers or scrubber")
+    }
+
+    @Test func clearingAFilterRestoresTheDateSectionedLibrary() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setFilter(space: .personal, query: FilterQuery(mediaKind: .video, takenAfter: nil, takenBefore: nil, minRating: nil))
+        #expect(ds.dateSections == nil)
+
+        // Clearing a filter switches back to the space source (what
+        // LibraryView.clearQuickFilter does), which restores the date sections
+        // and the full library count.
+        await ds.setSpace(.personal)
+        #expect(ds.dateSections != nil, "the sectioned library returns after clearing the filter")
+        #expect(ds.totalCount == 10, "back to the full library count")
+    }
+
+    @Test func filterWithNoMatchesReportsEmptyReadyResult() async {
+        let fake = FakePhotosCore()
+        // Only photos exist, so a video filter matches nothing.
+        fake.assets[.personal] = (0..<5).map { kindedAsset(Int64($0), kind: .photo) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setFilter(space: .personal, query: FilterQuery(mediaKind: .video, takenAfter: nil, takenBefore: nil, minRating: nil))
+        #expect(ds.totalCount == 0)
+        #expect(ds.isReady == true, "an empty filtered result is ready (shows the empty state), never a stuck spinner")
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.isEmpty)
+    }
+
+    @Test func setFilterResetsResidentFromAPriorSpace() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = [
+            kindedAsset(0, kind: .photo),
+            kindedAsset(1, kind: .video),
+            kindedAsset(2, kind: .video),
+        ]
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 3, total: 3, complete: true)
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.refreshCount()
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.item(at: 0)?.id == 0)
+
+        await ds.setFilter(space: .personal, query: FilterQuery(mediaKind: .video, takenAfter: nil, takenBefore: nil, minRating: nil))
+        #expect(ds.totalCount == 2, "the filtered count replaces the full-library count")
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.map(\.id) == [1, 2], "must read the filtered rows, not the stale unfiltered cache")
+    }
+
+    @Test func filterSourceUsesTheGivenSpaceForItemIdentity() async {
+        let fake = FakePhotosCore()
+        fake.assets[.shared] = [kindedAsset(0, kind: .video)]
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .shared, pageSize: 50)
+        await ds.setFilter(space: .shared, query: FilterQuery(mediaKind: .video, takenAfter: nil, takenBefore: nil, minRating: nil))
+        #expect(ds.space == .shared, "unlike search/collections, a filter is space-scoped and keeps its space")
+    }
 }

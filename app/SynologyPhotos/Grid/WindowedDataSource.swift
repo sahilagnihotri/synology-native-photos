@@ -30,6 +30,13 @@ private enum FetchSource: Equatable {
     /// `SearchFilters()` behaves exactly like the plain keyword search this
     /// case always supported.
     case search(String, SearchFilters)
+    /// The library's Quick Filter: a compound, LOCAL-index filter over a
+    /// space's assets by `FilterQuery` (file type, date-taken range, minimum
+    /// rating). Like `.space` it is a cheap local read with an exact count, so
+    /// unlike `.collection`/`.search` its count and readiness come from a real
+    /// `filterCount`, not a page-size estimate. It stays a single flat section
+    /// (no date-section headers or scrubber) while active.
+    case filter(Space, FilterQuery)
 }
 
 /// Bridges the NSCollectionView grid to the core's windowed reads.
@@ -82,6 +89,7 @@ final class WindowedDataSource {
     var space: Space {
         switch source {
         case .space(let s): return s
+        case .filter(let s, _): return s
         case .collection, .search(_, _): return .personal
         }
     }
@@ -126,6 +134,27 @@ final class WindowedDataSource {
                 isReady = false
                 dateSections = nil
             }
+        case .filter(let space, let query):
+            do {
+                let count = try await client.filterCount(
+                    space: space,
+                    mediaKind: query.mediaKind,
+                    takenAfter: query.takenAfter,
+                    takenBefore: query.takenBefore,
+                    minRating: query.minRating)
+                totalCount = Int(count)
+                // A filtered read is a local-index read like `fetchAssets`:
+                // the count is authoritative the instant we have it, so the
+                // grid is ready to page it (there is no separate crawl barrier
+                // to wait on here). The filtered grid is a single flat section,
+                // never date-sectioned, so its section geometry is cleared.
+                isReady = true
+                dateSections = nil
+            } catch {
+                totalCount = 0
+                isReady = false
+                dateSections = nil
+            }
         case .collection, .search:
             break
         }
@@ -158,6 +187,18 @@ final class WindowedDataSource {
                 // above: a search has no crawl barrier or grand total either.
                 isReady = rows.count < limit
                 totalCount = max(totalCount, offset + rows.count)
+            case .filter(let space, let query):
+                // Like `.space`, a local read whose count/readiness are owned
+                // by `refreshCount` (from `filterCount`), so this only fetches
+                // the requested slice and never touches totalCount/isReady.
+                rows = try await client.filterAssets(
+                    space: space,
+                    mediaKind: query.mediaKind,
+                    takenAfter: query.takenAfter,
+                    takenBefore: query.takenBefore,
+                    minRating: query.minRating,
+                    offset: UInt32(offset),
+                    limit: UInt32(limit))
             }
             for (i, asset) in rows.enumerated() { resident[offset + i] = asset }
             markPagesLoaded(coveringOffset: offset, limit: rows.count)
@@ -246,6 +287,22 @@ final class WindowedDataSource {
         // Live search results are never date-sectioned; drop any section
         // geometry from a prior `.space` source (see `setCollection`).
         dateSections = nil
+    }
+
+    /// Switches to windowing `space`'s library narrowed by the Quick Filter
+    /// `query`, instead of the plain library, a discovery collection, or a
+    /// search. Same reset discipline as `setSpace`: every cached row/page
+    /// marker is dropped since indices are meaningless across the switch.
+    /// Unlike `setCollection`/`setSearch`, this then calls `refreshCount`
+    /// because a filtered read HAS a cheap, exact local count (`filterCount`),
+    /// which seeds `totalCount`/`isReady` up front and clears the date-section
+    /// geometry so the filtered grid renders as a single flat section.
+    /// Callers `loadWindow` + re-apply the snapshot after this, the same way
+    /// `LibraryView` already does after `setSpace`.
+    func setFilter(space: Space, query: FilterQuery) async {
+        source = .filter(space, query)
+        resetResident()
+        await refreshCount()
     }
 
     private func resetResident() {

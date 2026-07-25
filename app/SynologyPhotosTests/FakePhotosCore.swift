@@ -160,6 +160,15 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     var searchFacetsResult: Result<SearchFacets, CoreError> = .success(
         SearchFacets(cameras: [], apertures: [], geocodings: [], mediaTypes: []))
 
+    // MARK: - Quick Filter (local) call tracking
+
+    private(set) var filterAssetsCallCount = 0
+    private(set) var filterCountCallCount = 0
+    private(set) var lastFilterMediaKind: MediaKind?
+    private(set) var lastFilterTakenAfter: Int64?
+    private(set) var lastFilterTakenBefore: Int64?
+    private(set) var lastFilterMinRating: UInt8?
+
     private(set) var fetchPeopleCallCount = 0
     private(set) var fetchPlacesCallCount = 0
     private(set) var fetchSubjectsCallCount = 0
@@ -338,6 +347,69 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
 
     func fetchLocalAlbums(space: Space) throws -> [Album] {
         albums[space] ?? []
+    }
+
+    // MARK: - Quick Filter (local)
+
+    func filterAssets(
+        space: Space,
+        mediaKind: MediaKind?,
+        takenAfter: Int64?,
+        takenBefore: Int64?,
+        minRating: UInt8?,
+        offset: UInt32,
+        limit: UInt32
+    ) throws -> [Asset] {
+        filterAssetsCallCount += 1
+        lastFilterMediaKind = mediaKind
+        lastFilterTakenAfter = takenAfter
+        lastFilterTakenBefore = takenBefore
+        lastFilterMinRating = minRating
+        let matched = filteredAssets(
+            space: space, mediaKind: mediaKind, takenAfter: takenAfter,
+            takenBefore: takenBefore, minRating: minRating)
+        return try window(matched, offset: offset, limit: limit)
+    }
+
+    func filterCount(
+        space: Space,
+        mediaKind: MediaKind?,
+        takenAfter: Int64?,
+        takenBefore: Int64?,
+        minRating: UInt8?
+    ) throws -> UInt64 {
+        filterCountCallCount += 1
+        lastFilterMediaKind = mediaKind
+        lastFilterTakenAfter = takenAfter
+        lastFilterTakenBefore = takenBefore
+        lastFilterMinRating = minRating
+        return UInt64(filteredAssets(
+            space: space, mediaKind: mediaKind, takenAfter: takenAfter,
+            takenBefore: takenBefore, minRating: minRating).count)
+    }
+
+    /// Applies the same predicate the real core's SQL does to `assets[space]`,
+    /// preserving the array's order (tests seed it newest-first, exactly like
+    /// `fetchAssets` returns), so the fake mirrors the core faithfully: a
+    /// date bound excludes undated rows, and an all-`nil` filter returns the
+    /// whole space.
+    private func filteredAssets(
+        space: Space,
+        mediaKind: MediaKind?,
+        takenAfter: Int64?,
+        takenBefore: Int64?,
+        minRating: UInt8?
+    ) -> [Asset] {
+        (assets[space] ?? []).filter { asset in
+            if let mediaKind, asset.mediaKind != mediaKind { return false }
+            if takenAfter != nil || takenBefore != nil {
+                guard let takenAt = asset.takenAt else { return false }
+                if let takenAfter, takenAt < takenAfter { return false }
+                if let takenBefore, takenAt > takenBefore { return false }
+            }
+            if let minRating, asset.rating < Int32(minRating) { return false }
+            return true
+        }
     }
 
     // MARK: - Media bytes

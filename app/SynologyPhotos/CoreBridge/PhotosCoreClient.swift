@@ -27,6 +27,18 @@ actor PhotosCoreClient {
         try core.fetchAssets(space: space, offset: offset, limit: limit)
     }
     func assetCount(space: Space) throws -> UInt64 { try core.assetCount(space: space) }
+    /// Local-only windowed read of `space`'s assets narrowed by the Quick
+    /// Filter facets (file type, `taken_at` range, minimum rating), newest
+    /// first with the same ordering as `fetchAssets`. No network; passing
+    /// every facet `nil` returns exactly what `fetchAssets` returns.
+    func filterAssets(space: Space, mediaKind: MediaKind?, takenAfter: Int64?, takenBefore: Int64?, minRating: UInt8?, offset: UInt32, limit: UInt32) throws -> [Asset] {
+        try core.filterAssets(space: space, mediaKind: mediaKind, takenAfter: takenAfter, takenBefore: takenBefore, minRating: minRating, offset: offset, limit: limit)
+    }
+    /// Local-only count of `space`'s assets matching the same Quick Filter
+    /// facets as `filterAssets`; equals `assetCount` when every facet is `nil`.
+    func filterCount(space: Space, mediaKind: MediaKind?, takenAfter: Int64?, takenBefore: Int64?, minRating: UInt8?) throws -> UInt64 {
+        try core.filterCount(space: space, mediaKind: mediaKind, takenAfter: takenAfter, takenBefore: takenBefore, minRating: minRating)
+    }
     /// Local-only per-day histogram for `space` (newest day first), for the
     /// grid's date-section headers and scroll scrubber. Cheap local read, no
     /// network; counts sum to `assetCount` and line up with `fetchAssets`.
