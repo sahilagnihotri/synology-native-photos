@@ -105,13 +105,24 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     /// error path through the windowing logic below.
     var fetchAssetsForResult: Result<[Asset], CoreError>?
 
+    /// Canned assets per keyword, windowed the same way `assetsForCollection`
+    /// is for `fetchAssetsFor`. Keyed by the exact keyword string a test
+    /// scripts, so different keywords can return different result sets.
+    var assetsForKeyword: [String: [Asset]] = [:]
+    /// Overrides `searchAssets` entirely when set, taking precedence over
+    /// `assetsForKeyword`; lets a test simulate a search failure without
+    /// needing a real error path through the windowing logic below.
+    var searchAssetsResult: Result<[Asset], CoreError>?
+
     private(set) var fetchPeopleCallCount = 0
     private(set) var fetchPlacesCallCount = 0
     private(set) var fetchSubjectsCallCount = 0
     private(set) var fetchTagsCallCount = 0
     private(set) var fetchLiveAlbumsCallCount = 0
     private(set) var fetchAssetsForCallCount = 0
+    private(set) var searchAssetsCallCount = 0
     private(set) var lastFetchAssetsForCollection: DiscoveryCollection?
+    private(set) var lastSearchKeyword: String?
 
     // MARK: - Call tracking
 
@@ -294,6 +305,15 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
             return try window(try fetchAssetsForResult.get(), offset: offset, limit: limit)
         }
         return try window(assetsForCollection[collection] ?? [], offset: offset, limit: limit)
+    }
+
+    func searchAssets(keyword: String, offset: UInt32, limit: UInt32) async throws -> [Asset] {
+        searchAssetsCallCount += 1
+        lastSearchKeyword = keyword
+        if let searchAssetsResult {
+            return try window(try searchAssetsResult.get(), offset: offset, limit: limit)
+        }
+        return try window(assetsForKeyword[keyword] ?? [], offset: offset, limit: limit)
     }
 
     /// Shared windowing helper matching `fetchAssets`' own offset/limit

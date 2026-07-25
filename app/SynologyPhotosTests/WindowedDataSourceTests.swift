@@ -189,4 +189,64 @@ struct WindowedDataSourceTests {
         await ds.setCollection(.favorites)
         #expect(ds.space == .personal, "every discovery collection is personal-space-only")
     }
+
+    // MARK: - Search windowing
+
+    @Test func setSearchLoadsFromSearchAssetsNotFetchAssets() async {
+        let fake = FakePhotosCore()
+        fake.assetsForKeyword["food"] = (0..<5).map { asset(Int64($0) + 6000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setSearch("food")
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.count == 5)
+        #expect(fake.searchAssetsCallCount == 1)
+        #expect(fake.lastSearchKeyword == "food")
+    }
+
+    @Test func searchWindowMarksReadyOnceAShortPageArrives() async {
+        let fake = FakePhotosCore()
+        fake.assetsForKeyword["food"] = (0..<5).map { asset(Int64($0) + 6000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setSearch("food")
+        #expect(ds.isReady == false, "no page has loaded yet, so readiness is unknown")
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.isReady == true, "a short page (5 rows for a 50-row ask) means this was the last page")
+        #expect(ds.totalCount == 5)
+    }
+
+    @Test func searchWindowReturnsCleanEmptyOnNoMatch() async {
+        let fake = FakePhotosCore()
+        // No entry for this keyword at all: the fake's default (an empty
+        // array) mirrors the core's own clean-empty-list behavior on a
+        // keyword that matches nothing.
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setSearch("zzzznosuchthing123")
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.isEmpty)
+        #expect(ds.totalCount == 0)
+        #expect(ds.isReady == true, "an empty result is itself a short page and must resolve ready, not hang loading")
+    }
+
+    @Test func setSearchResetsResidentFromAPriorSpace() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        fake.assetsForKeyword["food"] = (0..<3).map { asset(Int64($0) + 7000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.refreshCount()
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.item(at: 0)?.id == 0)
+
+        await ds.setSearch("food")
+        #expect(ds.totalCount == 0, "switching source must reset totalCount until the search's own first page loads")
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.map(\.id) == [7000, 7001, 7002], "must fetch from the search, not the stale space cache")
+    }
+
+    @Test func searchSourceDefaultsToPersonalSpaceForItemIdentity() async {
+        let fake = FakePhotosCore()
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .shared, pageSize: 50)
+        await ds.setSearch("food")
+        #expect(ds.space == .personal, "the search API is personal-space-only")
+    }
 }

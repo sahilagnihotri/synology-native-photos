@@ -10,19 +10,21 @@ struct AssetItemID: Hashable {
 }
 
 /// What a `WindowedDataSource` is currently windowing: either the local
-/// library index for a `Space` (the original, crawl-backed behavior), or a
+/// library index for a `Space` (the original, crawl-backed behavior), a
 /// discovery-browse `DiscoveryCollection` fetched live from the NAS on
-/// every page (no local index for these in this pass).
+/// every page, or a live keyword `search` (no local index for either of
+/// the latter two in this pass).
 ///
-/// Kept as an internal enum rather than two separate data source types so
+/// Kept as an internal enum rather than separate data source types so
 /// the grid controller, which only ever calls the small shared surface
 /// (`item(at:)`, `totalCount`, `isReady`, `loadWindow`, `pageSize`), does
 /// not need to know or care which kind of source is backing it. Selecting a
-/// discovery tile therefore reuses the exact same `PhotoGridController` the
-/// Library grid uses, per the brief.
+/// discovery tile or typing a search query therefore reuses the exact same
+/// `PhotoGridController` the Library grid uses, per the brief.
 private enum FetchSource: Equatable {
     case space(Space)
     case collection(DiscoveryCollection)
+    case search(String)
 }
 
 /// Bridges the NSCollectionView grid to the core's windowed reads.
@@ -57,13 +59,14 @@ final class WindowedDataSource {
 
     /// The space rows in the current window belong to, for `AssetItemID`
     /// purposes. For a `.space` source this is that space; for a
-    /// `.collection` source it is always `.personal`, since every
-    /// discovery-browse collection is personal-space-only (see
-    /// `synology_api::browse::CollectionFilter`'s own scope).
+    /// `.collection` or `.search` source it is always `.personal`, since
+    /// every discovery-browse collection (see
+    /// `synology_api::browse::CollectionFilter`'s own scope) and the search
+    /// API itself are personal-space-only.
     var space: Space {
         switch source {
         case .space(let s): return s
-        case .collection: return .personal
+        case .collection, .search: return .personal
         }
     }
 
@@ -100,7 +103,7 @@ final class WindowedDataSource {
                 totalCount = 0
                 isReady = false
             }
-        case .collection:
+        case .collection, .search:
             break
         }
     }
@@ -124,6 +127,12 @@ final class WindowedDataSource {
                 // ApiPageSource does for the initial crawl. A full page
                 // means there may be more rows beyond it; a short page
                 // (fewer rows than asked for) means this was the last one.
+                isReady = rows.count < limit
+                totalCount = max(totalCount, offset + rows.count)
+            case .search(let keyword):
+                rows = try await client.searchAssets(keyword: keyword, offset: UInt32(offset), limit: UInt32(limit))
+                // Same live-fetch, no-local-index estimate as `.collection`
+                // above: a search has no crawl barrier or grand total either.
                 isReady = rows.count < limit
                 totalCount = max(totalCount, offset + rows.count)
             }
@@ -168,6 +177,18 @@ final class WindowedDataSource {
     /// this, the same way `LibraryView` already does after `setSpace`.
     func setCollection(_ collection: DiscoveryCollection) async {
         source = .collection(collection)
+        resetResident()
+        totalCount = 0
+        isReady = false
+    }
+
+    /// Switches to windowing a live keyword `search` instead of a space's
+    /// library or a discovery-browse collection. Same reset discipline as
+    /// `setCollection`: every cached row/page marker from whatever was
+    /// previously loaded is dropped, and `totalCount`/`isReady` start at
+    /// zero/false, populated by the first `loadWindow` call the same way.
+    func setSearch(_ keyword: String) async {
+        source = .search(keyword)
         resetResident()
         totalCount = 0
         isReady = false
