@@ -2,6 +2,49 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-07-25: detail viewer rework (Apple Photos parity)
+
+Fixed the black box and reworked the detail viewer to Apple's full-pane model.
+Plan: `documentation/plans/2026-07-25-detail-viewer-rework.md` (DONE).
+
+- Root cause was NOT the inline video work: the library is all `photo`/`live`
+  (zero `video` items), so everything took the QuickLook branch, which showed
+  black because of a silent error catch plus a zero-framed `QLPreviewView`.
+- Detail photos now render as a real `NSImage` with explicit loading and error
+  (plus Retry) states, never a silent black frame (`3494aac`).
+- Viewer moved out of the `.sheet` into the split-view detail pane, so the
+  sidebar stays visible and it fills the pane; the grid stays mounted so back is
+  instant (`2863284`).
+- Toolbar with a Back chevron, a zoom slider bound to magnification, and the
+  info toggle; Cmd+Up / Escape / Back return to the grid.
+- Cmd+Down opens the selected photo into detail (`b944a99`).
+- Verified: clean build, and the full unit suite green (296 tests) run
+  independently. Visual confirmation by the user against the running build.
+
+## Session 2026-07-25: About window + Synology API version documentation
+
+- Native About window showing app version, build git SHA, Rust core version, and
+  the key Synology API versions (`748c1ba`); build-time git SHA injected into a
+  generated Swift source (`9bc9fa5`); `documentation/synology-api-versions.md`
+  as the single source of truth for every API and its pinned version (`ee7c634`,
+  DSM version filled in `3631ed9`). 4 new unit tests, suite green.
+
+## Session 2026-07-25: delete-semantics + album-mutation probes
+
+Empirical probes against the real NAS that unblock the delete/manage phase.
+Verdict + shapes in `documentation/phase0-probe-results.md` and
+`documentation/plans/2026-07-25-phase2-manage-implementation.md` section 0
+(`0bcc256`).
+
+- Proved end to end (on one authorized victim, backed up and fully restored)
+  that `SYNO.Foto.Browse.Item delete` is a soft delete: it drops the item from
+  the Photos index and moves the original to the home `#recycle`, but Synology
+  Photos exposes no trash/restore API and `SYNO.Core.RecycleBin` is config only.
+- Verified the album-mutation API reversibly: create (`NormalAlbum.create`),
+  add (`add_item`), remove (`delete_item`), delete album (`Album.delete`).
+- Confirmed File Station is available for recycle recovery, and that
+  `FileStation.Upload` needs the SynoToken in the URL query.
+
 ## Session 2026-07-25: keyword search
 
 Read-only toolbar search reusing the existing browse item decoder end to
