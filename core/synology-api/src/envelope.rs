@@ -65,6 +65,62 @@ pub fn decode_envelope<T: DeserializeOwned>(body: &str) -> Result<T, CoreError> 
     }
 }
 
+/// Tolerant decode for a STATE-CHANGING write whose success envelope has no
+/// `data` payload we need (album `add_item`/`delete_item`, `Album` delete,
+/// `Browse.Item` delete). Unlike `decode_envelope`, this does NOT fail closed
+/// on a `success:true` response that omits `data`: those writes legitimately
+/// answer with a bare `{"success":true}` (verified against the real NAS), and
+/// routing them through `decode_envelope` would misread that success as
+/// `UnexpectedResponse`.
+///
+/// FAIL CLOSED where it still matters:
+/// - `success:false` maps `error.code` through `map_error_code` exactly like
+///   `decode_envelope`.
+/// - A malformed body is `CoreError::Decode`.
+/// - If the response DOES carry a `data.error_list` (the `add_item` shape) and
+///   that list is non-empty, a per-item write failed even though the top-level
+///   envelope claimed success; this returns `CoreError::UnexpectedResponse`
+///   rather than reporting a write that did not fully happen. An absent or
+///   empty `error_list` is the success case.
+pub fn decode_write_success(body: &str) -> Result<(), CoreError> {
+    let parsed: WriteResponse = serde_json::from_str(body).map_err(|e| CoreError::Decode {
+        message: format!("write envelope parse failed: {e}"),
+    })?;
+    if !parsed.success {
+        let code = parsed.error.map(|e| e.code).unwrap_or(-1);
+        return Err(map_error_code(code));
+    }
+    if let Some(data) = parsed.data {
+        if let Some(list) = data.error_list {
+            if !list.is_empty() {
+                return Err(CoreError::UnexpectedResponse {
+                    message: format!("write reported {} per-item error(s) in error_list", list.len()),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct WriteResponse {
+    #[serde(default)]
+    success: bool,
+    #[serde(default = "none")]
+    error: Option<SynoError>,
+    #[serde(default = "none")]
+    data: Option<WriteData>,
+}
+
+/// The only field of a write response's `data` this crate inspects: the
+/// per-item `error_list` returned by album `add_item`. Everything else in
+/// `data` is ignored (tolerant decode, never `deny_unknown_fields`).
+#[derive(Debug, Deserialize)]
+struct WriteData {
+    #[serde(default = "none")]
+    error_list: Option<Vec<serde_json::Value>>,
+}
+
 /// Shared by every endpoint that answers with raw bytes on success but a
 /// JSON error envelope on failure (`SYNO.Foto(Team).Thumbnail`,
 /// `SYNO.Foto(Team).Download`, and any future binary-fetch endpoint).
@@ -204,6 +260,55 @@ mod tests {
     #[test]
     fn json_content_type_garbage_body_maps_to_decode() {
         let err = map_binary_or_error(Some("application/json; charset=utf-8"), b"not json").unwrap_err();
+        assert!(matches!(err, CoreError::Decode { .. }), "got {err:?}");
+    }
+
+    // --- decode_write_success: the write-call decoder --------------------
+
+    #[test]
+    fn write_success_bare_success_is_ok() {
+        // The Browse.Item / Album delete shape: success with no data field at
+        // all. decode_envelope would fail closed here; decode_write_success
+        // must accept it.
+        decode_write_success(r#"{"success":true}"#).expect("bare success must be Ok");
+    }
+
+    #[test]
+    fn write_success_empty_error_list_is_ok() {
+        // The album add_item shape: success with an empty error_list.
+        decode_write_success(r#"{"success":true,"data":{"error_list":[]}}"#).expect("empty error_list must be Ok");
+    }
+
+    #[test]
+    fn write_success_ignores_unknown_data_fields() {
+        decode_write_success(r#"{"success":true,"data":{"album":{"id":7},"future_flag":true}}"#)
+            .expect("unknown data fields must not break a write decode");
+    }
+
+    #[test]
+    fn write_success_non_empty_error_list_fails_closed() {
+        // A per-item failure reported under a success envelope must not be
+        // treated as a completed write.
+        let err = decode_write_success(r#"{"success":true,"data":{"error_list":[{"id":1,"code":123}]}}"#)
+            .unwrap_err();
+        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn write_success_false_maps_error_code() {
+        let err = decode_write_success(r#"{"success":false,"error":{"code":400}}"#).unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn write_success_false_unknown_code_fails_closed() {
+        let err = decode_write_success(r#"{"success":false,"error":{"code":9999}}"#).unwrap_err();
+        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn write_success_garbage_body_maps_to_decode() {
+        let err = decode_write_success("not json at all").unwrap_err();
         assert!(matches!(err, CoreError::Decode { .. }), "got {err:?}");
     }
 }

@@ -501,6 +501,38 @@ impl Transport {
             .map_err(scrub_reqwest_error)?;
         crate::envelope::decode_envelope(&body)
     }
+
+    /// POST a form-encoded STATE-CHANGING request to the shared CGI
+    /// dispatcher and return the raw response body for the caller to decode.
+    ///
+    /// Unlike `post_form`, this does not decode the envelope itself: the
+    /// write calls that use it (album create/add_item/delete_item, album
+    /// delete, item delete) each need a different decoder (`decode_envelope`
+    /// for the create response's `data.album`, `decode_write_success` for the
+    /// bare-success responses), so the raw body is handed back rather than
+    /// forced through one shape.
+    ///
+    /// Sends `X-SYNO-TOKEN: <token>` when `syno_token` is `Some` (DSM's CSRF
+    /// check on top of `_sid`; a token-auth session rejects a state-changing
+    /// call without it with synology error 119, exactly like the read calls
+    /// in `browse.rs`/`download.rs`). The header is omitted entirely when
+    /// `syno_token` is `None`, never sent empty. Uses a POST form body, not a
+    /// query string, matching the verified delete-probe request shape (curl
+    /// `--data-urlencode` plus the header) in
+    /// `documentation/phase0-probe-results.md`. Applies the throttle first.
+    pub async fn post_form_text(
+        &self,
+        form: &[(&str, &str)],
+        syno_token: Option<&str>,
+    ) -> Result<String, CoreError> {
+        self.throttle().await;
+        let mut request = self.client.post(self.entry_url()).form(form);
+        if let Some(token) = syno_token {
+            request = request.header("X-SYNO-TOKEN", token);
+        }
+        let response = request.send().await.map_err(scrub_reqwest_error)?;
+        response.text().await.map_err(scrub_reqwest_error)
+    }
 }
 
 /// Converts a `reqwest::Error` into `CoreError::Network` WITHOUT ever

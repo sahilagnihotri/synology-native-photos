@@ -2,8 +2,10 @@
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub mod album_write;
 pub mod auth;
 pub mod browse;
+pub mod delete_item;
 pub mod discovery;
 pub mod download;
 pub mod envelope;
@@ -13,11 +15,13 @@ pub mod search_filter;
 pub mod thumbnail;
 pub mod transport;
 
+pub use album_write::{add_items, create_album, delete_album, remove_items};
 pub use auth::{login, logout};
 pub use browse::{list_albums, list_items, list_items_filtered, search, search_filtered, CollectionFilter};
+pub use delete_item::permanent_delete;
 pub use discovery::{list_people, list_places, list_subjects, list_tags};
 pub use download::download_original;
-pub use envelope::{decode_envelope, map_error_code, SynoError, SynoResponse};
+pub use envelope::{decode_envelope, decode_write_success, map_error_code, SynoError, SynoResponse};
 pub use info::{pin_version, probe_capabilities};
 pub use search_filter::search_facets;
 pub use thumbnail::fetch_thumbnail;
@@ -34,6 +38,12 @@ mod facade_tests {
         let _ = crate::list_items as usize;
         let _ = crate::list_items_filtered as usize;
         let _ = crate::list_albums as usize;
+        let _ = crate::create_album as usize;
+        let _ = crate::add_items as usize;
+        let _ = crate::remove_items as usize;
+        let _ = crate::delete_album as usize;
+        let _ = crate::permanent_delete as usize;
+        let _ = crate::decode_write_success as usize;
         let _ = crate::search as usize;
         let _ = crate::search_filtered as usize;
         let _ = crate::search_facets as usize;
