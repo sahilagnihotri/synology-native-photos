@@ -2,6 +2,34 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-07-25 (cont.): media enrichment, viewer polish, real delete
+
+- **Media model enrichment** (schema v3): Live Photo `.MOV` clips now classify as
+  Video via the item `live_type` field (`69b6eba`), and each asset carries EXIF
+  (camera/aperture/exposure/focal/iso/lens), description, rating, and video
+  metadata pulled from Browse.Item `additional` (`75c96c2`, bindings `08932bd`).
+- **Library-load fix:** the enriched `additional` is rejected by Browse.Item at
+  version 1 (DSM error 120), so the crawl is pinned to version 2 and search keeps
+  its own lean `additional` on version 1 (`d7766a5`). This was breaking the whole
+  library load after enrichment.
+- **Detail viewer polish:** real EXIF/rating/video metadata in the info panel
+  (`f1cd6bd`), click-drag pan when zoomed (`b9c77be`), and a layout-warning fix
+  plus real `.MOV` playback (`6f4f2bc`).
+- **Real delete (design pivot).** The hybrid trash-album delete shipped first,
+  then was replaced: it left photos in the Synology library (still visible in the
+  web app), which is not what delete should mean. New model: everyday Delete is
+  the real Foto delete (removes from the library everywhere, lands in the DSM
+  recycle bin), recoverable via a File-Station-backed Recently Deleted. VERIFIED
+  end to end against the real NAS: delete to `#recycle`, `FileStation.Thumb` works
+  on recycle paths, `CopyMove` restore with `remove_src=true` plus a Foto reindex
+  brings the photo back into the library. Core: `8dfc989`/`a7f4cea`/`64c3216`/
+  `a72598f`. UI (real delete in the grid and full-photo view, RecycleItem-based
+  Recently Deleted with thumbnails/restore/permanent-empty, and a Refresh):
+  `6863836`/`5de5bb9`/`df1715b`/`6b8f418`/`ce5a4d6`/`81dfc82`. Cleanup done: the
+  vestigial NAS "Recently Deleted" album was removed and the local `in_trash`
+  flags cleared. Follow-up owed: delete the now-dead trash-album methods from the
+  core. 347 app tests green; ~343 core tests green.
+
 ## Session 2026-07-25: detail viewer rework (Apple Photos parity)
 
 Fixed the black box and reworked the detail viewer to Apple's full-pane model.
