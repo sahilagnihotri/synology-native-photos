@@ -530,108 +530,149 @@ struct LibraryView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            // An active search overrides whatever the sidebar is otherwise
-            // routed to, matching Photos' own behavior of overlaying search
-            // results on top of the current view rather than requiring the
-            // user to navigate anywhere first. Clearing the query (handled
-            // in the `.onChange(of: searchQuery)` above) drops straight
-            // back to `currentRoute` with no further action needed here.
-            if let activeSearch {
-                switch LibraryContentRoute.route(
-                    isComplete: env.dataSource.isReady,
-                    itemCount: env.dataSource.totalCount
-                ) {
-                case .importing:
-                    ProgressView("Searching...").accessibilityIdentifier("search.progressview")
-                case .empty:
-                    SearchEmptyView(query: activeSearch)
-                case .grid:
-                    PhotoGridView(controller: controller)
-                case .failed(let message):
-                    CrawlFailedView(message: message) {
-                        await runSearch(activeSearch)
+            // The photo grid lives at exactly ONE structural position (the
+            // `.grid` case here), shared by the plain (date-sectioned) library,
+            // search results, Quick Filter results, and a discovery drill-in.
+            // Those states differ only in the data source (already switched by
+            // setSpace/setSearch/setFilter/setCollection) and the header, so
+            // resolving them to the same `.grid` case keeps SwiftUI from moving
+            // the grid's NSViewController between branches when a search or
+            // filter toggles: the previous per-state branches re-hosted that
+            // shared controller and left the grid showing stale rows. The
+            // transient states (importing/empty/failed) render in the grid's
+            // place, and the genuinely different views (discovery tiles, the
+            // recycle bin) replace it on their own routes.
+            switch libraryDisplay {
+            case .grid:
+                PhotoGridView(controller: controller)
+            case .importing(let label, let accessibilityId):
+                ProgressView(label).accessibilityIdentifier(accessibilityId)
+            case .empty(let state):
+                emptyStateView(state)
+            case .failed(let message, let retry):
+                CrawlFailedView(message: message, onRetry: retry)
+            case .discoveryTiles:
+                if let tilesModel {
+                    DiscoveryTileGridView(model: tilesModel, cache: env.discoveryCoverCache) { collection in
+                        drilledInCollection = collection
                     }
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else if let activeFilter {
-                // A Quick Filter overlays the plain library the same way an
-                // active search does. The filtered read is local and its count
-                // is exact, so `isReady` is true immediately and this only ever
-                // resolves to the grid (nonzero) or the empty state (no match),
-                // never a lingering spinner.
-                switch LibraryContentRoute.route(
-                    isComplete: env.dataSource.isReady,
-                    itemCount: env.dataSource.totalCount
-                ) {
-                case .importing:
-                    ProgressView("Filtering...").accessibilityIdentifier("quickfilter.progressview")
-                case .empty:
-                    FilterEmptyView(summary: activeFilter.summary)
-                case .grid:
-                    PhotoGridView(controller: controller)
-                case .failed(let message):
-                    CrawlFailedView(message: message) {
-                        await applyQuickFilter()
-                    }
-                }
-            } else {
-                switch currentRoute {
-                case .grid:
-                    switch LibraryContentRoute.route(
-                        isComplete: env.crawl.isComplete,
-                        itemCount: env.dataSource.totalCount,
-                        failure: env.crawl.failure
-                    ) {
-                    case .importing:
-                        ProgressView(env.crawl.statusText).accessibilityIdentifier("crawl.progressview")
-                    case .empty:
-                        EmptyLibraryView(space: env.spaceSelection.current)
-                    case .grid:
-                        PhotoGridView(controller: controller)
-                    case .failed(let message):
-                        CrawlFailedView(message: message) {
-                            await env.crawl.startCrawl(space: env.spaceSelection.current)
-                            await env.dataSource.refreshCount()
-                            await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
-                            await controller.applySnapshot()
-                        }
-                    }
-                case .discoveryTiles:
-                    if let tilesModel {
-                        DiscoveryTileGridView(model: tilesModel, cache: env.discoveryCoverCache) { collection in
-                            drilledInCollection = collection
-                        }
-                    } else {
-                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                case .discoveryGrid:
-                    switch LibraryContentRoute.route(
-                        isComplete: env.dataSource.isReady,
-                        itemCount: env.dataSource.totalCount
-                    ) {
-                    case .importing:
-                        ProgressView("Loading...").accessibilityIdentifier("discoverygrid.progressview")
-                    case .empty:
-                        DiscoveryGridEmptyView(title: headerTitle)
-                    case .grid:
-                        PhotoGridView(controller: controller)
-                    case .failed(let message):
-                        CrawlFailedView(message: message) {
-                            if case .discoveryGrid(let collection) = currentRoute {
-                                await switchCollection(to: collection)
-                            }
-                        }
-                    }
-                case .recentlyDeleted:
-                    // The recycle bin has its own view (not the photo grid):
-                    // it reads `RecycleItem`s live from the NAS, loads itself
-                    // on appear, and owns its own Restore / Delete Permanently
-                    // action bar. A restore asks the library to refresh so the
-                    // returned items reappear.
-                    RecentlyDeletedView(model: recentlyDeletedModel, client: env.client) {
-                        await reconcileAndReloadGrid()
-                    }
+            case .recentlyDeleted:
+                // The recycle bin has its own view (not the photo grid): it
+                // reads `RecycleItem`s live from the NAS, loads itself on
+                // appear, and owns its own Restore / Delete Permanently action
+                // bar. A restore asks the library to refresh so the returned
+                // items reappear.
+                RecentlyDeletedView(model: recentlyDeletedModel, client: env.client) {
+                    await reconcileAndReloadGrid()
                 }
             }
+        }
+    }
+
+    /// The single thing the content area shows at any moment. Search, the Quick
+    /// Filter, the plain library, and a discovery drill-in all resolve to
+    /// `.grid` so the photo grid can be hosted at one stable position in the
+    /// view tree (see `content`'s `switch`); the transient and alternate states
+    /// carry whatever the view in the grid's place needs (a spinner label, the
+    /// empty-state kind, the failed message plus its retry). Computed fresh on
+    /// every body evaluation off the observable data source / crawl, so a
+    /// source or readiness change flips it without any stale routing lingering.
+    private enum LibraryDisplay {
+        case grid
+        case importing(label: String, accessibilityId: String)
+        case empty(LibraryEmptyState)
+        case failed(message: String, retry: () async -> Void)
+        case discoveryTiles
+        case recentlyDeleted
+    }
+
+    /// Which empty state the content area shows when a grid-backed route has no
+    /// rows: the plain library, a keyword search, the Quick Filter, or a
+    /// discovery collection. Each carries only what its view needs to render.
+    private enum LibraryEmptyState {
+        case library(Space)
+        case search(query: String)
+        case filter(summary: String)
+        case discovery(title: String)
+    }
+
+    /// Collapses the whole content-area routing into one `LibraryDisplay` so the
+    /// grid slot in `content` is invariant across a search/filter toggle. Reads
+    /// the same crawl-barrier-vs-count decision (`LibraryContentRoute.route`)
+    /// each grid-backed route already used; an active search or filter overlays
+    /// the plain library exactly as before.
+    private var libraryDisplay: LibraryDisplay {
+        if let activeSearch {
+            switch LibraryContentRoute.route(
+                isComplete: env.dataSource.isReady, itemCount: env.dataSource.totalCount) {
+            case .importing: return .importing(label: "Searching...", accessibilityId: "search.progressview")
+            case .empty: return .empty(.search(query: activeSearch))
+            case .grid: return .grid
+            case .failed(let message): return .failed(message: message, retry: { await runSearch(activeSearch) })
+            }
+        }
+        if let activeFilter {
+            // A Quick Filter overlays the plain library the same way an active
+            // search does. The filtered read is local and its count is exact, so
+            // `isReady` is true immediately: this resolves straight to `.grid`
+            // (nonzero) or `.empty` (no match), never a lingering spinner.
+            switch LibraryContentRoute.route(
+                isComplete: env.dataSource.isReady, itemCount: env.dataSource.totalCount) {
+            case .importing: return .importing(label: "Filtering...", accessibilityId: "quickfilter.progressview")
+            case .empty: return .empty(.filter(summary: activeFilter.summary))
+            case .grid: return .grid
+            case .failed(let message): return .failed(message: message, retry: { await applyQuickFilter() })
+            }
+        }
+        switch currentRoute {
+        case .grid:
+            switch LibraryContentRoute.route(
+                isComplete: env.crawl.isComplete,
+                itemCount: env.dataSource.totalCount,
+                failure: env.crawl.failure) {
+            case .importing: return .importing(label: env.crawl.statusText, accessibilityId: "crawl.progressview")
+            case .empty: return .empty(.library(env.spaceSelection.current))
+            case .grid: return .grid
+            case .failed(let message):
+                return .failed(message: message, retry: {
+                    await env.crawl.startCrawl(space: env.spaceSelection.current)
+                    await env.dataSource.refreshCount()
+                    await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+                    await controller.applySnapshot()
+                })
+            }
+        case .discoveryTiles:
+            return .discoveryTiles
+        case .discoveryGrid:
+            switch LibraryContentRoute.route(
+                isComplete: env.dataSource.isReady, itemCount: env.dataSource.totalCount) {
+            case .importing: return .importing(label: "Loading...", accessibilityId: "discoverygrid.progressview")
+            case .empty: return .empty(.discovery(title: headerTitle))
+            case .grid: return .grid
+            case .failed(let message):
+                return .failed(message: message, retry: {
+                    if case .discoveryGrid(let collection) = currentRoute {
+                        await switchCollection(to: collection)
+                    }
+                })
+            }
+        case .recentlyDeleted:
+            return .recentlyDeleted
+        }
+    }
+
+    /// Renders the empty state for a grid-backed route with no rows. Split out
+    /// of `content` so the single grid slot's `switch` stays flat and readable.
+    @ViewBuilder
+    private func emptyStateView(_ state: LibraryEmptyState) -> some View {
+        switch state {
+        case .library(let space): EmptyLibraryView(space: space)
+        case .search(let query): SearchEmptyView(query: query)
+        case .filter(let summary): FilterEmptyView(summary: summary)
+        case .discovery(let title): DiscoveryGridEmptyView(title: title)
         }
     }
 
