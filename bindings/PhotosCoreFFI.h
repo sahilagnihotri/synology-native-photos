@@ -303,7 +303,7 @@ uint64_t uniffi_photoscore_fn_method_photoscore_download_original(void*_Nonnull 
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_ALBUMS
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_ALBUMS
-RustBuffer uniffi_photoscore_fn_method_photoscore_fetch_albums(void*_Nonnull ptr, RustBuffer space, RustCallStatus *_Nonnull out_status
+uint64_t uniffi_photoscore_fn_method_photoscore_fetch_albums(void*_Nonnull ptr, uint32_t offset, uint32_t limit
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_ASSETS
@@ -319,6 +319,11 @@ uint64_t uniffi_photoscore_fn_method_photoscore_fetch_assets_for(void*_Nonnull p
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
 uint64_t uniffi_photoscore_fn_method_photoscore_fetch_certificate(void*_Nonnull ptr, RustBuffer host
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_LOCAL_ALBUMS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_LOCAL_ALBUMS
+RustBuffer uniffi_photoscore_fn_method_photoscore_fetch_local_albums(void*_Nonnull ptr, RustBuffer space, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_PEOPLE
@@ -713,6 +718,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_assets_for(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_CERTIFICATE
 uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_certificate(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_LOCAL_ALBUMS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_LOCAL_ALBUMS
+uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_local_albums(void
     
 );
 #endif

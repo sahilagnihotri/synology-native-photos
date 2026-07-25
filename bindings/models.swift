@@ -529,20 +529,44 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 }
 
 
+/**
+ * One row from `SYNO.Foto.Browse.Album`: either a user-created normal album
+ * or a rule-based smart (condition) album; the two share this one list
+ * surface on the real NAS (see `synology_api::browse::list_albums`'s doc
+ * comment for the confirmed request/response shape).
+ *
+ * `cover_unit_id` is the id the thumbnail endpoint keys on for the album's
+ * cover photo, mirrored from `additional.thumbnail.unit_id` the same way
+ * `Asset.unit_id` is (VERIFIED elsewhere in this crate that thumbnail
+ * endpoints key on unit_id, not an item id); `None` when the album has no
+ * cover yet (e.g. an empty album). `is_smart`/`is_shared` are best-effort:
+ * the real NAS account probed for this feature has zero albums of either
+ * kind, so the exact JSON marker for "this is a condition album" / "this
+ * album is shared" could not be captured from a live non-empty response.
+ * Both default to `false` when the marker is absent rather than failing
+ * decode, so an unrecognized/renamed marker degrades to "normal, unshared"
+ * rather than breaking the list.
+ */
 public struct Album {
     public var id: Int64
     public var name: String
     public var itemCount: UInt32
     public var coverCacheKey: String?
+    public var coverUnitId: Int64?
+    public var isShared: Bool
+    public var isSmart: Bool
     public var space: Space
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: Int64, name: String, itemCount: UInt32, coverCacheKey: String?, space: Space) {
+    public init(id: Int64, name: String, itemCount: UInt32, coverCacheKey: String?, coverUnitId: Int64?, isShared: Bool, isSmart: Bool, space: Space) {
         self.id = id
         self.name = name
         self.itemCount = itemCount
         self.coverCacheKey = coverCacheKey
+        self.coverUnitId = coverUnitId
+        self.isShared = isShared
+        self.isSmart = isSmart
         self.space = space
     }
 }
@@ -566,6 +590,15 @@ extension Album: Equatable, Hashable {
         if lhs.coverCacheKey != rhs.coverCacheKey {
             return false
         }
+        if lhs.coverUnitId != rhs.coverUnitId {
+            return false
+        }
+        if lhs.isShared != rhs.isShared {
+            return false
+        }
+        if lhs.isSmart != rhs.isSmart {
+            return false
+        }
         if lhs.space != rhs.space {
             return false
         }
@@ -577,6 +610,9 @@ extension Album: Equatable, Hashable {
         hasher.combine(name)
         hasher.combine(itemCount)
         hasher.combine(coverCacheKey)
+        hasher.combine(coverUnitId)
+        hasher.combine(isShared)
+        hasher.combine(isSmart)
         hasher.combine(space)
     }
 }
@@ -594,6 +630,9 @@ public struct FfiConverterTypeAlbum: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf), 
                 itemCount: FfiConverterUInt32.read(from: &buf), 
                 coverCacheKey: FfiConverterOptionString.read(from: &buf), 
+                coverUnitId: FfiConverterOptionInt64.read(from: &buf), 
+                isShared: FfiConverterBool.read(from: &buf), 
+                isSmart: FfiConverterBool.read(from: &buf), 
                 space: FfiConverterTypeSpace.read(from: &buf)
         )
     }
@@ -603,6 +642,9 @@ public struct FfiConverterTypeAlbum: FfiConverterRustBuffer {
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterUInt32.write(value.itemCount, into: &buf)
         FfiConverterOptionString.write(value.coverCacheKey, into: &buf)
+        FfiConverterOptionInt64.write(value.coverUnitId, into: &buf)
+        FfiConverterBool.write(value.isShared, into: &buf)
+        FfiConverterBool.write(value.isSmart, into: &buf)
         FfiConverterTypeSpace.write(value.space, into: &buf)
     }
 }
@@ -1845,10 +1887,11 @@ extension CoreError: Foundation.LocalizedError {
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * A discovery-browse collection to fetch photos for: one of People,
- * Places, Tags, or the user's Favorites. Personal space only (see
- * `synology_api::browse::CollectionFilter`, which this maps onto
- * one-for-one); there is deliberately no `Subject` variant because no
- * working item filter was found for Concept/Subjects on the real NAS.
+ * Places, Tags, the user's Favorites, or one Album (normal or smart).
+ * Personal space only (see `synology_api::browse::CollectionFilter`, which
+ * this maps onto one-for-one); there is deliberately no `Subject` variant
+ * because no working item filter was found for Concept/Subjects on the
+ * real NAS.
  */
 
 public enum DiscoveryCollection {
@@ -1860,6 +1903,8 @@ public enum DiscoveryCollection {
     case tag(id: Int64
     )
     case favorites
+    case album(id: Int64
+    )
 }
 
 
@@ -1888,6 +1933,9 @@ public struct FfiConverterTypeDiscoveryCollection: FfiConverterRustBuffer {
         
         case 4: return .favorites
         
+        case 5: return .album(id: try FfiConverterInt64.read(from: &buf)
+        )
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -1914,6 +1962,11 @@ public struct FfiConverterTypeDiscoveryCollection: FfiConverterRustBuffer {
         case .favorites:
             writeInt(&buf, Int32(4))
         
+        
+        case let .album(id):
+            writeInt(&buf, Int32(5))
+            FfiConverterInt64.write(id, into: &buf)
+            
         }
     }
 }

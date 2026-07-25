@@ -572,10 +572,14 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func downloadOriginal(space: Space, unitId: Int64, cacheKey: String) async throws  -> String
     
     /**
-     * Local read of every album in `space`, ordered by name. No network
-     * access; same lock discipline as `fetch_assets`/`asset_count`.
+     * Lists albums (`SYNO.Foto.Browse.Album`), a live network call every
+     * time: same discipline as `fetch_people`/`fetch_tags`/etc, there is no
+     * local index for the live NAS album list in this pass. Personal space
+     * only, matching every other discovery-browse lister in this facade.
+     * Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
      */
-    func fetchAlbums(space: Space) throws  -> [Album]
+    func fetchAlbums(offset: UInt32, limit: UInt32) async throws  -> [Album]
     
     /**
      * Windowed local read of assets in `space`, newest-first, for the grid's
@@ -588,11 +592,11 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     
     /**
      * Fetches the photos belonging to one discovery-browse `collection`
-     * (a person, place, tag, or the user's favorites), windowed the same
-     * way `fetch_assets` windows the library grid. Unlike `fetch_assets`,
-     * this always hits the NAS directly (no local index for discovery
-     * collections yet), but keeps the same unit_id/token invariants every
-     * other browse call in this crate relies on.
+     * (a person, place, tag, an album, or the user's favorites), windowed
+     * the same way `fetch_assets` windows the library grid. Unlike
+     * `fetch_assets`, this always hits the NAS directly (no local index
+     * for discovery collections yet), but keeps the same unit_id/token
+     * invariants every other browse call in this crate relies on.
      *
      * Requires a live session; fails closed with `CoreError::Auth`
      * otherwise. Personal space only, matching
@@ -614,6 +618,19 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * `Connection.pinned_cert_der` on the `Connection` used for `login`.
      */
     func fetchCertificate(host: String) async throws  -> CertInfo
+    
+    /**
+     * Local read of every album in `space`, ordered by name. No network
+     * access; same lock discipline as `fetch_assets`/`asset_count`.
+     *
+     * Not currently wired to anything crawling albums into the local
+     * index (nothing populates the `albums` table yet), so this always
+     * returns whatever was upserted by a prior test/tool run, typically
+     * empty. The user-visible Albums sidebar reads the live NAS-backed
+     * `fetch_albums` below instead, matching the discovery-browse
+     * collections (no local index for those either).
+     */
+    func fetchLocalAlbums(space: Space) throws  -> [Album]
     
     /**
      * Lists People (`SYNO.Foto.Browse.Person`), a live network call every
@@ -934,15 +951,28 @@ open func downloadOriginal(space: Space, unitId: Int64, cacheKey: String)async t
 }
     
     /**
-     * Local read of every album in `space`, ordered by name. No network
-     * access; same lock discipline as `fetch_assets`/`asset_count`.
+     * Lists albums (`SYNO.Foto.Browse.Album`), a live network call every
+     * time: same discipline as `fetch_people`/`fetch_tags`/etc, there is no
+     * local index for the live NAS album list in this pass. Personal space
+     * only, matching every other discovery-browse lister in this facade.
+     * Requires a live session; fails closed with `CoreError::Auth`
+     * otherwise.
      */
-open func fetchAlbums(space: Space)throws  -> [Album]  {
-    return try  FfiConverterSequenceTypeAlbum.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
-    uniffi_photoscore_fn_method_photoscore_fetch_albums(self.uniffiClonePointer(),
-        FfiConverterTypeSpace_lower(space),$0
-    )
-})
+open func fetchAlbums(offset: UInt32, limit: UInt32)async throws  -> [Album]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_fetch_albums(
+                    self.uniffiClonePointer(),
+                    FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeAlbum.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
 }
     
     /**
@@ -964,11 +994,11 @@ open func fetchAssets(space: Space, offset: UInt32, limit: UInt32)throws  -> [As
     
     /**
      * Fetches the photos belonging to one discovery-browse `collection`
-     * (a person, place, tag, or the user's favorites), windowed the same
-     * way `fetch_assets` windows the library grid. Unlike `fetch_assets`,
-     * this always hits the NAS directly (no local index for discovery
-     * collections yet), but keeps the same unit_id/token invariants every
-     * other browse call in this crate relies on.
+     * (a person, place, tag, an album, or the user's favorites), windowed
+     * the same way `fetch_assets` windows the library grid. Unlike
+     * `fetch_assets`, this always hits the NAS directly (no local index
+     * for discovery collections yet), but keeps the same unit_id/token
+     * invariants every other browse call in this crate relies on.
      *
      * Requires a live session; fails closed with `CoreError::Auth`
      * otherwise. Personal space only, matching
@@ -1019,6 +1049,25 @@ open func fetchCertificate(host: String)async throws  -> CertInfo  {
             liftFunc: FfiConverterTypeCertInfo_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
+}
+    
+    /**
+     * Local read of every album in `space`, ordered by name. No network
+     * access; same lock discipline as `fetch_assets`/`asset_count`.
+     *
+     * Not currently wired to anything crawling albums into the local
+     * index (nothing populates the `albums` table yet), so this always
+     * returns whatever was upserted by a prior test/tool run, typically
+     * empty. The user-visible Albums sidebar reads the live NAS-backed
+     * `fetch_albums` below instead, matching the discovery-browse
+     * collections (no local index for those either).
+     */
+open func fetchLocalAlbums(space: Space)throws  -> [Album]  {
+    return try  FfiConverterSequenceTypeAlbum.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_photoscore_fn_method_photoscore_fetch_local_albums(self.uniffiClonePointer(),
+        FfiConverterTypeSpace_lower(space),$0
+    )
+})
 }
     
     /**
@@ -1767,16 +1816,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_download_original() != 35832) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_fetch_albums() != 8838) {
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_albums() != 62551) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_assets() != 29559) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_fetch_assets_for() != 57361) {
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_assets_for() != 57496) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_certificate() != 19983) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_fetch_local_albums() != 23033) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_people() != 6988) {
