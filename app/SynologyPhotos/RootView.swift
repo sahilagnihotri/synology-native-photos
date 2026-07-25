@@ -23,10 +23,18 @@ struct RootRouter {
 /// unit-testable without a scene. A sync is allowed when none has run yet, or
 /// once at least `minimumInterval` seconds have passed since the last one.
 enum AutoSyncGate {
-    /// Minimum gap between activation-triggered syncs. Chosen so quickly
-    /// clicking away and back (Cmd-Tab, a notification, a Spotlight peek)
-    /// does not fire a reconcile every time the window regains focus.
+    /// Minimum gap between automatic syncs (activation and periodic). Chosen
+    /// so quickly clicking away and back (Cmd-Tab, a notification, a Spotlight
+    /// peek), or a periodic tick landing right after a manual Refresh, does
+    /// not fire a second reconcile back to back.
     static let minimumInterval: TimeInterval = 20
+
+    /// How often the periodic background sync ticks while the library grid is
+    /// active. A light every-few-minutes cadence: often enough that changes
+    /// made elsewhere trickle in on their own, rare enough to be negligible
+    /// load. The `minimumInterval` debounce still coalesces a tick that would
+    /// otherwise land just after another sync.
+    static let periodicInterval: TimeInterval = 150
 
     static func shouldSync(lastSyncAt: Date?, now: Date, minimumInterval: TimeInterval = minimumInterval) -> Bool {
         guard let lastSyncAt else { return true }
@@ -146,16 +154,21 @@ extension LibraryContentRoute {
 /// as before, only the control that triggers it has moved.
 struct LibraryView: View {
     let env: AppEnvironment
-    /// Drives the activation auto-sync: transitioning to `.active` reconciles
-    /// the current space so changes made elsewhere show up without a manual
-    /// Refresh (see `autoSyncOnActivation`).
+    /// Drives the automatic syncs: transitioning to `.active` reconciles the
+    /// current space, and the periodic timer only runs while `.active` (see
+    /// `autoSyncTick` and `isPeriodicSyncActive`).
     @Environment(\.scenePhase) private var scenePhase
     @State private var controller: PhotoGridController
     @State private var detailIndex: Int?
-    /// When the last space reconcile ran (manual Refresh or activation
-    /// auto-sync), so `AutoSyncGate` can debounce activation syncs. Nil until
-    /// the first one runs.
+    /// When the last space reconcile ran (manual Refresh, activation auto-sync,
+    /// or the periodic timer), so `AutoSyncGate` can debounce the automatic
+    /// paths against each other and against a manual Refresh. Nil until the
+    /// first one runs.
     @State private var lastAutoSyncAt: Date?
+    /// True while a reconcile + grid reload is in flight, so the automatic
+    /// paths never stack a second one on top of a running sync. Checked and
+    /// set synchronously in `syncLibrary`.
+    @State private var isSyncing = false
     @State private var sidebarSelection: SidebarItem? = .library
     @State private var zoom = GridZoomModel()
     @State private var deleteController: DeleteController
@@ -290,9 +303,27 @@ struct LibraryView: View {
             // Only on a real transition INTO active (not an active->active
             // report), so re-focusing the window auto-syncs while ordinary
             // in-app changes do not. The debounce and route/crawl guards live
-            // in `autoSyncOnActivation`.
+            // in `autoSyncTick`.
             guard newPhase == .active, oldPhase != .active else { return }
-            Task { await autoSyncOnActivation() }
+            Task { await autoSyncTick() }
+        }
+        // Light periodic background sync: while the app is active AND the
+        // space-backed library grid is on screen, reconcile + reload on a
+        // timer so changes made elsewhere trickle in without a manual
+        // Refresh. `.task(id:)` ties the loop's lifetime to
+        // `isPeriodicSyncActive`: it starts when that becomes true, is
+        // cancelled the moment it flips false (app deactivated, or the user
+        // navigates to discovery/search/recently-deleted), and is torn down
+        // with the view on sign-out. Each tick still runs through
+        // `autoSyncTick`, so it shares the same debounce/in-flight/route
+        // guards as the manual and on-activation paths.
+        .task(id: isPeriodicSyncActive) {
+            guard isPeriodicSyncActive else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(AutoSyncGate.periodicInterval))
+                if Task.isCancelled { break }
+                await autoSyncTick()
+            }
         }
         // The everyday delete confirm, shared verbatim by the grid and the
         // full-photo detail viewer. The space is read from the data source
@@ -416,7 +447,7 @@ struct LibraryView: View {
                     // library grid: discovery collections and search are
                     // fetched live on every load and have no crawl to reconcile.
                     if isLibraryGridRoute {
-                        Button { Task { await refreshLibrary() } } label: {
+                        Button { Task { await syncLibrary() } } label: {
                             Label("Refresh", systemImage: "arrow.clockwise")
                         }
                         .accessibilityIdentifier("library.refresh")
@@ -518,7 +549,7 @@ struct LibraryView: View {
                     // action bar. A restore asks the library to refresh so the
                     // returned items reappear.
                     RecentlyDeletedView(model: recentlyDeletedModel, client: env.client) {
-                        await refreshLibrary()
+                        await reconcileAndReloadGrid()
                     }
                 }
             }
@@ -582,6 +613,16 @@ struct LibraryView: View {
         return false
     }
 
+    /// Whether the periodic background sync loop should be running: only while
+    /// the app is active AND the space-backed library grid is on screen. The
+    /// `.task(id:)` that owns the loop keys off this, so the timer is created
+    /// when it becomes true and cancelled the instant it flips false (the app
+    /// deactivates, or the user leaves the library grid for discovery, search,
+    /// or the recycle bin).
+    private var isPeriodicSyncActive: Bool {
+        scenePhase == .active && isLibraryGridRoute
+    }
+
     /// Switches the active space (a no-op if `space` already matches
     /// `env.spaceSelection.current`) and re-runs the same
     /// crawl/refresh/load/snapshot sequence the initial `.task` runs, so a
@@ -627,31 +668,48 @@ struct LibraryView: View {
         await controller.applySnapshot()
     }
 
-    /// The visible Refresh action for the library: runs a delta reconcile for
-    /// the current space so NAS-side changes made elsewhere (and this app's
-    /// own deletes/restores) show up, then reloads the grid. Reuses the crawl
-    /// model's reconcile entry point rather than a fresh full crawl.
+    /// Raw delta reconcile for the current space followed by a grid reload, so
+    /// NAS-side changes made elsewhere (and this app's own deletes/restores)
+    /// show up. Reuses the crawl model's reconcile entry point rather than a
+    /// fresh full crawl. Stamps `lastAutoSyncAt` so every automatic path
+    /// debounces against it.
     ///
-    /// Stamps `lastAutoSyncAt` so the activation auto-sync debounces against a
-    /// manual Refresh too: pressing Refresh then immediately clicking away and
-    /// back should not fire a second, redundant reconcile.
-    private func refreshLibrary() async {
+    /// Ungated on purpose: the callers that must always reflect a change
+    /// immediately (Cmd-Z undo, a recycle-bin restore) use this directly.
+    /// `PhotosCoreClient` is an actor, so overlapping reconciles serialize
+    /// rather than race, and `refreshCurrentGrid` is idempotent, so a rare
+    /// overlap is wasteful at worst, never unsafe.
+    private func reconcileAndReloadGrid() async {
         lastAutoSyncAt = Date()
         await env.crawl.reconcile(space: env.spaceSelection.current)
         await refreshCurrentGrid()
     }
 
-    /// Auto-sync when the app becomes active: reconcile the current space and
-    /// reload the grid so changes made elsewhere (a delete in the Synology web
-    /// app, another device) show up without pressing Refresh. Only for the
-    /// space-backed library grid, gated by `AutoSyncGate` so it does not fire
-    /// on every trivial focus change, and skipped while the initial crawl is
-    /// still running (reconciling mid-import would fight the crawl).
-    private func autoSyncOnActivation() async {
+    /// The visible Refresh action for the library, guarded against overlapping
+    /// itself: if a sync is already in flight, this is a no-op so a reconcile
+    /// is never double-loaded on top of another. The `isSyncing` check-and-set
+    /// is synchronous (no `await` between them), so on the main actor two
+    /// callers can never both pass it. Drives the manual Refresh button and,
+    /// via `autoSyncTick`, both automatic syncs.
+    private func syncLibrary() async {
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        await reconcileAndReloadGrid()
+    }
+
+    /// The gated automatic sync shared by the on-activation trigger and the
+    /// periodic timer: only for the space-backed library grid, only once the
+    /// initial crawl is done (reconciling mid-import would fight the crawl),
+    /// and only when the debounce window has elapsed since the last sync
+    /// (`AutoSyncGate`, whose clock the manual Refresh stamps too, so the two
+    /// automatic paths coalesce with a manual Refresh and with each other and
+    /// never run two reconciles back to back).
+    private func autoSyncTick() async {
         guard isLibraryGridRoute else { return }
         guard env.crawl.isComplete else { return }
         guard AutoSyncGate.shouldSync(lastSyncAt: lastAutoSyncAt, now: Date()) else { return }
-        await refreshLibrary()
+        await syncLibrary()
     }
 
     // MARK: - Delete actions
@@ -674,7 +732,7 @@ struct LibraryView: View {
     /// index once the reconcile pulls them back from the NAS).
     private func undoLastDelete() async {
         await deleteController.undoLastDelete {
-            await refreshLibrary()
+            await reconcileAndReloadGrid()
         }
     }
 

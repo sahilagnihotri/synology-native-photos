@@ -39,6 +39,25 @@ struct AutoSyncGateTests {
         let atBoundary = last.addingTimeInterval(AutoSyncGate.minimumInterval)
         #expect(AutoSyncGate.shouldSync(lastSyncAt: last, now: atBoundary))
     }
+
+    /// A periodic tick landing right after another sync (manual Refresh or
+    /// on-activation) must coalesce: the debounce clock is shared, so a tick
+    /// inside the minimum interval is skipped even though the interval itself
+    /// is minutes long.
+    @Test func aPeriodicTickWithinTheDebounceWindowIsSkipped() {
+        let last = Date()
+        let shortlyAfter = last.addingTimeInterval(AutoSyncGate.minimumInterval - 1)
+        #expect(!AutoSyncGate.shouldSync(lastSyncAt: last, now: shortlyAfter))
+    }
+
+    /// The periodic cadence is a light every-few-minutes tick (the brief's
+    /// "roughly every 2 to 3 minutes"), and comfortably longer than the
+    /// coalescing debounce so a tick is never gated purely by its own cadence.
+    @Test func periodicIntervalIsRoughlyTwoToThreeMinutes() {
+        #expect(AutoSyncGate.periodicInterval >= 120)
+        #expect(AutoSyncGate.periodicInterval <= 180)
+        #expect(AutoSyncGate.periodicInterval > AutoSyncGate.minimumInterval)
+    }
 }
 
 /// Exercises the decision behind what the library area shows once the crawl
