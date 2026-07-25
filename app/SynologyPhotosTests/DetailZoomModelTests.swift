@@ -24,6 +24,15 @@ struct DetailZoomModelTests {
         #expect(DetailZoomModel.clamp(DetailZoomModel.maxScale) == DetailZoomModel.maxScale)
     }
 
+    @Test func zoomStaysBoundedBetweenFitAndEightX() {
+        // The toolbar slider and pinch gesture both drive this clamp, so the
+        // fit..8x range the viewer advertises must be exactly these bounds.
+        #expect(DetailZoomModel.fitScale == 1.0)
+        #expect(DetailZoomModel.maxScale == 8.0)
+        #expect(DetailZoomModel.clamp(0.1) == 1.0)
+        #expect(DetailZoomModel.clamp(100) == 8.0)
+    }
+
     @Test func fitScaleIsNotConsideredZoomed() {
         #expect(DetailZoomModel.isZoomed(DetailZoomModel.fitScale) == false)
     }

@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AppKit
 import PhotosCore
 @testable import SynologyPhotos
 
@@ -39,5 +40,52 @@ struct VideoPlaybackAssetBuilderTests {
         let source = VideoPlaybackSource.url(url: "")
         let asset = VideoPlaybackAssetBuilder.makeAsset(source: source, synoToken: "TOKEN")
         #expect(asset.url.isFileURL)
+    }
+}
+
+/// Exercises the detail image renderer's state machine (the photo branch),
+/// independent of a real NAS download or a real image on disk: both the
+/// download and the decode step are injected closures, so loading -> loaded
+/// and loading -> failed are verifiable directly.
+@MainActor
+struct DetailImageLoaderTests {
+    private func photo() -> Asset {
+        Asset(id: 1, unitId: 1, cacheKey: "k", filename: "IMG_1.jpg", mediaKind: .photo,
+              takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
+              space: .personal, serverVersion: nil)
+    }
+
+    private struct DownloadFailed: Error {}
+
+    @Test func startsInLoadingBeforeAnyLoad() {
+        let loader = DetailImageLoader(
+            download: { _, _ in URL(fileURLWithPath: "/dev/null") },
+            makeImage: { _ in NSImage(size: NSSize(width: 1, height: 1)) })
+        #expect(loader.state == .loading)
+    }
+
+    @Test func movesToLoadedOnAValidImage() async {
+        let image = NSImage(size: NSSize(width: 2, height: 2))
+        let loader = DetailImageLoader(
+            download: { _, _ in URL(fileURLWithPath: "/tmp/whatever.jpg") },
+            makeImage: { _ in image })
+        await loader.load(asset: photo(), space: .personal)
+        #expect(loader.state == .loaded(image))
+    }
+
+    @Test func movesToFailedWhenTheDownloadThrows() async {
+        let loader = DetailImageLoader(
+            download: { _, _ in throw DownloadFailed() },
+            makeImage: { _ in NSImage(size: NSSize(width: 1, height: 1)) })
+        await loader.load(asset: photo(), space: .personal)
+        #expect(loader.state == .failed("Could not load this photo."))
+    }
+
+    @Test func movesToFailedWhenTheFileCannotBeDecoded() async {
+        let loader = DetailImageLoader(
+            download: { _, _ in URL(fileURLWithPath: "/tmp/not-an-image") },
+            makeImage: { _ in nil })
+        await loader.load(asset: photo(), space: .personal)
+        #expect(loader.state == .failed("This file could not be opened as an image."))
     }
 }
