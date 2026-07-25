@@ -9,20 +9,31 @@ Only pending work. Completed items live in `Fixed.md`. Live scratch progress in 
 
 ## Viewer + browsing enhancements (feedback 2026-07-25)
 
-Shared prerequisite: a core "media model enrichment" pass. Browse.Item `additional`
-exposes `exif` (camera, aperture, exposure_time, focal_length, iso, lens),
-`description`, `rating`, `tag`, `person`, and (for videos) `video_meta` (codec,
-container, duration, framerate, resolution); items also carry `live_type`
-("photo"/"video") alongside `type`. Capture these in the Asset model, browse
-decoder, and local schema; that single pass unblocks the video fix, info panel,
-and filters. Do this AFTER the hybrid delete core lands (both touch models/browse/schema).
+Done this session (see `Fixed.md`): media enrichment, `.MOV`/live video playback,
+richer info panel (EXIF/rating/description/video metadata), click-drag pan,
+timeline date-section headers + date scrubber, and Quick Filter (file type / date
+/ rating). Remaining:
 
-- [ ] BUG: live-photo videos (`.MOV`, `type=live` `live_type=video`) open with "could not load as image" because they route to the image renderer. Fix: media kind should treat `live_type=="video"` and `type=="video"` as Video so they play via AVPlayer (video_meta confirms h264/mp4). Show the play badge on them in the grid too.
-- [ ] Richer info panel to match Synology: camera/lens/aperture/ISO/exposure/focal length (EXIF), description, rating stars, tags, people, and for videos codec/duration/framerate/resolution. Data is in Browse.Item `additional`.
-- [ ] Confirm pan works when zoomed in the detail viewer (scroll to pan once magnified); fix if not.
-- [ ] Quick Filter (Synology parity): file type (photo/video), date taken (year/month), favorites, rating, plus people and geolocation. Local-first over the SQLite index (needs favorite/rating/media-type columns); people/geolocation reuse the existing discovery collections.
-- [ ] Share link: create a public share link for a photo/video (`SYNO.Foto.PublicSharing` / `SYNO.Foto.Sharing.*`). New feature; probe read-first.
-- [ ] Edit (crop/rotate): Phase 3 non-destructive (upload the edited copy as a NEW asset; original stays immutable).
+- [ ] Edit (crop/rotate): IN PROGRESS. Non-destructive: uploads the edited copy as
+  a NEW asset (FileStation.Upload + Foto reindex, both verified); original immutable.
+- [ ] Share link: DEFERRED pending the exact API shape. Create is
+  `SYNO.Foto.Sharing.Passphrase set_shared` with a `policy` param whose type is
+  undocumented (a JSON object returns `{"reason":"type"}`); reads/updates key on a
+  `passphrase`; `SYNO.Foto.PublicSharing get` is the unauthenticated public read.
+  Next step: capture the real `set_shared` request from the Synology web app
+  (devtools or browser automation), then build create/list/revoke against it.
+- [ ] Timeline day bucketing is UTC (chosen for monotonicity with taken_at, which
+  the lazy windowed sections require). Photos near local midnight can land on an
+  adjacent day header. Switch to local-timezone day bucketing (still monotonic
+  with a fixed offset) as a follow-up.
+- [ ] Date scrubber drag-to-jump: read-only indicator shipped; add drag-to-jump
+  (the prefix-sum geometry `GridDateSections`/`dayStart(forAbsolute:)` is in place).
+- [ ] Fold People / Geolocation / Favorites into the Quick Filter (currently via
+  sidebar collections only); needs per-item favorite plus a way to combine cluster
+  facets with the local compound filter.
+- [ ] Code hygiene: remove the now-dead trash-album methods from the core
+  (`deleteToTrash`/`restoreFromTrash`/`fetchTrash`/`trashCount`/`reconcileTrash`/
+  `ensureTrashAlbum` and the app-trash `permanentlyDelete`), superseded by real delete.
 
 ## Build infra
 
