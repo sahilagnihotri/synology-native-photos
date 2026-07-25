@@ -102,6 +102,76 @@ pub struct Asset {
     pub file_size: Option<u64>,
     pub space: Space,
     pub server_version: Option<i64>,
+    // Per-asset metadata enrichment (from `Browse.Item`
+    // `additional=["exif","description","rating","video_meta"]`, VERIFIED
+    // shapes against the real NAS). All are kept flat and non-optional with a
+    // neutral default so the surface matches the rest of `Asset` and round-
+    // trips cleanly over UniFFI and persistence: a string field is "" when the
+    // NAS omits it, `rating` is 0 (unrated). EXIF fields are populated mainly
+    // for photos, the video_* fields only for videos; the other kind simply
+    // leaves them empty. Formatting (duration to mm:ss, framerate rounding) is
+    // deliberately left to the UI layer, so these hold the raw server values.
+    /// 0..5 star rating (Synology's own scale); 0 means unrated.
+    pub rating: i32,
+    /// User-entered caption/description; "" when none.
+    pub description: String,
+    /// EXIF camera model, e.g. "Apple iPhone 12". "" when unknown.
+    pub camera: String,
+    /// EXIF aperture, e.g. "f/1.8" (raw server string). "" when unknown.
+    pub aperture: String,
+    /// EXIF exposure/shutter time, e.g. "1/120". "" when unknown.
+    pub exposure_time: String,
+    /// EXIF focal length, e.g. "26 mm". "" when unknown.
+    pub focal_length: String,
+    /// EXIF ISO, e.g. "100". "" when unknown.
+    pub iso: String,
+    /// EXIF lens model. "" when unknown.
+    pub lens: String,
+    /// Video duration, raw server value (e.g. milliseconds as a string).
+    /// "" for non-videos or when the NAS omits it.
+    pub duration: String,
+    /// Video frame rate, raw server value (e.g. "29.97"). "" for non-videos.
+    pub framerate: String,
+    /// Video codec, e.g. "hevc". "" for non-videos.
+    pub video_codec: String,
+    /// Video container type, e.g. "mov". "" for non-videos.
+    pub container_type: String,
+}
+
+/// A neutral, empty `Asset`. Not produced by any real decode path (those set
+/// every field explicitly); it exists so test fixtures and future incremental
+/// constructors can spread `..Default::default()` over the metadata fields
+/// they do not care about instead of restating every field. Purely Rust-side:
+/// UniFFI binding generation is unaffected by this impl.
+impl Default for Asset {
+    fn default() -> Self {
+        Asset {
+            id: 0,
+            unit_id: 0,
+            cache_key: String::new(),
+            filename: String::new(),
+            media_kind: MediaKind::Unknown,
+            taken_at: None,
+            added_at: None,
+            width: None,
+            height: None,
+            file_size: None,
+            space: Space::Personal,
+            server_version: None,
+            rating: 0,
+            description: String::new(),
+            camera: String::new(),
+            aperture: String::new(),
+            exposure_time: String::new(),
+            focal_length: String::new(),
+            iso: String::new(),
+            lens: String::new(),
+            duration: String::new(),
+            framerate: String::new(),
+            video_codec: String::new(),
+            container_type: String::new(),
+        }
+    }
 }
 
 /// One row from `SYNO.Foto.Browse.Album`: either a user-created normal album
@@ -345,12 +415,38 @@ mod tests {
             file_size: Some(2_500_000),
             space: Space::Personal,
             server_version: Some(7),
+            rating: 4,
+            description: "sunset".to_string(),
+            camera: "Apple iPhone 12".to_string(),
+            aperture: "f/1.8".to_string(),
+            exposure_time: "1/120".to_string(),
+            focal_length: "26 mm".to_string(),
+            iso: "100".to_string(),
+            lens: "iPhone 12 back camera".to_string(),
+            duration: String::new(),
+            framerate: String::new(),
+            video_codec: String::new(),
+            container_type: String::new(),
         };
         assert_eq!(a.id, 42);
         assert_eq!(a.unit_id, 4242);
         assert_eq!(a.space, Space::Personal);
         assert_eq!(a.media_kind, MediaKind::Photo);
         assert_eq!(a.width, Some(4032));
+        assert_eq!(a.rating, 4);
+        assert_eq!(a.description, "sunset");
+        assert_eq!(a.camera, "Apple iPhone 12");
+        assert_eq!(a.iso, "100");
+    }
+
+    #[test]
+    fn asset_default_is_neutral_and_empty() {
+        let a = Asset::default();
+        assert_eq!(a.rating, 0);
+        assert_eq!(a.description, "");
+        assert_eq!(a.camera, "");
+        assert_eq!(a.duration, "");
+        assert_eq!(a.media_kind, MediaKind::Unknown);
     }
 
     #[test]

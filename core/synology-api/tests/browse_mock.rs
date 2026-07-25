@@ -152,6 +152,115 @@ async fn live_photo_components_classify_by_live_type() {
     assert_eq!(assets[2].media_kind, MediaKind::Photo, "live with no live_type defaults to Photo");
 }
 
+/// A photo carrying the enriched `additional` blocks (exif/description/
+/// rating) must decode every field onto the Asset. VERIFIED shapes: EXIF
+/// values are strings, rating is an int 0..5, description is a string.
+#[tokio::test]
+async fn item_decodes_exif_description_and_rating() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":601,"filename":"IMG_0601.HEIC","type":"photo",
+             "additional":{
+               "thumbnail":{"cache_key":"CK601","unit_id":6010},
+               "resolution":{"width":4032,"height":3024},
+               "description":"sunset over the fjord",
+               "rating":4,
+               "exif":{"camera":"Apple iPhone 12","aperture":"f/1.8",
+                       "exposure_time":"1/120","focal_length":"26 mm",
+                       "iso":"100","lens":"iPhone 12 back camera 4.2mm f/1.6"}
+             }}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok");
+    assert_eq!(assets.len(), 1);
+    let a = &assets[0];
+    assert_eq!(a.rating, 4);
+    assert_eq!(a.description, "sunset over the fjord");
+    assert_eq!(a.camera, "Apple iPhone 12");
+    assert_eq!(a.aperture, "f/1.8");
+    assert_eq!(a.exposure_time, "1/120");
+    assert_eq!(a.focal_length, "26 mm");
+    assert_eq!(a.iso, "100");
+    assert_eq!(a.lens, "iPhone 12 back camera 4.2mm f/1.6");
+    // A photo has no video_meta: those fields stay empty.
+    assert_eq!(a.duration, "");
+    assert_eq!(a.video_codec, "");
+}
+
+/// A video carrying `video_meta` must decode the raw duration/framerate/
+/// codec/container onto the Asset. `duration`/`framerate` are tolerated as
+/// either numbers or strings and stored raw; unsurfaced video_meta fields
+/// (audio_codec, bitrate, ...) are ignored, not fatal.
+#[tokio::test]
+async fn video_decodes_video_meta() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":602,"filename":"IMG_0602.MOV","type":"video",
+             "additional":{
+               "thumbnail":{"cache_key":"CK602","unit_id":6020},
+               "video_meta":{"duration":30000,"framerate":"29.97",
+                             "video_codec":"hevc","container_type":"mov",
+                             "audio_codec":"aac","bitrate":12345678}
+             }}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok");
+    assert_eq!(assets.len(), 1);
+    let a = &assets[0];
+    assert_eq!(a.media_kind, MediaKind::Video);
+    // duration arrived as a JSON number; it is stored raw, stringified.
+    assert_eq!(a.duration, "30000");
+    assert_eq!(a.framerate, "29.97");
+    assert_eq!(a.video_codec, "hevc");
+    assert_eq!(a.container_type, "mov");
+}
+
+/// An item that omits every enrichment block entirely must still decode, with
+/// the metadata fields defaulting gracefully (empty strings / rating 0) rather
+/// than failing the item.
+#[tokio::test]
+async fn item_missing_enrichment_blocks_defaults_gracefully() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":603,"filename":"IMG_0603.JPG","type":"photo",
+             "additional":{"thumbnail":{"cache_key":"CK603","unit_id":6030}}}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok");
+    assert_eq!(assets.len(), 1);
+    let a = &assets[0];
+    assert_eq!(a.rating, 0);
+    assert_eq!(a.description, "");
+    assert_eq!(a.camera, "");
+    assert_eq!(a.iso, "");
+    assert_eq!(a.duration, "");
+    assert_eq!(a.framerate, "");
+}
+
 #[tokio::test]
 async fn unknown_media_type_decodes_as_unknown_not_error() {
     let mut server = mockito::Server::new_async().await;

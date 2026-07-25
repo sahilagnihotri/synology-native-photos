@@ -52,16 +52,69 @@ pub(crate) fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// The asset columns, in the exact order `row_to_asset` reads them. Both
+/// windowed reads (`fetch_assets`, `fetch_trash`) select this list verbatim so
+/// the positional row mapping stays valid and the two queries can never drift
+/// out of column order as the model grows.
+const ASSET_SELECT_COLUMNS: &str = "server_id, unit_id, cache_key, filename, media_kind, taken_at, \
+     added_at, width, height, file_size, server_version, space, \
+     rating, description, camera, aperture, exposure_time, focal_length, \
+     iso, lens, duration, framerate, video_codec, container_type";
+
+/// Maps one row selected in `ASSET_SELECT_COLUMNS` order into an `Asset`.
+/// Shared by `fetch_assets` and `fetch_trash` so the (now 24-field) mapping
+/// lives in exactly one place. `in_trash`/`trashed_at` are intentionally not
+/// read back: they are storage-only bookkeeping that partitions the two
+/// queries, never surfaced on the `Asset` model.
+fn row_to_asset(r: &rusqlite::Row) -> rusqlite::Result<Asset> {
+    Ok(Asset {
+        id: r.get(0)?,
+        unit_id: r.get(1)?,
+        cache_key: r.get(2)?,
+        filename: r.get(3)?,
+        media_kind: int_to_media_kind(r.get::<_, i64>(4)?),
+        taken_at: r.get(5)?,
+        added_at: r.get(6)?,
+        width: r.get::<_, Option<i64>>(7)?.map(|v| v as u32),
+        height: r.get::<_, Option<i64>>(8)?.map(|v| v as u32),
+        file_size: r.get::<_, Option<i64>>(9)?.map(|v| v as u64),
+        server_version: r.get(10)?,
+        space: int_to_space(r.get::<_, i64>(11)?),
+        rating: r.get::<_, i64>(12)? as i32,
+        description: r.get(13)?,
+        camera: r.get(14)?,
+        aperture: r.get(15)?,
+        exposure_time: r.get(16)?,
+        focal_length: r.get(17)?,
+        iso: r.get(18)?,
+        lens: r.get(19)?,
+        duration: r.get(20)?,
+        framerate: r.get(21)?,
+        video_codec: r.get(22)?,
+        container_type: r.get(23)?,
+    })
+}
+
 impl Store {
     /// Inserts a new asset row or updates it in place, keyed on `(space, server_id)`.
     /// Re-crawling the same server item never duplicates a row.
     pub fn upsert_asset(&self, asset: &Asset) -> Result<(), CoreError> {
+        // NOTE: `in_trash` / `trashed_at` (schema v2) are deliberately absent
+        // from the ON CONFLICT DO UPDATE SET below. A re-crawl re-upserts an
+        // asset with server-derived fields only; it must NEVER reach in and
+        // un-trash an item the user moved to the app trash. Leaving those two
+        // columns out of the SET is exactly what preserves them across a
+        // re-crawl (regression-tested in `upsert_preserves_trash_flag_*`). The
+        // v3 metadata columns ARE in the SET so a re-crawl refreshes EXIF/
+        // rating/video metadata as the NAS reports it.
         self.conn
             .execute(
                 "INSERT INTO assets
                     (space, server_id, unit_id, cache_key, filename, media_kind,
-                     taken_at, added_at, width, height, file_size, server_version, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+                     taken_at, added_at, width, height, file_size, server_version,
+                     rating, description, camera, aperture, exposure_time, focal_length,
+                     iso, lens, duration, framerate, video_codec, container_type, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)
                  ON CONFLICT(space, server_id) DO UPDATE SET
                      unit_id        = excluded.unit_id,
                      cache_key      = excluded.cache_key,
@@ -73,6 +126,18 @@ impl Store {
                      height         = excluded.height,
                      file_size      = excluded.file_size,
                      server_version = excluded.server_version,
+                     rating         = excluded.rating,
+                     description    = excluded.description,
+                     camera         = excluded.camera,
+                     aperture       = excluded.aperture,
+                     exposure_time  = excluded.exposure_time,
+                     focal_length   = excluded.focal_length,
+                     iso            = excluded.iso,
+                     lens           = excluded.lens,
+                     duration       = excluded.duration,
+                     framerate      = excluded.framerate,
+                     video_codec    = excluded.video_codec,
+                     container_type = excluded.container_type,
                      updated_at     = excluded.updated_at",
                 params![
                     space_to_int(asset.space),
@@ -87,6 +152,18 @@ impl Store {
                     asset.height,
                     asset.file_size,
                     asset.server_version,
+                    asset.rating,
+                    asset.description,
+                    asset.camera,
+                    asset.aperture,
+                    asset.exposure_time,
+                    asset.focal_length,
+                    asset.iso,
+                    asset.lens,
+                    asset.duration,
+                    asset.framerate,
+                    asset.video_codec,
+                    asset.container_type,
                     now_secs(),
                 ],
             )
@@ -167,36 +244,18 @@ impl Store {
     /// library grows, and the tiebreak guarantees paging by offset/limit never
     /// skips or duplicates a row when two assets share the same `taken_at`.
     pub fn fetch_assets(&self, space: Space, offset: u32, limit: u32) -> Result<Vec<Asset>, CoreError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT server_id, unit_id, cache_key, filename, media_kind, taken_at,
-                        added_at, width, height, file_size, server_version, space
+        let sql = format!(
+            "SELECT {ASSET_SELECT_COLUMNS}
                  FROM assets
                  WHERE space = ?1 AND in_trash = 0
                  ORDER BY (taken_at IS NULL) ASC, taken_at DESC, server_id DESC
-                 LIMIT ?2 OFFSET ?3",
-            )
-            .map_err(map_sql)?;
+                 LIMIT ?2 OFFSET ?3"
+        );
+        let mut stmt = self.conn.prepare(&sql).map_err(map_sql)?;
         let rows = stmt
             .query_map(
                 params![space_to_int(space), limit as i64, offset as i64],
-                |r| {
-                    Ok(Asset {
-                        id: r.get(0)?,
-                        unit_id: r.get(1)?,
-                        cache_key: r.get(2)?,
-                        filename: r.get(3)?,
-                        media_kind: int_to_media_kind(r.get::<_, i64>(4)?),
-                        taken_at: r.get(5)?,
-                        added_at: r.get(6)?,
-                        width: r.get::<_, Option<i64>>(7)?.map(|v| v as u32),
-                        height: r.get::<_, Option<i64>>(8)?.map(|v| v as u32),
-                        file_size: r.get::<_, Option<i64>>(9)?.map(|v| v as u64),
-                        server_version: r.get(10)?,
-                        space: int_to_space(r.get::<_, i64>(11)?),
-                    })
-                },
+                row_to_asset,
             )
             .map_err(map_sql)?;
         let mut out = Vec::new();
@@ -213,34 +272,16 @@ impl Store {
     /// partition a space's assets into the library grid and the Recently
     /// Deleted view.
     pub fn fetch_trash(&self, space: Space, offset: u32, limit: u32) -> Result<Vec<Asset>, CoreError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT server_id, unit_id, cache_key, filename, media_kind, taken_at,
-                        added_at, width, height, file_size, server_version, space
+        let sql = format!(
+            "SELECT {ASSET_SELECT_COLUMNS}
                  FROM assets
                  WHERE space = ?1 AND in_trash = 1
                  ORDER BY (trashed_at IS NULL) ASC, trashed_at DESC, server_id DESC
-                 LIMIT ?2 OFFSET ?3",
-            )
-            .map_err(map_sql)?;
+                 LIMIT ?2 OFFSET ?3"
+        );
+        let mut stmt = self.conn.prepare(&sql).map_err(map_sql)?;
         let rows = stmt
-            .query_map(params![space_to_int(space), limit as i64, offset as i64], |r| {
-                Ok(Asset {
-                    id: r.get(0)?,
-                    unit_id: r.get(1)?,
-                    cache_key: r.get(2)?,
-                    filename: r.get(3)?,
-                    media_kind: int_to_media_kind(r.get::<_, i64>(4)?),
-                    taken_at: r.get(5)?,
-                    added_at: r.get(6)?,
-                    width: r.get::<_, Option<i64>>(7)?.map(|v| v as u32),
-                    height: r.get::<_, Option<i64>>(8)?.map(|v| v as u32),
-                    file_size: r.get::<_, Option<i64>>(9)?.map(|v| v as u64),
-                    server_version: r.get(10)?,
-                    space: int_to_space(r.get::<_, i64>(11)?),
-                })
-            })
+            .query_map(params![space_to_int(space), limit as i64, offset as i64], row_to_asset)
             .map_err(map_sql)?;
         let mut out = Vec::new();
         for row in rows {
@@ -410,6 +451,7 @@ mod tests {
             file_size: Some(2_000_000),
             space,
             server_version: ver,
+            ..Default::default()
         }
     }
 
@@ -770,6 +812,18 @@ mod tests {
             file_size: Some(12_345_678),
             space: Space::Shared,
             server_version: Some(4),
+            rating: 5,
+            description: "clip from the trip".to_string(),
+            camera: "Apple iPhone 12".to_string(),
+            aperture: "f/1.8".to_string(),
+            exposure_time: "1/60".to_string(),
+            focal_length: "26 mm".to_string(),
+            iso: "200".to_string(),
+            lens: "iPhone 12 back camera".to_string(),
+            duration: "30000".to_string(),
+            framerate: "29.97".to_string(),
+            video_codec: "hevc".to_string(),
+            container_type: "mov".to_string(),
         };
         store.upsert_asset(&original).unwrap();
         let page = store.fetch_assets(Space::Shared, 0, 10).unwrap();
@@ -787,5 +841,76 @@ mod tests {
         assert_eq!(round_tripped.file_size, original.file_size);
         assert_eq!(round_tripped.space, original.space);
         assert_eq!(round_tripped.server_version, original.server_version);
+        // Media-enrichment fields (schema v3) round-trip too.
+        assert_eq!(round_tripped.rating, original.rating);
+        assert_eq!(round_tripped.description, original.description);
+        assert_eq!(round_tripped.camera, original.camera);
+        assert_eq!(round_tripped.aperture, original.aperture);
+        assert_eq!(round_tripped.exposure_time, original.exposure_time);
+        assert_eq!(round_tripped.focal_length, original.focal_length);
+        assert_eq!(round_tripped.iso, original.iso);
+        assert_eq!(round_tripped.lens, original.lens);
+        assert_eq!(round_tripped.duration, original.duration);
+        assert_eq!(round_tripped.framerate, original.framerate);
+        assert_eq!(round_tripped.video_codec, original.video_codec);
+        assert_eq!(round_tripped.container_type, original.container_type);
+    }
+
+    /// An asset that carries no enrichment metadata (the common case, e.g. a
+    /// re-crawl before values are populated, or a photo with empty EXIF) must
+    /// round-trip through upsert+fetch with the neutral defaults intact, not
+    /// error and not turn "" into NULL.
+    #[test]
+    fn metadata_defaults_round_trip_when_absent() {
+        let store = Store::open_in_memory().unwrap();
+        // The `asset` helper spreads `..Default::default()`, so it carries the
+        // neutral metadata defaults already.
+        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+        let page = store.fetch_assets(Space::Personal, 0, 10).unwrap();
+        assert_eq!(page.len(), 1);
+        let a = &page[0];
+        assert_eq!(a.rating, 0);
+        assert_eq!(a.description, "");
+        assert_eq!(a.camera, "");
+        assert_eq!(a.iso, "");
+        assert_eq!(a.duration, "");
+        assert_eq!(a.framerate, "");
+        assert_eq!(a.video_codec, "");
+        assert_eq!(a.container_type, "");
+    }
+
+    /// A re-crawl updates the enrichment metadata in place (the fields ARE in
+    /// the ON CONFLICT SET) while STILL preserving the trash flag (which is
+    /// NOT). This pins both halves of the upsert contract at once: metadata
+    /// refreshes, trash state is sacred.
+    #[test]
+    fn recrawl_updates_metadata_but_preserves_trash() {
+        let store = Store::open_in_memory().unwrap();
+        let mut a = asset(Space::Personal, 1, Some(100), Some(1));
+        a.rating = 2;
+        a.description = "old caption".to_string();
+        store.upsert_asset(&a).unwrap();
+        store.set_trash_flag(Space::Personal, &[1], true, Some(9999)).unwrap();
+
+        // Re-crawl reports a higher rating and a new caption for the same item.
+        let mut recrawled = asset(Space::Personal, 1, Some(100), Some(2));
+        recrawled.rating = 5;
+        recrawled.description = "new caption".to_string();
+        recrawled.camera = "Apple iPhone 15".to_string();
+        store.upsert_asset(&recrawled).unwrap();
+
+        // Still trashed (not un-trashed by the re-crawl)...
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
+        let trash = store.fetch_trash(Space::Personal, 0, 10).unwrap();
+        assert_eq!(trash.len(), 1);
+        // ...but the metadata reflects the re-crawl.
+        assert_eq!(trash[0].rating, 5, "re-crawl must refresh rating");
+        assert_eq!(trash[0].description, "new caption", "re-crawl must refresh description");
+        assert_eq!(trash[0].camera, "Apple iPhone 15");
+        let trashed_at: Option<i64> = store
+            .conn
+            .query_row("SELECT trashed_at FROM assets WHERE server_id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(trashed_at, Some(9999), "trashed_at must survive a metadata re-crawl");
     }
 }

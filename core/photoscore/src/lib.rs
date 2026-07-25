@@ -1690,6 +1690,7 @@ mod core_tests {
                         file_size: Some(2_000_000),
                         space: Space::Personal,
                         server_version: Some(1),
+                        ..Default::default()
                     })
                     .unwrap();
             }
@@ -1707,6 +1708,7 @@ mod core_tests {
                     file_size: None,
                     space: Space::Shared,
                     server_version: Some(1),
+                    ..Default::default()
                 })
                 .unwrap();
             store
@@ -2081,6 +2083,7 @@ mod core_tests {
             file_size: Some(10_000_000),
             space: Space::Personal,
             server_version: Some(1),
+            ..Default::default()
         }
     }
 
@@ -2542,6 +2545,7 @@ mod core_tests {
                 file_size: None,
                 space,
                 server_version: Some(1),
+                ..Default::default()
             })
             .unwrap();
     }

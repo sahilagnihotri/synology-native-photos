@@ -143,6 +143,7 @@ mod tests {
             file_size: Some(1),
             space: Space::Personal,
             server_version: Some(ver),
+            ..Default::default()
         }
     }
 

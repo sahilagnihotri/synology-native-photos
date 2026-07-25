@@ -31,6 +31,7 @@ mod tests {
             media_kind: MediaKind::Photo, taken_at: Some(id * 10), added_at: Some(1),
             width: Some(100), height: Some(100), file_size: Some(1),
             space: Space::Personal, server_version: Some(ver),
+            ..Default::default()
         }
     }
 

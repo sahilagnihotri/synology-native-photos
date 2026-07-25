@@ -135,6 +135,17 @@ fn parse_media_kind(kind: &str, live_type: Option<&str>) -> MediaKind {
     }
 }
 
+/// The `additional` keys requested on every `Browse.Item` list and every
+/// `Search.Search list_item` call, kept in one place so the two paths stay in
+/// lockstep. `thumbnail` yields `cache_key`/`unit_id` (needed for thumbnails/
+/// downloads), `resolution` yields pixel dimensions, and `exif`/`description`/
+/// `rating`/`video_meta` yield the per-asset metadata the info panel and the
+/// rating filter consume. All four metadata blocks decode tolerantly, so
+/// requesting them never risks failing an item on a DSM build that omits or
+/// reshapes one.
+const ITEM_ADDITIONAL: &str =
+    "[\"thumbnail\",\"resolution\",\"exif\",\"description\",\"rating\",\"video_meta\"]";
+
 #[derive(Debug, Deserialize)]
 struct ItemList {
     // Deserialized as raw JSON values, not `Vec<RawItem>` directly: see the
@@ -191,6 +202,91 @@ struct ItemAdditional {
     thumbnail: Option<Thumb>,
     #[serde(default)]
     resolution: Option<Resolution>,
+    // Metadata enrichment (VERIFIED shapes against the real NAS). Requested
+    // via `additional=[...,"exif","description","rating","video_meta"]`. Every
+    // field is optional and tolerant: a missing block, a null, or a value that
+    // arrives as a number where a string was expected all decode to a neutral
+    // default rather than failing the item (same fail-open discipline as the
+    // rest of this decoder).
+    #[serde(default)]
+    exif: Option<Exif>,
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    description: String,
+    #[serde(default, deserialize_with = "i32_from_scalar")]
+    rating: i32,
+    #[serde(default)]
+    video_meta: Option<VideoMeta>,
+}
+
+/// `additional.exif`: per-photo EXIF. All fields VERIFIED to arrive as strings
+/// (and often empty) on the real NAS, but decoded through `string_from_scalar`
+/// so a build that reports one as a bare number (e.g. `iso: 100`) still
+/// decodes instead of failing the item.
+#[derive(Debug, Deserialize, Default)]
+struct Exif {
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    camera: String,
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    aperture: String,
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    exposure_time: String,
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    focal_length: String,
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    iso: String,
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    lens: String,
+}
+
+/// `additional.video_meta`: per-video technical metadata. `duration` and
+/// `framerate` may be numbers or strings across DSM builds, so both go through
+/// `string_from_scalar` and are stored raw; width/height already come from
+/// `resolution`. Fields this crate does not surface (audio_codec, bitrate,
+/// rotation, ...) are simply ignored via the tolerant decode.
+#[derive(Debug, Deserialize, Default)]
+struct VideoMeta {
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    duration: String,
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    framerate: String,
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    video_codec: String,
+    #[serde(default, deserialize_with = "string_from_scalar")]
+    container_type: String,
+}
+
+/// Tolerantly decode a JSON scalar the NAS reports for a metadata field into a
+/// `String`. A string passes through; a number or bool is stringified (so a
+/// build that sends `iso: 100` or `framerate: 29.97` still decodes); a null,
+/// array, or object becomes "". Never errors, so one oddly-typed metadata
+/// field can never fail the whole item.
+fn string_from_scalar<'de, D>(de: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde_json::Value;
+    Ok(match Value::deserialize(de)? {
+        Value::String(s) => s,
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        // null / array / object: no meaningful scalar, treat as absent.
+        _ => String::new(),
+    })
+}
+
+/// Tolerantly decode `additional.rating` into an `i32`. Accepts a JSON number
+/// (the verified shape) or a numeric string; anything else (null, non-numeric
+/// string, ...) decodes as 0 (unrated) rather than failing the item.
+fn i32_from_scalar<'de, D>(de: D) -> Result<i32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde_json::Value;
+    Ok(match Value::deserialize(de)? {
+        Value::Number(n) => n.as_i64().unwrap_or(0) as i32,
+        Value::String(s) => s.trim().parse::<i32>().unwrap_or(0),
+        _ => 0,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -316,13 +412,14 @@ async fn get_body(
 /// `SYNO.Foto.Browse.Item` / `SYNO.FotoTeam.Browse.Item`, `method=list`.
 /// Space-aware: the API name is resolved from `space` via `namespace`, and
 /// every returned `Asset.space` is set to the same `space` the caller asked
-/// for (the item payload itself carries no space marker). Requests
-/// `additional=["thumbnail","resolution"]` so each item comes back with a
-/// `cache_key` (needed for thumbnails/downloads), a `unit_id` (the id the
-/// thumbnail/download endpoints actually key on, see the module doc
-/// comment), and pixel dimensions. Unknown item fields are ignored; an
-/// unrecognized `type` decodes as `MediaKind::Unknown` rather than failing
-/// the whole list.
+/// for (the item payload itself carries no space marker). Requests the shared
+/// `ITEM_ADDITIONAL` key set so each item comes back with a `cache_key`
+/// (needed for thumbnails/downloads), a `unit_id` (the id the thumbnail/
+/// download endpoints actually key on, see the module doc comment), pixel
+/// dimensions, and the per-asset metadata (EXIF, description, rating, video
+/// metadata). Unknown item fields are ignored, every metadata block decodes
+/// tolerantly, and an unrecognized `type` decodes as `MediaKind::Unknown`
+/// rather than failing the whole list.
 ///
 /// Decoding is per-element and tolerant: an element that fails to
 /// deserialize into `RawItem` at all, or one that decodes but is missing
@@ -383,7 +480,7 @@ async fn list_items_inner(
         ("method", "list".to_string()),
         ("offset", offset.to_string()),
         ("limit", limit.to_string()),
-        ("additional", "[\"thumbnail\",\"resolution\"]".to_string()),
+        ("additional", ITEM_ADDITIONAL.to_string()),
         ("_sid", sid.to_string()),
     ];
     if let Some(filter) = filter {
@@ -425,6 +522,8 @@ async fn list_items_inner(
                 Some(r) => (r.width, r.height),
                 None => (None, None),
             };
+            let exif = additional.exif.unwrap_or_default();
+            let video = additional.video_meta.unwrap_or_default();
             Some(Asset {
                 id: item.id,
                 unit_id,
@@ -438,6 +537,18 @@ async fn list_items_inner(
                 file_size: item.filesize,
                 space,
                 server_version: item.version,
+                rating: additional.rating,
+                description: additional.description,
+                camera: exif.camera,
+                aperture: exif.aperture,
+                exposure_time: exif.exposure_time,
+                focal_length: exif.focal_length,
+                iso: exif.iso,
+                lens: exif.lens,
+                duration: video.duration,
+                framerate: video.framerate,
+                video_codec: video.video_codec,
+                container_type: video.container_type,
             })
         })
         .collect();
@@ -471,11 +582,13 @@ async fn list_items_inner(
 /// `{"data":{"list":[...]}}` envelope as `Browse.Item`, not grouped into
 /// people/places/tags sections.
 ///
-/// `additional=["thumbnail","resolution"]` is honored identically to
+/// The shared `ITEM_ADDITIONAL` key set is honored identically to
 /// `list_items`: `cache_key`/`unit_id` under `additional.thumbnail`,
-/// `width`/`height` under `additional.resolution`. Reuses `RawItem`/`Asset`
-/// end to end -- search rows have the exact same shape as browse rows, so
-/// no new model or decoder was needed. Live Photos surface here with
+/// `width`/`height` under `additional.resolution`, and the EXIF/description/
+/// rating/video metadata under their respective `additional` blocks. Reuses
+/// `RawItem`/`Asset` end to end -- search rows have the exact same shape as
+/// browse rows, so no new model or decoder was needed. Live Photos surface
+/// here with
 /// `type="live"` and are classified by their sibling `live_type` exactly as
 /// on the browse path (`parse_media_kind`): the motion `.MOV` component is a
 /// `Video`, the still `.JPG` a `Photo`.
@@ -534,7 +647,7 @@ pub async fn search_filtered(
         ("keyword", keyword.to_string()),
         ("offset", offset.to_string()),
         ("limit", limit.to_string()),
-        ("additional", "[\"thumbnail\",\"resolution\"]".to_string()),
+        ("additional", ITEM_ADDITIONAL.to_string()),
         ("_sid", sid.to_string()),
     ];
     if let Some(start) = filters.start_time {
@@ -574,6 +687,8 @@ pub async fn search_filtered(
                 Some(r) => (r.width, r.height),
                 None => (None, None),
             };
+            let exif = additional.exif.unwrap_or_default();
+            let video = additional.video_meta.unwrap_or_default();
             Some(Asset {
                 id: item.id,
                 unit_id,
@@ -587,6 +702,18 @@ pub async fn search_filtered(
                 file_size: item.filesize,
                 space: Space::Personal,
                 server_version: item.version,
+                rating: additional.rating,
+                description: additional.description,
+                camera: exif.camera,
+                aperture: exif.aperture,
+                exposure_time: exif.exposure_time,
+                focal_length: exif.focal_length,
+                iso: exif.iso,
+                lens: exif.lens,
+                duration: video.duration,
+                framerate: video.framerate,
+                video_codec: video.video_codec,
+                container_type: video.container_type,
             })
         })
         .collect();

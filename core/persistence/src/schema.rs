@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS assets (
     server_version INTEGER,
     in_trash       INTEGER NOT NULL DEFAULT 0,  -- 0/1: sitting in the app "Recently Deleted" album
     trashed_at     INTEGER,                     -- epoch seconds the item was moved to trash, NULL when not trashed
+    rating         INTEGER NOT NULL DEFAULT 0,  -- 0..5 stars, 0 = unrated (NAS-derived)
+    description    TEXT    NOT NULL DEFAULT '',  -- caption/description (NAS-derived)
+    camera         TEXT    NOT NULL DEFAULT '',  -- EXIF camera model
+    aperture       TEXT    NOT NULL DEFAULT '',  -- EXIF aperture
+    exposure_time  TEXT    NOT NULL DEFAULT '',  -- EXIF exposure/shutter time
+    focal_length   TEXT    NOT NULL DEFAULT '',  -- EXIF focal length
+    iso            TEXT    NOT NULL DEFAULT '',  -- EXIF ISO
+    lens           TEXT    NOT NULL DEFAULT '',  -- EXIF lens model
+    duration       TEXT    NOT NULL DEFAULT '',  -- video duration, raw server value
+    framerate      TEXT    NOT NULL DEFAULT '',  -- video frame rate, raw server value
+    video_codec    TEXT    NOT NULL DEFAULT '',  -- video codec
+    container_type TEXT    NOT NULL DEFAULT '',  -- video container type
     updated_at     INTEGER NOT NULL,
     UNIQUE (space, server_id)
 );
@@ -140,6 +152,22 @@ const STEPS: &[MigrationStep] = &[
         version: 2,
         requires_recrawl: false,
         apply: add_trash_columns_if_missing,
+    },
+    MigrationStep {
+        // Media model enrichment: per-asset EXIF, rating, description, and
+        // video metadata. Adds the twelve metadata columns to a pre-existing
+        // assets table. `requires_recrawl: true` because every one of these
+        // columns is NAS-derived: `ALTER TABLE ADD COLUMN` can only backfill
+        // existing rows with the static default ('' / 0), which is stale, not
+        // the real value. Left un-recrawled, existing libraries would show
+        // blank EXIF and rating 0 forever (the exact shape of the unit_id
+        // bug). Marking it forces one full re-crawl that repopulates the real
+        // values; the crawl is resumable and idempotent, so this is cheap and
+        // safe. Does NOT touch in_trash/trashed_at (schema v2), so the app
+        // trash survives the upgrade untouched.
+        version: 3,
+        requires_recrawl: true,
+        apply: add_metadata_columns_if_missing,
     },
 ];
 
@@ -306,6 +334,53 @@ fn add_trash_columns_if_missing(conn: &Connection) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Migration step 3: adds the twelve media-enrichment columns (`rating`,
+/// `description`, the six EXIF strings, and the four video-metadata strings)
+/// to a pre-existing `assets` table. Each `ALTER TABLE ADD COLUMN` is guarded
+/// by a `PRAGMA table_info` check so a re-run, or a fresh database whose
+/// `BASE_DDL` already created these columns, is a no-op rather than a
+/// duplicate-column error (keeping the step idempotent). Only columns that are
+/// genuinely absent are added, so this survives being interrupted and re-run.
+/// The `in_trash`/`trashed_at` columns from step 2 are never referenced here,
+/// so the app trash is untouched by this upgrade. Existing rows get the static
+/// defaults ('' / 0), which are stale, which is exactly why the step is marked
+/// `requires_recrawl` in `STEPS`.
+fn add_metadata_columns_if_missing(conn: &Connection) -> Result<(), CoreError> {
+    let existing: Vec<String> = {
+        let mut stmt = conn.prepare("PRAGMA table_info(assets)").map_err(map_sql)?;
+        let names = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(map_sql)?
+            .filter_map(|r| r.ok())
+            .collect();
+        names
+    };
+    // (column name, column definition) for each new metadata column. TEXT
+    // columns default to '' and rating to 0, matching a fresh insert and the
+    // Asset model's own defaults.
+    let columns: &[(&str, &str)] = &[
+        ("rating", "INTEGER NOT NULL DEFAULT 0"),
+        ("description", "TEXT NOT NULL DEFAULT ''"),
+        ("camera", "TEXT NOT NULL DEFAULT ''"),
+        ("aperture", "TEXT NOT NULL DEFAULT ''"),
+        ("exposure_time", "TEXT NOT NULL DEFAULT ''"),
+        ("focal_length", "TEXT NOT NULL DEFAULT ''"),
+        ("iso", "TEXT NOT NULL DEFAULT ''"),
+        ("lens", "TEXT NOT NULL DEFAULT ''"),
+        ("duration", "TEXT NOT NULL DEFAULT ''"),
+        ("framerate", "TEXT NOT NULL DEFAULT ''"),
+        ("video_codec", "TEXT NOT NULL DEFAULT ''"),
+        ("container_type", "TEXT NOT NULL DEFAULT ''"),
+    ];
+    for (name, def) in columns {
+        if !existing.iter().any(|c| c == name) {
+            conn.execute(&format!("ALTER TABLE assets ADD COLUMN {name} {def}"), [])
+                .map_err(map_sql)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,12 +470,159 @@ mod tests {
         conn
     }
 
-    /// A database already migrated to v1 must gain the `in_trash` /
-    /// `trashed_at` columns on upgrade to v2, default them for existing rows,
-    /// bump both `user_version` and the `schema_meta` mirror to 2, and stay a
-    /// no-op on a second run (no duplicate-column error).
+    /// Builds a v2-shaped `assets` table: it has `unit_id` and the hybrid-
+    /// delete `in_trash`/`trashed_at` columns, but NOT the step-3 media
+    /// metadata columns, with `user_version` pinned at 2. Mirrors a real
+    /// database created after the delete work but before this enrichment step.
+    fn open_v2_db_without_metadata_columns() -> Connection {
+        let conn = rusqlite::Connection::open_in_memory().expect("open");
+        conn.execute_batch(
+            "CREATE TABLE assets (
+                rowid_pk       INTEGER PRIMARY KEY AUTOINCREMENT,
+                space          INTEGER NOT NULL,
+                server_id      INTEGER NOT NULL,
+                unit_id        INTEGER NOT NULL DEFAULT 0,
+                cache_key      TEXT    NOT NULL,
+                filename       TEXT    NOT NULL,
+                media_kind     INTEGER NOT NULL DEFAULT 2,
+                taken_at       INTEGER,
+                added_at       INTEGER,
+                width          INTEGER,
+                height         INTEGER,
+                file_size      INTEGER,
+                server_version INTEGER,
+                in_trash       INTEGER NOT NULL DEFAULT 0,
+                trashed_at     INTEGER,
+                updated_at     INTEGER NOT NULL,
+                UNIQUE (space, server_id)
+            );
+            CREATE INDEX idx_assets_space_trash ON assets (space, in_trash);
+            CREATE TABLE sync_state (
+                space                  INTEGER PRIMARY KEY,
+                initial_crawl_complete INTEGER NOT NULL DEFAULT 0,
+                expected_total         INTEGER NOT NULL DEFAULT 0,
+                last_offset            INTEGER NOT NULL DEFAULT 0,
+                last_page_limit        INTEGER NOT NULL DEFAULT 0,
+                highest_seen_version   INTEGER,
+                last_crawl_at          INTEGER,
+                last_reconcile_at      INTEGER
+            );
+            CREATE TABLE schema_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            PRAGMA user_version = 2;",
+        )
+        .expect("v2 tables");
+        conn
+    }
+
+    /// A v2 database must gain all twelve media-enrichment columns on upgrade
+    /// to v3, default them for existing rows, bump `user_version` and the
+    /// `schema_meta` mirror to 3, and stay a no-op (no duplicate-column error)
+    /// on a second run.
     #[test]
-    fn migration_v1_to_v2_adds_trash_columns_defaulted_and_is_idempotent() {
+    fn migration_v2_to_v3_adds_metadata_columns_defaulted_and_is_idempotent() {
+        let conn = open_v2_db_without_metadata_columns();
+        conn.execute(
+            "INSERT INTO assets (space, server_id, unit_id, cache_key, filename, updated_at) VALUES (0, 1, 10, 'ck1', 'a.jpg', 0)",
+            [],
+        )
+        .expect("v2 row");
+
+        run_migrations(&conn).expect("migration adds metadata columns");
+
+        let (rating, description, camera, duration): (i64, String, String, String) = conn
+            .query_row(
+                "SELECT rating, description, camera, duration FROM assets WHERE server_id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .expect("metadata columns readable");
+        assert_eq!(rating, 0, "existing row defaults rating to 0");
+        assert_eq!(description, "", "existing row defaults description to ''");
+        assert_eq!(camera, "", "existing row defaults camera to ''");
+        assert_eq!(duration, "", "existing row defaults duration to ''");
+        assert_eq!(user_version(&conn).unwrap(), 3);
+        let meta: String = conn
+            .query_row("SELECT value FROM schema_meta WHERE key = 'schema_version'", [], |r| r.get(0))
+            .expect("schema_meta mirror set");
+        assert_eq!(meta, "3");
+
+        // Second run must not fail with a duplicate-column error and must stay
+        // a no-op at v3.
+        run_migrations(&conn).expect("second run is a no-op");
+        assert_eq!(user_version(&conn).unwrap(), 3);
+    }
+
+    /// REGRESSION GUARD for the hybrid-delete work: the v3 migration must not
+    /// touch the schema-v2 `in_trash`/`trashed_at` state. A row already flagged
+    /// as trashed in a v2 database must stay trashed (and keep its
+    /// `trashed_at`) after the metadata columns are added, and re-running the
+    /// migration must not clear it either.
+    #[test]
+    fn v2_to_v3_migration_preserves_in_trash_state() {
+        let conn = open_v2_db_without_metadata_columns();
+        conn.execute(
+            "INSERT INTO assets (space, server_id, unit_id, cache_key, filename, in_trash, trashed_at, updated_at)
+             VALUES (0, 7, 70, 'ck7', 'trashed.jpg', 1, 9999, 0)",
+            [],
+        )
+        .expect("trashed v2 row");
+
+        run_migrations(&conn).expect("v2 to v3 migration");
+
+        let (in_trash, trashed_at): (i64, Option<i64>) = conn
+            .query_row("SELECT in_trash, trashed_at FROM assets WHERE server_id = 7", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("trash columns intact");
+        assert_eq!(in_trash, 1, "the migration must not un-trash an already-trashed row");
+        assert_eq!(trashed_at, Some(9999), "trashed_at must survive the v3 migration");
+
+        // Re-run: still trashed, still v3.
+        run_migrations(&conn).expect("second run is a no-op");
+        let in_trash_after: i64 = conn
+            .query_row("SELECT in_trash FROM assets WHERE server_id = 7", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(in_trash_after, 1, "re-running the migration must not clear in_trash");
+    }
+
+    /// The v3 metadata migration is NAS-derived (`requires_recrawl: true`), so
+    /// a v2 database that had already completed its crawl must have its barrier
+    /// reset and cursor rewound, exactly like the unit_id migration, so the
+    /// real EXIF/rating/video values get backfilled instead of shipping the
+    /// stale ''/0 defaults forever.
+    #[test]
+    fn v2_to_v3_migration_resets_crawl_barrier_for_completed_space() {
+        let conn = open_v2_db_without_metadata_columns();
+        conn.execute(
+            "INSERT INTO sync_state (space, initial_crawl_complete, expected_total, last_offset, last_page_limit)
+             VALUES (0, 1, 151, 151, 200)",
+            [],
+        )
+        .expect("personal sync_state");
+
+        run_migrations(&conn).expect("v2 to v3 migration");
+
+        let (complete, offset): (i64, i64) = conn
+            .query_row(
+                "SELECT initial_crawl_complete, last_offset FROM sync_state WHERE space = 0",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(complete, 0, "a data-bearing migration must reset a completed crawl");
+        assert_eq!(offset, 0, "the paging cursor must rewind so the crawl restarts and backfills metadata");
+    }
+
+    /// A database on v1 must gain the `in_trash` / `trashed_at` columns
+    /// (step 2), default them for existing rows, and run through to the latest
+    /// version (a v1 db has both step 2 and step 3 pending), bumping both
+    /// `user_version` and the `schema_meta` mirror, and staying a no-op on a
+    /// second run (no duplicate-column error).
+    #[test]
+    fn migration_from_v1_adds_trash_columns_defaulted_and_is_idempotent() {
         let conn = open_v1_db_without_trash_columns();
         conn.execute(
             "INSERT INTO assets (space, server_id, unit_id, cache_key, filename, updated_at) VALUES (0, 1, 10, 'ck1', 'a.jpg', 0)",
@@ -417,24 +639,27 @@ mod tests {
             .expect("trash columns readable");
         assert_eq!(in_trash, 0, "existing row defaults to not-trashed");
         assert_eq!(trashed_at, None, "existing row has a NULL trashed_at");
-        assert_eq!(user_version(&conn).unwrap(), 2);
+        assert_eq!(user_version(&conn).unwrap(), latest_version());
         let meta: String = conn
             .query_row("SELECT value FROM schema_meta WHERE key = 'schema_version'", [], |r| r.get(0))
             .expect("schema_meta mirror set");
-        assert_eq!(meta, "2");
+        assert_eq!(meta, latest_version().to_string());
 
         // Second run must not fail with a duplicate-column error and must stay
-        // a no-op at v2.
+        // a no-op at the latest version.
         run_migrations(&conn).expect("second run is a no-op");
-        assert_eq!(user_version(&conn).unwrap(), 2);
+        assert_eq!(user_version(&conn).unwrap(), latest_version());
     }
 
-    /// A v1 database that had already completed its crawl must NOT have its
-    /// crawl barrier reset by the v2 migration: the trash columns are
-    /// app-local state with correct defaults, so step 2 is not
-    /// `requires_recrawl` and must not force a needless full re-crawl.
+    /// A v1 database that had already completed its crawl, migrated all the
+    /// way to the latest version, MUST have its crawl barrier reset: the batch
+    /// of pending steps includes the data-bearing v3 metadata step
+    /// (`requires_recrawl`), and a single such step anywhere in the batch is
+    /// enough to force the one re-crawl that backfills the NAS-derived values.
+    /// (The non-data-bearing v2 trash step, in isolation, would not; but it
+    /// never runs in isolation from a v1 start now that v3 exists.)
     #[test]
-    fn v1_to_v2_migration_does_not_reset_the_crawl_barrier() {
+    fn migration_from_v1_to_latest_resets_barrier_via_data_bearing_step() {
         let conn = open_v1_db_without_trash_columns();
         conn.execute(
             "INSERT INTO sync_state (space, initial_crawl_complete, expected_total, last_offset, last_page_limit)
@@ -443,7 +668,7 @@ mod tests {
         )
         .expect("personal sync_state");
 
-        run_migrations(&conn).expect("v1 to v2 migration");
+        run_migrations(&conn).expect("v1 to latest migration");
 
         let (complete, offset): (i64, i64) = conn
             .query_row(
@@ -452,14 +677,14 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(complete, 1, "a non-data-bearing migration must leave a completed crawl completed");
-        assert_eq!(offset, 151, "the paging cursor must not be rewound by a non-data-bearing migration");
+        assert_eq!(complete, 0, "a batch containing a data-bearing step must reset a completed crawl");
+        assert_eq!(offset, 0, "the paging cursor must rewind so the crawl restarts and backfills metadata");
     }
 
     #[test]
     fn migrations_create_all_tables_and_seed_version() {
         let store = crate::Store::open_in_memory().expect("open");
-        assert_eq!(store.schema_version().expect("version"), 2);
+        assert_eq!(store.schema_version().expect("version"), 3);
         let names: Vec<String> = {
             let mut stmt = store
                 .conn
@@ -483,7 +708,7 @@ mod tests {
         let store = crate::Store::open_in_memory().expect("open");
         assert_eq!(user_version(&store.conn).unwrap(), latest_version());
         run_migrations(&store.conn).expect("rerun");
-        assert_eq!(store.schema_version().expect("version"), 2);
+        assert_eq!(store.schema_version().expect("version"), 3);
         assert_eq!(user_version(&store.conn).unwrap(), latest_version());
     }
 
