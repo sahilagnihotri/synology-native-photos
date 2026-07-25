@@ -289,6 +289,19 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         syncSelectionHighlight()
     }
 
+    /// Resolves the current selection's absolute grid indices to the server
+    /// asset ids of the rows actually loaded, for a bulk action (move to
+    /// Recently Deleted, restore, permanent delete). Reads through the data
+    /// source's non-scheduling `residentItem(at:)`, so an index whose page
+    /// has not loaded yet contributes nothing: a bulk action only ever
+    /// targets rows the user can actually see, and reading the selection
+    /// never triggers a wave of page loads. Sorted so the resulting id list
+    /// is deterministic (matching the grid's own row order) rather than the
+    /// selection set's arbitrary iteration order.
+    func selectedAssetIds() -> [Int64] {
+        selection.sortedIndices.compactMap { dataSource.residentItem(at: $0)?.id }
+    }
+
     /// Double-click opens the detail viewer on the clicked cell. Maps the
     /// click location to an index path; a click in empty space (no item)
     /// does nothing. Bounds-checked against the applied snapshot for the
