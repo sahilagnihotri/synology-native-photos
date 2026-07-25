@@ -93,9 +93,9 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// which index Space was pressed against.
     var onToggleQuickLook: ((Int) -> Void)?
 
-    /// Invoked on Delete/Cmd-Delete with the current selection count.
-    /// Never performs a real delete itself (Phase 2, not built): the
-    /// caller is expected to show the honest "coming soon" affordance.
+    /// Invoked on Delete/Cmd-Delete with the current selection count. The
+    /// controller performs no delete itself: the caller resolves the
+    /// selection to asset ids and runs the `DeleteController` confirm flow.
     var onDeleteRequested: ((Int) -> Void)?
 
     /// Invoked on Escape when there is nothing to clear at the grid level

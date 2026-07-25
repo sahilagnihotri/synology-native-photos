@@ -66,6 +66,22 @@ final class CrawlProgressModel {
         }
     }
 
+    /// Runs a delta reconcile for `space` (a lighter incremental sync than a
+    /// full crawl) so NAS-side changes made elsewhere, and this app's own
+    /// deletes, show up. Drives the visible Refresh action. Unlike
+    /// `startCrawl` this does not clear `isComplete` first: a manual Refresh
+    /// on an already-imported library should never flash the "Importing..."
+    /// state, and `reconcileDelta` returns a completed `CrawlProgress` anyway.
+    func reconcile(space: Space) async {
+        do {
+            let progress = try await client.reconcileDelta(space: space)
+            apply(progress)
+            failure = nil
+        } catch {
+            failure = Self.message(for: error)
+        }
+    }
+
     /// Refreshes `done`/`total`/`isComplete` from the core's current
     /// snapshot without starting a new crawl. Used to pick up the barrier's
     /// state on launch (e.g. a previous session already finished crawling,

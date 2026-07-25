@@ -135,6 +135,10 @@ struct LibraryView: View {
     @State private var sidebarSelection: SidebarItem? = .library
     @State private var zoom = GridZoomModel()
     @State private var deleteController: DeleteController
+    /// Backs the Recently Deleted (recycle bin) view. Long-lived alongside the
+    /// grid controller so its loaded contents and selection survive navigating
+    /// away and back within one library session.
+    @State private var recentlyDeletedModel: RecentlyDeletedModel
     /// The tile-grid model for whichever discovery kind is currently
     /// selected, or `nil` when the sidebar is not on a discovery-tiles
     /// section. Rebuilt (not cached across sections) every time the section
@@ -170,6 +174,7 @@ struct LibraryView: View {
         let c = PhotoGridController(dataSource: env.dataSource, cache: env.thumbnailCache, client: env.client)
         _controller = State(initialValue: c)
         _deleteController = State(initialValue: DeleteController(client: env.client))
+        _recentlyDeletedModel = State(initialValue: RecentlyDeletedModel(client: env.client))
     }
 
     var body: some View {
@@ -196,12 +201,6 @@ struct LibraryView: View {
             await env.dataSource.refreshCount()
             await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
             await controller.applySnapshot()
-            // Once the first crawl/load has completed, reconcile the app-owned
-            // Recently Deleted album so a restore performed on another Synology
-            // client is reflected locally. Best-effort and off the critical
-            // path: a failure here (e.g. transient auth) must never block the
-            // library from showing, so it is fire-and-forget with try?.
-            Task { try? await env.client.reconcileTrash(space: env.spaceSelection.current) }
         }
         .onChange(of: sidebarSelection) { _, newValue in
             guard let newValue else { return }
@@ -218,9 +217,13 @@ struct LibraryView: View {
             case .discoveryGrid(let collection):
                 tilesModel = nil
                 Task { await switchCollection(to: collection) }
-            case .trash(let space):
+            case .recentlyDeleted:
+                // The recycle bin is its own view (RecentlyDeletedView), not
+                // the photo grid, and loads itself on appear. Clear the grid
+                // selection so a stale library selection cannot linger under
+                // it, but there is no windowed data source to switch here.
                 tilesModel = nil
-                Task { await switchToTrash(space: space) }
+                controller.clearSelection()
             }
         }
         .onChange(of: drilledInCollection) { _, newValue in
@@ -259,14 +262,16 @@ struct LibraryView: View {
             // was up; nothing else reclaims it on the same window otherwise.
             if newValue == nil { restoreGridFocus() }
         }
-        // Everyday delete-to-trash confirm (never destructive) and the
-        // strongly-worded, always-shown permanent-delete confirm. The space
-        // for each is read from the data source, which is the library space
-        // on the main grid and the trashed space in the Recently Deleted
-        // view; both refresh the current grid on success so the acted-on rows
-        // disappear.
-        .deleteConfirm(deleteController, space: env.dataSource.space) { await refreshCurrentGrid() }
-        .permanentDeleteConfirm(deleteController, space: env.dataSource.space) { await refreshCurrentGrid() }
+        // The everyday delete confirm, shared verbatim by the grid and the
+        // full-photo detail viewer. The space is read from the data source
+        // (the current library/collection/search source). On a confirmed
+        // success it closes the detail viewer if it happens to be open (a
+        // no-op for a grid delete, where `detailIndex` is already nil) and
+        // refreshes the current grid so the deleted rows disappear.
+        .deleteConfirm(deleteController, space: env.dataSource.space) {
+            detailIndex = nil
+            await refreshCurrentGrid()
+        }
     }
 
     /// The inline detail viewer shown over the grid when `detailIndex` is set.
@@ -286,7 +291,12 @@ struct LibraryView: View {
                 get: { detailIndex ?? 0 },
                 set: { detailIndex = $0 }
             ),
-            onClose: { detailIndex = nil }
+            onClose: { detailIndex = nil },
+            // Delete from full-photo view runs the SAME DeleteController flow
+            // the grid uses: raise the confirm for just this asset; the shared
+            // `.deleteConfirm` modifier closes the viewer and refreshes on a
+            // confirmed success.
+            onDelete: { asset in deleteController.requestDelete(ids: [asset.id]) }
         )
     }
 
@@ -320,10 +330,10 @@ struct LibraryView: View {
             detailIndex = (detailIndex != nil) ? nil : index
         }
         controller.onClearSelection = { detailIndex = nil }
-        // Delete / Cmd-Delete on the main grid starts the reversible
-        // move-to-Recently-Deleted flow (a confirm, then deleteToTrash). It is
-        // a no-op in the Recently Deleted view itself, where items are already
-        // trashed and permanent delete is a separate, explicit button.
+        // Delete / Cmd-Delete on the grid starts the everyday delete flow (a
+        // confirm, then a real delete into the Synology recycle bin). The
+        // recycle bin has its own view with its own actions and is never this
+        // photo grid, so there is no in-trash special case here anymore.
         controller.onDeleteRequested = { _ in requestDeleteSelected() }
     }
 
@@ -358,26 +368,23 @@ struct LibraryView: View {
                         Text("\(controller.selection.count) selected")
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("selection.count")
-                        // Contextual bulk actions. The Recently Deleted view
-                        // offers Restore and the gated Delete Permanently (the
-                        // ONLY place permanent delete is reachable); every
-                        // other photo grid offers the reversible move-to-trash
-                        // Delete.
-                        if isTrashRoute {
-                            Button { restoreSelected() } label: {
-                                Label("Restore", systemImage: "arrow.uturn.backward")
-                            }
-                            .accessibilityIdentifier("trash.restore")
-                            Button(role: .destructive) { requestPermanentDeleteSelected() } label: {
-                                Label("Delete Permanently", systemImage: "trash.slash")
-                            }
-                            .accessibilityIdentifier("trash.deletepermanently")
-                        } else {
-                            Button(role: .destructive) { requestDeleteSelected() } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .accessibilityIdentifier("grid.delete")
+                        // The everyday delete: a real delete into the Synology
+                        // recycle bin, recoverable from Recently Deleted.
+                        Button(role: .destructive) { requestDeleteSelected() } label: {
+                            Label("Delete", systemImage: "trash")
                         }
+                        .accessibilityIdentifier("grid.delete")
+                    }
+                    // Refresh re-runs a delta reconcile for the current space
+                    // so NAS-side changes made elsewhere (and this app's own
+                    // deletes) show up. Only meaningful for the space-backed
+                    // library grid: discovery collections and search are
+                    // fetched live on every load and have no crawl to reconcile.
+                    if isLibraryGridRoute {
+                        Button { Task { await refreshLibrary() } } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        .accessibilityIdentifier("library.refresh")
                     }
                     ZoomSliderView(zoom: zoom) { size in
                         controller.applyZoom(itemSize: size)
@@ -469,28 +476,14 @@ struct LibraryView: View {
                             }
                         }
                     }
-                case .trash:
-                    // The Recently Deleted grid: a plain local read with no
-                    // crawl barrier, so `isReady`/`totalCount` come straight
-                    // from `trashCount`. An empty trash shows its own empty
-                    // state rather than the library's "try the other space"
-                    // hint, which would make no sense here.
-                    switch LibraryContentRoute.route(
-                        isComplete: env.dataSource.isReady,
-                        itemCount: env.dataSource.totalCount
-                    ) {
-                    case .importing:
-                        ProgressView("Loading...").accessibilityIdentifier("trash.progressview")
-                    case .empty:
-                        RecentlyDeletedEmptyView()
-                    case .grid:
-                        PhotoGridView(controller: controller)
-                    case .failed(let message):
-                        CrawlFailedView(message: message) {
-                            if case .trash(let space) = currentRoute {
-                                await switchToTrash(space: space)
-                            }
-                        }
+                case .recentlyDeleted:
+                    // The recycle bin has its own view (not the photo grid):
+                    // it reads `RecycleItem`s live from the NAS, loads itself
+                    // on appear, and owns its own Restore / Delete Permanently
+                    // action bar. A restore asks the library to refresh so the
+                    // returned items reappear.
+                    RecentlyDeletedView(model: recentlyDeletedModel, client: env.client) {
+                        await refreshLibrary()
                     }
                 }
             }
@@ -538,19 +531,19 @@ struct LibraryView: View {
     private var isShowingPhotoGrid: Bool {
         if activeSearch != nil { return true }
         switch currentRoute {
-        case .grid, .discoveryGrid, .trash: return true
-        case .discoveryTiles: return false
+        case .grid, .discoveryGrid: return true
+        case .discoveryTiles, .recentlyDeleted: return false
         }
     }
 
-    /// Whether the Recently Deleted view is the thing on screen, gating the
-    /// contextual Restore / Delete Permanently actions (and suppressing the
-    /// ordinary Delete). A search overlays its results over whatever the
-    /// sidebar is routed to, so an active search is never the trash view even
-    /// if the sidebar row behind it is Recently Deleted.
-    private var isTrashRoute: Bool {
+    /// Whether the space-backed library grid is the thing on screen, gating
+    /// the Refresh action (a delta reconcile only makes sense for a crawled
+    /// space, not a live-fetched discovery collection or search). An active
+    /// search overlays live results over whatever the sidebar is routed to,
+    /// so it is never the library grid even when the sidebar row behind it is.
+    private var isLibraryGridRoute: Bool {
         if activeSearch != nil { return false }
-        if case .trash = currentRoute { return true }
+        if case .grid = currentRoute { return true }
         return false
     }
 
@@ -588,26 +581,10 @@ struct LibraryView: View {
         await controller.applySnapshot()
     }
 
-    /// Switches the grid to windowing the Recently Deleted album for `space`,
-    /// the trash equivalent of `switchSpace`/`switchCollection`. Clears the
-    /// selection first (indices from the previous view are meaningless here)
-    /// and, like a discovery collection, has no crawl to start: `setTrash`
-    /// re-reads count/readiness from `trashCount` and the first page loads
-    /// straight away.
-    private func switchToTrash(space: Space) async {
-        controller.clearSelection()
-        await env.dataSource.setTrash(space)
-        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
-        await controller.applySnapshot()
-    }
-
-    /// Refreshes whatever grid is currently on screen after a trash mutation
-    /// (move-to-trash, restore, permanent delete): drops the cached rows,
-    /// re-reads the count, reloads the first window, and re-applies the
-    /// snapshot so removed rows disappear. Clears the selection because its
-    /// absolute indices no longer line up once rows have shifted. Runs
-    /// against the current source (library or trash), which is exactly what
-    /// needs refreshing in each case.
+    /// Refreshes whatever grid is currently on screen after a delete: drops
+    /// the cached rows, re-reads the count, reloads the first window, and
+    /// re-applies the snapshot so removed rows disappear. Clears the selection
+    /// because its absolute indices no longer line up once rows have shifted.
     private func refreshCurrentGrid() async {
         await env.dataSource.reload()
         await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
@@ -615,32 +592,22 @@ struct LibraryView: View {
         await controller.applySnapshot()
     }
 
-    // MARK: - Delete / restore actions
+    /// The visible Refresh action for the library: runs a delta reconcile for
+    /// the current space so NAS-side changes made elsewhere (and this app's
+    /// own deletes/restores) show up, then reloads the grid. Reuses the crawl
+    /// model's reconcile entry point rather than a fresh full crawl.
+    private func refreshLibrary() async {
+        await env.crawl.reconcile(space: env.spaceSelection.current)
+        await refreshCurrentGrid()
+    }
 
-    /// Starts the reversible move-to-Recently-Deleted flow for the current
-    /// selection: resolves the selected rows to asset ids and raises the
-    /// confirm. A no-op in the Recently Deleted view (items there are already
-    /// trashed) and on an empty resolved selection. Nothing is moved until the
-    /// user confirms.
+    // MARK: - Delete actions
+
+    /// Starts the everyday delete for the current grid selection: resolves the
+    /// selected rows to asset ids and raises the confirm. A no-op on an empty
+    /// resolved selection. Nothing is deleted until the user confirms.
     private func requestDeleteSelected() {
-        guard !isTrashRoute else { return }
         deleteController.requestDelete(ids: controller.selectedAssetIds())
-    }
-
-    /// Restores the current Recently Deleted selection back into the library,
-    /// then refreshes the trash grid so the restored rows leave it. No confirm:
-    /// restore is fully reversible and non-destructive.
-    private func restoreSelected() {
-        let ids = controller.selectedAssetIds()
-        let space = env.dataSource.space
-        Task { await deleteController.restore(space: space, ids: ids) { await refreshCurrentGrid() } }
-    }
-
-    /// Raises the gated, always-shown permanent-delete confirm for the current
-    /// Recently Deleted selection. Nothing is deleted until the user confirms
-    /// on that dedicated sheet.
-    private func requestPermanentDeleteSelected() {
-        deleteController.requestPermanentDelete(ids: controller.selectedAssetIds())
     }
 
     /// Runs a debounced keyword search: same reset/reload/snapshot sequence
@@ -675,10 +642,9 @@ struct LibraryView: View {
             await switchSpace(to: space)
         case .discoveryGrid(let collection):
             await switchCollection(to: collection)
-        case .trash(let space):
-            await switchToTrash(space: space)
-        case .discoveryTiles:
-            // A tile grid has no photo data source to restore at all.
+        case .discoveryTiles, .recentlyDeleted:
+            // Neither a tile grid nor the recycle bin has a photo data source
+            // to restore: both fetch their own contents independently.
             break
         }
     }

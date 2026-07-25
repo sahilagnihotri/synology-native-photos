@@ -30,13 +30,6 @@ private enum FetchSource: Equatable {
     /// `SearchFilters()` behaves exactly like the plain keyword search this
     /// case always supported.
     case search(String, SearchFilters)
-    /// The Recently Deleted view for a `Space`: a windowed LOCAL read of the
-    /// app-owned trash album (`fetchTrash`/`trashCount`), the exact same
-    /// local-index discipline `.space` uses, not a live NAS call. Kept as its
-    /// own case (rather than reusing `.space`) so the library grid and the
-    /// trash view never share a resident cache, and so `refreshCount` reads
-    /// `trashCount` instead of `assetCount`.
-    case trash(Space)
 }
 
 /// Bridges the NSCollectionView grid to the core's windowed reads.
@@ -78,7 +71,6 @@ final class WindowedDataSource {
     var space: Space {
         switch source {
         case .space(let s): return s
-        case .trash(let s): return s
         case .collection, .search(_, _): return .personal
         }
     }
@@ -116,19 +108,6 @@ final class WindowedDataSource {
                 totalCount = 0
                 isReady = false
             }
-        case .trash(let space):
-            // The trash album is a plain local read with no crawl barrier:
-            // `trashCount` is authoritative immediately, so `isReady` is true
-            // as soon as it succeeds (a load never has to wait for a crawl to
-            // flip complete the way a `.space` source does).
-            do {
-                let count = try await client.trashCount(space: space)
-                totalCount = Int(count)
-                isReady = true
-            } catch {
-                totalCount = 0
-                isReady = false
-            }
         case .collection, .search:
             break
         }
@@ -146,11 +125,6 @@ final class WindowedDataSource {
             switch source {
             case .space(let space):
                 rows = try await client.fetchAssets(space: space, offset: UInt32(offset), limit: UInt32(limit))
-            case .trash(let space):
-                // Local windowed read, same as `.space`. `totalCount`/`isReady`
-                // come from `refreshCount`'s `trashCount` read, not from this
-                // page's own size, so no page-size heuristic is applied here.
-                rows = try await client.fetchTrash(space: space, offset: UInt32(offset), limit: UInt32(limit))
             case .collection(let collection):
                 rows = try await client.fetchAssetsFor(collection: collection, offset: UInt32(offset), limit: UInt32(limit))
                 // No local index/crawl barrier for a discovery collection:
@@ -189,12 +163,12 @@ final class WindowedDataSource {
     }
 
     /// Read-only lookup of an already-resident row that NEVER schedules a
-    /// page load for a missing one (unlike `item(at:)`). Used by bulk actions
-    /// (delete-to-trash, restore, permanent delete) that resolve the current
-    /// selection's absolute indices to asset ids: those must only ever target
-    /// rows the user can actually see (already loaded), and must never kick
-    /// off a wave of page loads as a side effect of merely reading which rows
-    /// are selected (e.g. after Select All on a large library).
+    /// page load for a missing one (unlike `item(at:)`). Used by the delete
+    /// action that resolves the current selection's absolute indices to asset
+    /// ids: it must only ever target rows the user can actually see (already
+    /// loaded), and must never kick off a wave of page loads as a side effect
+    /// of merely reading which rows are selected (e.g. after Select All on a
+    /// large library).
     func residentItem(at index: Int) -> Asset? { resident[index] }
 
     /// Switches the active space, drops every cached row and page marker
@@ -207,22 +181,10 @@ final class WindowedDataSource {
         await refreshCount()
     }
 
-    /// Switches to windowing the Recently Deleted album for `space`. Same
-    /// reset/refresh discipline as `setSpace`: every cached row/page marker
-    /// from the previous source is dropped (indices are meaningless across a
-    /// source switch), and count/readiness are re-read from `trashCount`.
-    /// Callers are expected to `loadWindow` right after, the same way they do
-    /// after `setSpace`.
-    func setTrash(_ space: Space) async {
-        source = .trash(space)
-        resetResident()
-        await refreshCount()
-    }
-
     /// Drops every cached row and re-reads count/readiness for the CURRENT
-    /// source, without switching sources. Used after a trash mutation
-    /// (delete-to-trash, restore, permanent delete) so the grid reflects the
-    /// new server state: a plain page reload cannot be trusted after rows are
+    /// source, without switching sources. Used after a delete (or a manual
+    /// Refresh) so the grid reflects the new server state: a plain page
+    /// reload cannot be trusted after rows are
     /// removed, since every absolute index at or beyond the removed row shifts
     /// and the resident cache would otherwise keep serving stale entries at
     /// those indices. Callers `loadWindow` + re-apply the snapshot after this.
