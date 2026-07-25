@@ -72,6 +72,10 @@ private func makeLaunchOutcome() -> LaunchOutcome {
 
 @main
 struct SynologyPhotosApp: App {
+    /// Scene id for the custom About window, opened from the app menu's
+    /// "About Synology Photos" item (see the `.commands` block below).
+    static let aboutWindowID = "about"
+
     private let outcome: LaunchOutcome
 
     init() {
@@ -123,6 +127,36 @@ struct SynologyPhotosApp: App {
             case .storeFailed(let message):
                 StoreFailedView(message: message).frame(minWidth: 480, minHeight: 320)
             }
+        }
+        .commands {
+            // Replace the stock "About SynologyPhotos" item so it opens our
+            // custom About window (app + build, git commit, core version, and
+            // the Synology API versions) instead of the default panel.
+            CommandGroup(replacing: .appInfo) {
+                AboutMenuButton()
+            }
+        }
+
+        // Fixed-size, non-resizable About window, opened by id from the menu
+        // button above. A dedicated Window scene (rather than the AppKit
+        // standard about panel) is what lets it show the richer version info.
+        Window("About Synology Photos", id: Self.aboutWindowID) {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+    }
+}
+
+/// The app menu's "About Synology Photos" item. A tiny view rather than an
+/// inline button so it can read the `openWindow` action out of the
+/// environment (which command content receives) to open the About window.
+private struct AboutMenuButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("About Synology Photos") {
+            openWindow(id: SynologyPhotosApp.aboutWindowID)
         }
     }
 }
