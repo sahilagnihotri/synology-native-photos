@@ -63,6 +63,11 @@ final class AppEnvironment {
     let dataSource: WindowedDataSource
     let thumbnailCache: ThumbnailCache
     let tempCache: TempFileCache
+    /// Two-tier cache of full downloaded originals (RAM decode + on-disk
+    /// bytes), feeding the detail viewer's photo and video load paths so a
+    /// re-open is instant and never re-downloads. Sized from the persisted
+    /// cache Settings.
+    let originalCache: OriginalImageCache
     let crawl: CrawlProgressModel
     let spaceSelection: SpaceSelection
     let discoveryCoverCache: DiscoveryCoverCache
@@ -81,6 +86,11 @@ final class AppEnvironment {
         self.dataSource = WindowedDataSource(client: c, space: .personal, pageSize: 200)
         self.thumbnailCache = ThumbnailCache(client: c)
         self.tempCache = TempFileCache(limit: 24)
+        let cacheSettings = CacheSettingsStore()
+        self.originalCache = OriginalImageCache(
+            cacheDir: accountCacheDir.appendingPathComponent("originals", isDirectory: true),
+            ramLimitBytes: cacheSettings.ramLimitBytes,
+            diskLimitBytes: cacheSettings.diskLimitBytes)
         self.crawl = CrawlProgressModel(client: c)
         self.spaceSelection = SpaceSelection(current: .personal)
         self.discoveryCoverCache = DiscoveryCoverCache(client: c)
@@ -390,6 +400,8 @@ struct LibraryView: View {
             space: env.dataSource.space,
             client: env.client,
             cache: env.tempCache,
+            originalCache: env.originalCache,
+            thumbnailCache: env.thumbnailCache,
             synoToken: currentSynoToken(),
             currentIndex: Binding(
                 get: { detailIndex ?? 0 },
@@ -522,7 +534,10 @@ struct LibraryView: View {
                             keychainUsername: currentUsername(),
                             accountCacheDir: env.accountCacheDir,
                             thumbnailCache: env.thumbnailCache,
-                            clearTempCache: { await env.tempCache.clearAll() })
+                            clearTempCache: {
+                                await env.tempCache.clearAll()
+                                await env.originalCache.clear()
+                            })
                         await so.signOut()
                     }
                 }

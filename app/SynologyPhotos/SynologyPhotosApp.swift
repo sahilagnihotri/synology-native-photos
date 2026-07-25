@@ -145,6 +145,23 @@ struct SynologyPhotosApp: App {
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
+
+        // Preferences window (Cmd-,): the cache size controls. Wired to the
+        // running `OriginalImageCache` when the local store opened, so a size
+        // change live-applies and the usage/clear controls act on the real
+        // cache; on a store-open failure there is no live cache and the panel
+        // just persists the chosen sizes for next launch.
+        Settings {
+            CacheSettingsView(model: CacheSettingsModel(cache: settingsCache))
+        }
+    }
+
+    /// The live original cache to wire the Settings panel to, or `nil` when the
+    /// local store failed to open (no environment was built).
+    @MainActor
+    private var settingsCache: OriginalImageCache? {
+        if case .ready(let env) = outcome { return env.originalCache }
+        return nil
     }
 }
 
