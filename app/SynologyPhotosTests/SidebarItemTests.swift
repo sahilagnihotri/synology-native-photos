@@ -17,8 +17,10 @@ struct SidebarItemTests {
         #expect(SidebarItem.space(.personal).route(currentSpace: .shared) == .grid(.personal))
     }
 
-    @Test func albumsRowRoutesToAlbums() {
-        #expect(SidebarItem.albums.route(currentSpace: .personal) == .albums)
+    @Test func albumsRowRoutesToAlbumsDiscoveryTiles() {
+        #expect(SidebarItem.albums.route(currentSpace: .personal) == .discoveryTiles(.albums))
+        #expect(SidebarItem.albums.route(currentSpace: .shared) == .discoveryTiles(.albums),
+                "albums routing must not depend on the currently active space")
     }
 
     @Test func discoveryTileRowsRouteToTheirOwnKind() {

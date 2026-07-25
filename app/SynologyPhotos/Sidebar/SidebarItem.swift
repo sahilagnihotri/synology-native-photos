@@ -5,9 +5,10 @@ import PhotosCore
 /// `.library` always shows the currently selected space's grid (the space
 /// itself is chosen by the `.space` rows below it, mirroring how Photos'
 /// own sidebar has one "Library" row plus separate rows for other sources).
-/// `.albums` is a placeholder section: albums are Phase 2 work, so this
-/// case exists only so the sidebar can show an empty/coming-soon state
-/// under a real "Albums" header rather than pretending albums exist.
+/// `.albums` shows the real Albums tile grid (cover + name/count, smart/
+/// shared badges), fetched live from the NAS the same way People/Places/
+/// Tags are; selecting an album tile drills into the existing photo grid.
+/// Read-only for this pass: no create/rename/add-to/remove-from album yet.
 ///
 /// `.people`/`.places`/`.subjects`/`.tags` are discovery-browse sections:
 /// selecting one shows a tile grid of that collection type (cover +
@@ -26,10 +27,10 @@ enum SidebarItem: Hashable {
 }
 
 /// Static sidebar layout: one Library row, one row per space, one Albums
-/// placeholder, and the discovery-browse sections. Kept as a plain array
-/// rather than something data-driven since the set of rows is fixed for
-/// this phase (no user-created albums yet); once Phase 2 adds real albums
-/// this becomes the seam that grows a dynamic list under `.albums`.
+/// row, and the discovery-browse sections. Kept as a plain array rather
+/// than something data-driven since the set of top-level rows is fixed;
+/// the actual album list underneath `.albums` is fetched live and rendered
+/// as a tile grid, the same way People/Places/Tags already work.
 enum SidebarSections {
     static let libraryAndSpaces: [SidebarItem] = [.library, .space(.personal), .space(.shared)]
     static let albums: [SidebarItem] = [.albums]

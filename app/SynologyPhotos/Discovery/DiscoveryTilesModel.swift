@@ -53,6 +53,8 @@ final class DiscoveryTilesModel {
                 fetched = try await client.fetchSubjects(offset: 0, limit: Self.fetchLimit).map(DiscoveryTile.init(subject:))
             case .tags:
                 fetched = try await client.fetchTags(offset: 0, limit: Self.fetchLimit).map(DiscoveryTile.init(tag:))
+            case .albums:
+                fetched = try await client.fetchAlbums(offset: 0, limit: Self.fetchLimit).map(DiscoveryTile.init(album:))
             }
             tiles = fetched
             route = fetched.isEmpty ? .empty : .tiles
@@ -76,6 +78,7 @@ extension DiscoveryKind {
         case .places: return "Places"
         case .subjects: return "Subjects"
         case .tags: return "Tags"
+        case .albums: return "Albums"
         }
     }
 
@@ -87,6 +90,7 @@ extension DiscoveryKind {
         case .places: return "map"
         case .subjects: return "square.grid.2x2"
         case .tags: return "tag"
+        case .albums: return "rectangle.stack"
         }
     }
 
@@ -98,6 +102,7 @@ extension DiscoveryKind {
         case .places: return "DSM has not detected any locations in your photos yet."
         case .subjects: return "DSM has not detected any subjects in your photos yet."
         case .tags: return "You have not created any tags yet."
+        case .albums: return "You have not created any albums yet."
         }
     }
 }

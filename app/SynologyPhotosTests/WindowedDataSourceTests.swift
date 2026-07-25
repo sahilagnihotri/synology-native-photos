@@ -171,6 +171,18 @@ struct WindowedDataSourceTests {
         #expect(window.map(\.id) == [4000, 4001, 4002], "must fetch from the collection, not the stale space cache")
     }
 
+    @Test func setCollectionLoadsAlbumPhotosFromFetchAssetsFor() async {
+        let fake = FakePhotosCore()
+        let albumId = DiscoveryCollection.album(id: 42)
+        fake.assetsForCollection[albumId] = (0..<7).map { asset(Int64($0) + 5000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setCollection(albumId)
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.count == 7)
+        #expect(fake.fetchAssetsForCallCount == 1)
+        #expect(fake.lastFetchAssetsForCollection == albumId)
+    }
+
     @Test func discoverySourceDefaultsToPersonalSpaceForItemIdentity() async {
         let fake = FakePhotosCore()
         let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .shared, pageSize: 50)

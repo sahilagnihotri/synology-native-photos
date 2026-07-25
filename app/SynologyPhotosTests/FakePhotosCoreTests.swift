@@ -120,17 +120,17 @@ struct FakePhotosCoreTests {
         #expect(try fake.assetCount(space: .shared) == 0)
     }
 
-    @Test func fakeFetchAlbumsReturnsConfiguredList() throws {
+    @Test func fakeFetchLocalAlbumsReturnsConfiguredList() throws {
         let fake = FakePhotosCore()
         fake.albums[.shared] = [
-            Album(id: 1, name: "Trip", itemCount: 12, coverCacheKey: "ck1", space: .shared)
+            Album(id: 1, name: "Trip", itemCount: 12, coverCacheKey: "ck1", coverUnitId: nil, isShared: false, isSmart: false, space: .shared)
         ]
 
-        let albums = try fake.fetchAlbums(space: .shared)
+        let albums = try fake.fetchLocalAlbums(space: .shared)
 
         #expect(albums.count == 1)
         #expect(albums.first?.name == "Trip")
-        #expect(try fake.fetchAlbums(space: .personal).isEmpty)
+        #expect(try fake.fetchLocalAlbums(space: .personal).isEmpty)
     }
 
     // MARK: - Crawl

@@ -69,6 +69,7 @@ private struct DiscoveryTileView: View {
                 coverView
                     .frame(width: 120, height: 120)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(alignment: .topTrailing) { badgeView }
                 nameView
                 Text("\(tile.itemCount) item\(tile.itemCount == 1 ? "" : "s")")
                     .font(.caption)
@@ -81,7 +82,7 @@ private struct DiscoveryTileView: View {
         .accessibilityIdentifier("discovery.tile.\(tile.id)")
         .task {
             guard let unitId = tile.coverUnitId else { return }
-            cover = await cache.cover(unitId: unitId)
+            cover = await cache.cover(unitId: unitId, cacheKey: tile.coverCacheKey)
         }
     }
 
@@ -101,7 +102,33 @@ private struct DiscoveryTileView: View {
         case .person: return "person.fill"
         case .place: return "map.fill"
         case .tag: return "tag.fill"
+        case .album: return "rectangle.stack.fill"
         case .favorites, nil: return "square.grid.2x2"
+        }
+    }
+
+    /// Small smart/shared indicator shown in the corner of an album's
+    /// cover. Only ever non-empty for an Album tile (`isSmart`/`isShared`
+    /// are hardcoded `false` on every other tile kind, see `DiscoveryTile`'s
+    /// doc comment), so this is a no-op view for every other collection.
+    @ViewBuilder
+    private var badgeView: some View {
+        if tile.isSmart || tile.isShared {
+            HStack(spacing: 3) {
+                if tile.isSmart {
+                    Image(systemName: "gearshape.fill")
+                        .accessibilityIdentifier("discovery.tile.\(tile.id).smartbadge")
+                }
+                if tile.isShared {
+                    Image(systemName: "person.2.fill")
+                        .accessibilityIdentifier("discovery.tile.\(tile.id).sharedbadge")
+                }
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(4)
+            .background(.black.opacity(0.55), in: Capsule())
+            .padding(5)
         }
     }
 

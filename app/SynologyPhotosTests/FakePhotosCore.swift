@@ -93,6 +93,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     var placesResult: Result<[Place], CoreError> = .success([])
     var subjectsResult: Result<[Subject], CoreError> = .success([])
     var tagsResult: Result<[Tag], CoreError> = .success([])
+    var liveAlbumsResult: Result<[Album], CoreError> = .success([])
     /// Canned assets per collection, windowed the same way `assets` is for
     /// `fetchAssets`. Keyed by the collection's own equality (DiscoveryCollection
     /// conforms to Equatable via its generated Hashable/Equatable), so a test
@@ -108,6 +109,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var fetchPlacesCallCount = 0
     private(set) var fetchSubjectsCallCount = 0
     private(set) var fetchTagsCallCount = 0
+    private(set) var fetchLiveAlbumsCallCount = 0
     private(set) var fetchAssetsForCallCount = 0
     private(set) var lastFetchAssetsForCollection: DiscoveryCollection?
 
@@ -214,7 +216,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         UInt64((assets[space] ?? []).count)
     }
 
-    func fetchAlbums(space: Space) throws -> [Album] {
+    func fetchLocalAlbums(space: Space) throws -> [Album] {
         albums[space] ?? []
     }
 
@@ -278,6 +280,11 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     func fetchTags(offset: UInt32, limit: UInt32) async throws -> [Tag] {
         fetchTagsCallCount += 1
         return try window(try tagsResult.get(), offset: offset, limit: limit)
+    }
+
+    func fetchAlbums(offset: UInt32, limit: UInt32) async throws -> [Album] {
+        fetchLiveAlbumsCallCount += 1
+        return try window(try liveAlbumsResult.get(), offset: offset, limit: limit)
     }
 
     func fetchAssetsFor(collection: DiscoveryCollection, offset: UInt32, limit: UInt32) async throws -> [Asset] {

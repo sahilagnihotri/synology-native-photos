@@ -6,15 +6,19 @@ import PhotosCore
 /// This is deliberately a separate, smaller enum from `SidebarItem`: the
 /// sidebar can show a "Library" row that does not carry its own space (the
 /// space comes from whichever `.space` row was picked most recently), so
-/// the content-routing decision needs exactly two cases for the existing
-/// library/albums split, plus one more per discovery-browse destination.
+/// the content-routing decision needs one case for the library grid, plus
+/// one more per discovery-browse destination. Albums reuses the exact same
+/// two discovery-browse cases as People/Places/Tags: `.discoveryTiles(.albums)`
+/// shows the album tile grid, and `.discoveryGrid(.album(id:))` shows one
+/// album's photos, since an album is, from the content area's point of
+/// view, just another discovery-browse collection with a tile step first.
 ///
 /// `.discoveryTiles` shows the tile grid for a collection type (People,
-/// Places, Subjects, Tags); `.discoveryGrid` shows the photo grid for one
-/// selected tile, or directly for Favorites (which has no tile step).
+/// Places, Subjects, Tags, Albums); `.discoveryGrid` shows the photo grid
+/// for one selected tile, or directly for Favorites (which has no tile
+/// step).
 enum SidebarSelectionRoute: Equatable {
     case grid(Space)
-    case albums
     case discoveryTiles(DiscoveryKind)
     case discoveryGrid(DiscoveryCollection)
 }
@@ -28,6 +32,7 @@ enum DiscoveryKind: Equatable {
     case places
     case subjects
     case tags
+    case albums
 }
 
 extension SidebarItem {
@@ -41,7 +46,7 @@ extension SidebarItem {
         switch self {
         case .library: return .grid(currentSpace)
         case .space(let space): return .grid(space)
-        case .albums: return .albums
+        case .albums: return .discoveryTiles(.albums)
         case .people: return .discoveryTiles(.people)
         case .places: return .discoveryTiles(.places)
         case .subjects: return .discoveryTiles(.subjects)

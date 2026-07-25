@@ -45,4 +45,24 @@ struct DiscoveryTileTests {
         #expect(tile.collection == .tag(id: 5))
         #expect(!tile.isNameless)
     }
+
+    @Test func normalAlbumCarriesCoverAndRoutesToItsOwnId() {
+        let album = Album(id: 5, name: "Trip", itemCount: 42, coverCacheKey: "COVER5", coverUnitId: 55805, isShared: false, isSmart: false, space: .personal)
+        let tile = DiscoveryTile(album: album)
+        #expect(tile.collection == .album(id: 5))
+        #expect(tile.coverUnitId == 55805)
+        #expect(tile.coverCacheKey == "COVER5")
+        #expect(!tile.isSmart)
+        #expect(!tile.isShared)
+        #expect(!tile.isNameless)
+    }
+
+    @Test func smartSharedAlbumCarriesBothBadgeFlags() {
+        let album = Album(id: 9, name: "Sunsets", itemCount: 12, coverCacheKey: nil, coverUnitId: nil, isShared: true, isSmart: true, space: .personal)
+        let tile = DiscoveryTile(album: album)
+        #expect(tile.isSmart)
+        #expect(tile.isShared)
+        #expect(tile.coverUnitId == nil)
+        #expect(tile.coverCacheKey.isEmpty)
+    }
 }

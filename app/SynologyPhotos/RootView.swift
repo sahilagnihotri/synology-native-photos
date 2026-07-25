@@ -177,8 +177,6 @@ struct LibraryView: View {
             case .grid(let space):
                 tilesModel = nil
                 Task { await switchSpace(to: space) }
-            case .albums:
-                tilesModel = nil
             case .discoveryTiles(let kind):
                 controller.clearSelection()
                 let model = DiscoveryTilesModel(client: env.client, kind: kind)
@@ -276,8 +274,6 @@ struct LibraryView: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
             switch currentRoute {
-            case .albums:
-                AlbumsComingSoonView()
             case .grid:
                 switch LibraryContentRoute.route(
                     isComplete: env.crawl.isComplete,
@@ -359,14 +355,14 @@ struct LibraryView: View {
     }
 
     /// Whether the photo grid (Library/Shared space, or a discovery
-    /// collection drilled into) is the thing currently on screen, as
-    /// opposed to a tile grid or the Albums placeholder. Drives the
+    /// collection/album drilled into) is the thing currently on screen, as
+    /// opposed to a tile grid (People/Places/Tags/Albums). Drives the
     /// selection-count/zoom-slider header controls, which only make sense
     /// against an actual photo grid.
     private var isShowingPhotoGrid: Bool {
         switch currentRoute {
         case .grid, .discoveryGrid: return true
-        case .albums, .discoveryTiles: return false
+        case .discoveryTiles: return false
         }
     }
 

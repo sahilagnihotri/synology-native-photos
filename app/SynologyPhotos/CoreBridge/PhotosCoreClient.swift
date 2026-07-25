@@ -27,7 +27,7 @@ actor PhotosCoreClient {
         try core.fetchAssets(space: space, offset: offset, limit: limit)
     }
     func assetCount(space: Space) throws -> UInt64 { try core.assetCount(space: space) }
-    func fetchAlbums(space: Space) throws -> [Album] { try core.fetchAlbums(space: space) }
+    func fetchLocalAlbums(space: Space) throws -> [Album] { try core.fetchLocalAlbums(space: space) }
     func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize) async throws -> ThumbnailData {
         try await core.thumbnail(space: space, unitId: unitId, cacheKey: cacheKey, size: size)
     }
@@ -48,6 +48,9 @@ actor PhotosCoreClient {
     }
     func fetchTags(offset: UInt32, limit: UInt32) async throws -> [Tag] {
         try await core.fetchTags(offset: offset, limit: limit)
+    }
+    func fetchAlbums(offset: UInt32, limit: UInt32) async throws -> [Album] {
+        try await core.fetchAlbums(offset: offset, limit: limit)
     }
     func fetchAssetsFor(collection: DiscoveryCollection, offset: UInt32, limit: UInt32) async throws -> [Asset] {
         try await core.fetchAssetsFor(collection: collection, offset: offset, limit: limit)

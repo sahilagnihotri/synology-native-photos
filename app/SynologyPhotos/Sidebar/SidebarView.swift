@@ -2,10 +2,13 @@ import SwiftUI
 import PhotosCore
 
 /// Photos-style source list: a "Library" row (showing whichever space is
-/// currently active), one row per space (Personal/Shared), and an "Albums"
-/// section placeholder. Selecting a row drives `selection`, which
-/// `LibraryView` reads through `SidebarItem.route(currentSpace:)` to decide
-/// what the content area shows.
+/// currently active), one row per space (Personal/Shared), a real "Albums"
+/// row, and the Discovery section. Selecting a row drives `selection`,
+/// which `LibraryView` reads through `SidebarItem.route(currentSpace:)` to
+/// decide what the content area shows. Selecting "Albums" routes to the
+/// same discovery-tiles/discovery-grid machinery People/Places/Tags use:
+/// an album tile grid first, then that album's photos once a tile is
+/// selected.
 ///
 /// Uses `List(selection:)` with `.sidebar` styling rather than a bespoke
 /// AppKit source list: this is exactly the case `NavigationSplitView` /
@@ -37,28 +40,5 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .accessibilityIdentifier("sidebar.list")
-    }
-}
-
-/// Shown when the "Albums" sidebar row is selected. Albums themselves are
-/// Phase 2 work (creating, naming, adding photos to them); this is an
-/// honest "not built yet" placeholder rather than any fake album content,
-/// matching the brief's instruction not to fake the feature.
-struct AlbumsComingSoonView: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "rectangle.stack")
-                .font(.system(size: 64))
-                .foregroundStyle(.tertiary)
-            Text("Albums")
-                .font(.title2)
-                .fontWeight(.medium)
-            Text("Albums are coming in a future update.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityIdentifier("albums.comingsoon")
     }
 }

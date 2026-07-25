@@ -48,6 +48,18 @@ struct DiscoveryTilesModelTests {
         #expect(model.tiles.first?.collection == nil)
     }
 
+    @Test func loadFetchesAlbumsForAlbumsKind() async {
+        let fake = FakePhotosCore()
+        fake.liveAlbumsResult = .success([
+            Album(id: 5, name: "Trip", itemCount: 42, coverCacheKey: "COVER5", coverUnitId: 55805, isShared: false, isSmart: false, space: .personal),
+        ])
+        let model = DiscoveryTilesModel(client: PhotosCoreClient(core: fake), kind: .albums)
+        await model.load()
+        #expect(model.route == .tiles)
+        #expect(fake.fetchLiveAlbumsCallCount == 1)
+        #expect(model.tiles.first?.collection == .album(id: 5))
+    }
+
     @Test func reloadStartsFromLoadingBeforeSettling() async {
         let fake = FakePhotosCore()
         fake.peopleResult = .success([Person(id: 1, name: "A", itemCount: 1, coverUnitId: nil, show: true)])
