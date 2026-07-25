@@ -52,12 +52,14 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     /// Invoked with the absolute grid index behind a newly (plain-)
     /// selected cell, or `nil` on deselect. Index rather than `Asset`
     /// directly, so the caller (the detail viewer) can page by index
-    /// without a linear scan back over the data source to recover it. Left
-    /// as an injectable closure (rather than a hard dependency on a detail
-    /// view type) so this controller stays AppKit/grid-only; the caller
-    /// (the app's library screen) is responsible for what selecting a
-    /// photo actually opens.
-    var onSelect: ((Int?) -> Void)?
+    /// Invoked whenever the current selection changes (click, arrow-key
+    /// move, or cleared to nil), so the caller can track what is selected
+    /// (toolbar count, future bulk actions). This NEVER opens the detail
+    /// viewer: in Apple Photos, moving or clicking a cell only changes the
+    /// selection; opening is a separate, deliberate gesture (double-click or
+    /// Return, via `onOpenDetail`). Kept as an injectable closure so this
+    /// controller stays AppKit/grid-only.
+    var onSelectionChanged: ((Int?) -> Void)?
 
     /// The clean, AppKit-independent selection model: click/shift/cmd/
     /// select-all transitions all flow through this, and it is what future
@@ -134,6 +136,13 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         collectionView.keyHandler = { [weak self] event in
             self?.handleKey(event) ?? false
         }
+        // Double-click opens the detail viewer (Apple Photos: single click
+        // selects, double-click opens). A gesture recognizer set to require
+        // two clicks fires only on the second click and leaves AppKit's own
+        // single-click selection handling untouched.
+        let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick(_:)))
+        doubleClick.numberOfClicksRequired = 2
+        collectionView.addGestureRecognizer(doubleClick)
         scroll.documentView = collectionView
         scroll.hasVerticalScroller = true
         self.view = scroll
@@ -212,7 +221,11 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
             if target < snapshotItemCount() {
                 collectionView.scrollToItems(at: [IndexPath(item: target, section: Self.section)], scrollPosition: .nearestHorizontalEdge)
             }
-            onSelect?(target)
+            // Arrow keys MOVE the selection only; they never open the detail
+            // viewer (Apple Photos: arrows walk the grid, Return/double-click
+            // open). Report the change through the selection-changed path,
+            // NOT onOpenDetail.
+            onSelectionChanged?(target)
             return true
         }
     }
@@ -227,6 +240,21 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     func clearSelection() {
         selection.clear()
         syncSelectionHighlight()
+    }
+
+    /// Double-click opens the detail viewer on the clicked cell. Maps the
+    /// click location to an index path; a click in empty space (no item)
+    /// does nothing. Bounds-checked against the applied snapshot for the
+    /// same reason `currentIndex()` is (a stale index must never open a
+    /// blank frame).
+    @objc private func handleDoubleClick(_ gesture: NSClickGestureRecognizer) {
+        let point = gesture.location(in: collectionView)
+        guard let indexPath = collectionView.indexPathForItem(at: point) else { return }
+        let index = indexPath.item
+        guard index < snapshotItemCount() else { return }
+        selection.click(index)
+        syncSelectionHighlight()
+        onOpenDetail?(index)
     }
 
     private func currentIndex() -> Int? {
@@ -426,11 +454,12 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
 
     /// `NSCollectionViewDelegate`: mirrors AppKit's own hit-testing/modifier
     /// handling into `selection` (see the property's doc comment for why),
-    /// then reports the index behind a plain click to `onSelect`: a plain
-    /// click is the one gesture that should open detail navigation
-    /// (`onSelect` drives the QuickLook sheet), shift-range and cmd-toggle
-    /// only build up a multi-select for a future bulk action and must not
-    /// also pop a single-item detail sheet.
+    /// Mirrors AppKit's mouse selection into `selection` by inspecting the
+    /// active modifier flags: shift extends a range, cmd toggles, a plain
+    /// click replaces. A single click only SELECTS (Apple Photos does not
+    /// open the viewer on a single click); opening is double-click, handled
+    /// separately by `handleDoubleClick`. All three gestures report through
+    /// `onSelectionChanged`, none of them opens detail.
     func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
         guard let indexPath = indexPaths.first else { return }
         let index = indexPath.item
@@ -441,8 +470,8 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
             selection.toggle(index)
         } else {
             selection.click(index)
-            onSelect?(index)
         }
+        onSelectionChanged?(currentIndex())
     }
 
     /// `NSCollectionViewDelegate`: mirrors deselection into `selection`
@@ -456,7 +485,7 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
             selection.toggle(indexPath.item)
         }
         if collectionView.selectionIndexPaths.isEmpty {
-            onSelect?(nil)
+            onSelectionChanged?(nil)
         }
     }
 

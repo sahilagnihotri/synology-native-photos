@@ -481,11 +481,35 @@ struct PhotoGridControllerTests {
         let (controller, _) = await makeController(count: 10)
 
         var selectedIndex: Int?
-        controller.onSelect = { selectedIndex = $0 }
+        var openedIndex: Int?
+        controller.onSelectionChanged = { selectedIndex = $0 }
+        // Arrow keys must NEVER open the detail viewer, only move selection.
+        controller.onOpenDetail = { openedIndex = $0 }
 
         #expect(controller.handleKey(keyEvent(KeyCode.rightArrow)) == true)
         #expect(controller.selection.selected == [0])
         #expect(selectedIndex == 0)
+        // Regression guard: pressing an arrow must not have opened detail.
+        #expect(openedIndex == nil)
+    }
+
+    /// Regression for the bug where every arrow key opened the image: moving
+    /// the selection with arrows reports through onSelectionChanged and never
+    /// fires onOpenDetail.
+    @Test func arrowKeysMoveSelectionWithoutOpeningDetail() async {
+        let (controller, _) = await makeController(count: 10)
+        controller.selection.click(4)
+
+        var opened = false
+        controller.onOpenDetail = { _ in opened = true }
+
+        #expect(controller.handleKey(keyEvent(KeyCode.rightArrow)) == true)
+        #expect(controller.selection.selected == [5])
+        #expect(opened == false)
+
+        #expect(controller.handleKey(keyEvent(KeyCode.leftArrow)) == true)
+        #expect(controller.selection.selected == [4])
+        #expect(opened == false)
     }
 
     @Test func leftArrowMovesSelectionBackByOne() async {

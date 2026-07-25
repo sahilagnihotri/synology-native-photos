@@ -114,11 +114,12 @@ extension LibraryContentRoute {
 /// detail.
 ///
 /// Grid item selection opens `DetailViewerHost` in a sheet: `detailIndex`
-/// is populated from `PhotoGridController.onSelect`/`onOpenDetail`, which
-/// the controller invokes with the relevant absolute grid index (nil clears
-/// the sheet on deselect). This is the wiring `DetailQuickLookView`'s own
-/// task (51) explicitly deferred to here, since extended with Return/Space
-/// keyboard opens and Left/Right paging.
+/// is populated from `PhotoGridController.onOpenDetail`, which the
+/// controller invokes with the relevant absolute grid index on a
+/// deliberate open gesture (double-click or Return), not on a plain
+/// selection change (nil clears the sheet on close). This is the wiring
+/// `DetailQuickLookView`'s own task (51) explicitly deferred to here, since
+/// extended with Return/Space keyboard opens and Left/Right paging.
 ///
 /// The top segmented Personal/Shared toggle is replaced by a Photos-style
 /// sidebar (`SidebarView`): the sidebar's "Library" row plus per-space rows
@@ -150,6 +151,17 @@ struct LibraryView: View {
     /// re-entering the same tiles section) always drops back out of a
     /// drilled-in collection first.
     @State private var drilledInCollection: DiscoveryCollection?
+    /// The toolbar search field's live text, bound directly to `.searchable`.
+    /// Read-only search: there is no saved-search list, and clearing this
+    /// back to empty simply returns to whatever the sidebar was already
+    /// routed to, per the brief.
+    @State private var searchQuery = ""
+    /// The query actually searched for after debounce, or `nil` when no
+    /// search is active. Kept separate from `searchQuery` so keystrokes
+    /// never fire a request on every character; `searchTask` below commits
+    /// this once the user pauses typing.
+    @State private var activeSearch: String?
+    @State private var searchTask: Task<Void, Never>?
 
     init(env: AppEnvironment) {
         self.env = env
@@ -163,6 +175,7 @@ struct LibraryView: View {
         } detail: {
             content
         }
+        .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search Photos")
         .task {
             wireGridCallbacks()
             await env.crawl.startCrawl(space: env.spaceSelection.current)
@@ -190,6 +203,26 @@ struct LibraryView: View {
         .onChange(of: drilledInCollection) { _, newValue in
             guard let newValue else { return }
             Task { await switchCollection(to: newValue) }
+        }
+        .onChange(of: searchQuery) { _, newValue in
+            searchTask?.cancel()
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                // Empty query: drop straight back to whatever the sidebar is
+                // already routed to, no debounce needed for clearing. Only
+                // do this if a search was actually active, so clearing an
+                // already-empty field on first launch is a no-op rather
+                // than an extra reload.
+                guard activeSearch != nil else { return }
+                activeSearch = nil
+                Task { await restoreCurrentRoute() }
+                return
+            }
+            searchTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                await runSearch(trimmed)
+            }
         }
         .sheet(isPresented: Binding(
             get: { detailIndex != nil },
@@ -220,7 +253,12 @@ struct LibraryView: View {
     /// keeps this wiring O(1) per keypress/click regardless of library
     /// size.
     private func wireGridCallbacks() {
-        controller.onSelect = { index in detailIndex = index }
+        // Selection changes (click, arrow-key move, cleared) only track the
+        // selection; they MUST NOT open the detail viewer. Apple Photos opens
+        // only on a deliberate gesture: double-click or Return (onOpenDetail),
+        // or Space for QuickLook (onToggleQuickLook). Wiring selection changes
+        // to detailIndex is exactly the bug where arrow keys opened the image.
+        controller.onSelectionChanged = { _ in }
         controller.onOpenDetail = { index in detailIndex = index }
         controller.onToggleQuickLook = { index in
             detailIndex = (detailIndex != nil) ? nil : index
@@ -242,9 +280,9 @@ struct LibraryView: View {
                 // The crawl status line only ever applies to the space-backed
                 // Library grid: discovery collections have no crawl barrier
                 // at all (they are fetched live), so showing "Importing..."
-                // over a tile grid or a discovery photo grid would be a
-                // meaningless, permanently-stuck status.
-                if case .grid = currentRoute, !env.crawl.isComplete {
+                // over a tile grid, a discovery photo grid, or search
+                // results would be a meaningless, permanently-stuck status.
+                if activeSearch == nil, case .grid = currentRoute, !env.crawl.isComplete {
                     Text(env.crawl.statusText).accessibilityIdentifier("crawl.status")
                 }
                 if isShowingPhotoGrid {
@@ -273,50 +311,74 @@ struct LibraryView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            switch currentRoute {
-            case .grid:
-                switch LibraryContentRoute.route(
-                    isComplete: env.crawl.isComplete,
-                    itemCount: env.dataSource.totalCount,
-                    failure: env.crawl.failure
-                ) {
-                case .importing:
-                    ProgressView(env.crawl.statusText).accessibilityIdentifier("crawl.progressview")
-                case .empty:
-                    EmptyLibraryView(space: env.spaceSelection.current)
-                case .grid:
-                    PhotoGridView(controller: controller)
-                case .failed(let message):
-                    CrawlFailedView(message: message) {
-                        await env.crawl.startCrawl(space: env.spaceSelection.current)
-                        await env.dataSource.refreshCount()
-                        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
-                        await controller.applySnapshot()
-                    }
-                }
-            case .discoveryTiles:
-                if let tilesModel {
-                    DiscoveryTileGridView(model: tilesModel, cache: env.discoveryCoverCache) { collection in
-                        drilledInCollection = collection
-                    }
-                } else {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            case .discoveryGrid:
+            // An active search overrides whatever the sidebar is otherwise
+            // routed to, matching Photos' own behavior of overlaying search
+            // results on top of the current view rather than requiring the
+            // user to navigate anywhere first. Clearing the query (handled
+            // in the `.onChange(of: searchQuery)` above) drops straight
+            // back to `currentRoute` with no further action needed here.
+            if let activeSearch {
                 switch LibraryContentRoute.route(
                     isComplete: env.dataSource.isReady,
                     itemCount: env.dataSource.totalCount
                 ) {
                 case .importing:
-                    ProgressView("Loading...").accessibilityIdentifier("discoverygrid.progressview")
+                    ProgressView("Searching...").accessibilityIdentifier("search.progressview")
                 case .empty:
-                    DiscoveryGridEmptyView(title: headerTitle)
+                    SearchEmptyView(query: activeSearch)
                 case .grid:
                     PhotoGridView(controller: controller)
                 case .failed(let message):
                     CrawlFailedView(message: message) {
-                        if case .discoveryGrid(let collection) = currentRoute {
-                            await switchCollection(to: collection)
+                        await runSearch(activeSearch)
+                    }
+                }
+            } else {
+                switch currentRoute {
+                case .grid:
+                    switch LibraryContentRoute.route(
+                        isComplete: env.crawl.isComplete,
+                        itemCount: env.dataSource.totalCount,
+                        failure: env.crawl.failure
+                    ) {
+                    case .importing:
+                        ProgressView(env.crawl.statusText).accessibilityIdentifier("crawl.progressview")
+                    case .empty:
+                        EmptyLibraryView(space: env.spaceSelection.current)
+                    case .grid:
+                        PhotoGridView(controller: controller)
+                    case .failed(let message):
+                        CrawlFailedView(message: message) {
+                            await env.crawl.startCrawl(space: env.spaceSelection.current)
+                            await env.dataSource.refreshCount()
+                            await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+                            await controller.applySnapshot()
+                        }
+                    }
+                case .discoveryTiles:
+                    if let tilesModel {
+                        DiscoveryTileGridView(model: tilesModel, cache: env.discoveryCoverCache) { collection in
+                            drilledInCollection = collection
+                        }
+                    } else {
+                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                case .discoveryGrid:
+                    switch LibraryContentRoute.route(
+                        isComplete: env.dataSource.isReady,
+                        itemCount: env.dataSource.totalCount
+                    ) {
+                    case .importing:
+                        ProgressView("Loading...").accessibilityIdentifier("discoverygrid.progressview")
+                    case .empty:
+                        DiscoveryGridEmptyView(title: headerTitle)
+                    case .grid:
+                        PhotoGridView(controller: controller)
+                    case .failed(let message):
+                        CrawlFailedView(message: message) {
+                            if case .discoveryGrid(let collection) = currentRoute {
+                                await switchCollection(to: collection)
+                            }
                         }
                     }
                 }
@@ -325,11 +387,14 @@ struct LibraryView: View {
     }
 
     /// Title shown above the grid, matching Photos' own content-area
-    /// heading (e.g. "Library", "Personal", "Shared", "Favorites"). A
-    /// drilled-in tile (People/Places/Tags) shows the tile's own name
-    /// instead of the section's generic title, e.g. "Sahil" rather than
-    /// "People", matching how Photos itself titles a person's page.
+    /// heading (e.g. "Library", "Personal", "Shared", "Favorites"). An
+    /// active search shows the query itself, matching Photos' own titling
+    /// of a search results page; a drilled-in tile (People/Places/Tags)
+    /// shows the tile's own name instead of the section's generic title,
+    /// e.g. "Sahil" rather than "People", matching how Photos itself titles
+    /// a person's page.
     private var headerTitle: String {
+        if let activeSearch { return "Search: \(activeSearch)" }
         if let drilledInCollection, drilledInCollection != .favorites,
            let tile = tilesModel?.tiles.first(where: { $0.collection == drilledInCollection }) {
             return tile.displayName.isEmpty ? currentSpaceRoute.title : tile.displayName
@@ -354,12 +419,13 @@ struct LibraryView: View {
         return sidebarSelection?.route(currentSpace: env.spaceSelection.current) ?? .grid(env.spaceSelection.current)
     }
 
-    /// Whether the photo grid (Library/Shared space, or a discovery
-    /// collection/album drilled into) is the thing currently on screen, as
-    /// opposed to a tile grid (People/Places/Tags/Albums). Drives the
-    /// selection-count/zoom-slider header controls, which only make sense
-    /// against an actual photo grid.
+    /// Whether the photo grid (Library/Shared space, a discovery
+    /// collection/album drilled into, or active search results) is the
+    /// thing currently on screen, as opposed to a tile grid
+    /// (People/Places/Tags/Albums). Drives the selection-count/zoom-slider
+    /// header controls, which only make sense against an actual photo grid.
     private var isShowingPhotoGrid: Bool {
+        if activeSearch != nil { return true }
         switch currentRoute {
         case .grid, .discoveryGrid: return true
         case .discoveryTiles: return false
@@ -400,6 +466,37 @@ struct LibraryView: View {
         await controller.applySnapshot()
     }
 
+    /// Runs a debounced keyword search: same reset/reload/snapshot sequence
+    /// as `switchCollection`, since search is windowed the same way (a live
+    /// NAS call, no local index or crawl barrier). Setting `activeSearch`
+    /// is what actually switches the content area over to showing results;
+    /// this always happens after the data source itself is already
+    /// windowing the new keyword, so the grid never briefly shows the
+    /// previous view's stale rows under the new header.
+    private func runSearch(_ keyword: String) async {
+        controller.clearSelection()
+        await env.dataSource.setSearch(keyword)
+        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+        await controller.applySnapshot()
+        activeSearch = keyword
+    }
+
+    /// Re-windows the data source against whatever `currentRoute` points at
+    /// once a search is cleared, since `runSearch` switched it over to the
+    /// `.search` source and it needs to go back to the space/collection the
+    /// sidebar (or a drilled-in tile) was already showing.
+    private func restoreCurrentRoute() async {
+        switch currentRoute {
+        case .grid(let space):
+            await switchSpace(to: space)
+        case .discoveryGrid(let collection):
+            await switchCollection(to: collection)
+        case .discoveryTiles:
+            // A tile grid has no photo data source to restore at all.
+            break
+        }
+    }
+
     /// The signed-in account username, read from the current auth phase.
     private func currentUsername() -> String {
         if case .valid(let session) = env.auth.phase { return session.username }
@@ -437,6 +534,30 @@ struct DiscoveryGridEmptyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("discoverygrid.empty")
+    }
+}
+
+/// Shown when an active keyword search genuinely matched nothing. Mirrors
+/// `DiscoveryGridEmptyView`'s visual language, worded the way Photos itself
+/// words a no-results search rather than a plain "no photos" message.
+struct SearchEmptyView: View {
+    let query: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 64))
+                .foregroundStyle(.tertiary)
+            Text("No Results")
+                .font(.title2)
+                .fontWeight(.medium)
+            Text("No photos found for \u{201c}\(query)\u{201d}.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("search.empty")
     }
 }
 
