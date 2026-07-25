@@ -28,6 +28,7 @@
 		48EFD0FE8A0BCD99422F2CC1 /* SidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58D01D3F06430B7D20A238E5 /* SidebarItem.swift */; };
 		49342E84F94410F6FF29C43D /* GridZoomModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5E25DCDDB5F134220A9E7F /* GridZoomModelTests.swift */; };
 		4A102FE0D8B5ED56831E327C /* ImageDownsampleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5261051EEA590BD7268673F8 /* ImageDownsampleTests.swift */; };
+		4A9D19E4AA605E800212C508 /* DetailVideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7054BFA3764B1896AF8A6B21 /* DetailVideoPlayerView.swift */; };
 		4EDCB29436B762E43A9D1FD9 /* PhotoDragExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD0CABA27FF76D9A0BF054E /* PhotoDragExport.swift */; };
 		529EB56C301B014E76FA7CEE /* SearchFilterModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49031F3A8BCBF65A3738930E /* SearchFilterModelTests.swift */; };
 		53B08BCA15B493B24FBEB737 /* ZoomSliderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B383D6411BB99C1A23D54C4F /* ZoomSliderView.swift */; };
@@ -80,6 +81,7 @@
 		E8936FC2A8E25821FDA0ED64 /* ImageDownsample.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B5A556BC6D75D787EC6353 /* ImageDownsample.swift */; };
 		E8F637EAF875CC7E53D219B4 /* DiscoveryTileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2AE4FDB73A0F3C890F411E /* DiscoveryTileTests.swift */; };
 		EA884F70294FA80457254F90 /* EmptyLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AA11CEC5270A0AB58CE575 /* EmptyLibraryView.swift */; };
+		EE3AE0B10B309928F5FD360F /* DetailVideoPlayerViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271B14DD1E9AA0D7D465F877 /* DetailVideoPlayerViewTests.swift */; };
 		F06F24C5903CADBB0E2CF0E0 /* AssetInfoFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B73ADCAA1B227B90E3B1AA /* AssetInfoFormatterTests.swift */; };
 		F3DF81EDC7A33D114986BE0D /* CoreBridgeSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */; };
 		F6E0B0C7401716BE5DF838C4 /* WindowedDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8A7EB2843B1889B47AA6DA /* WindowedDataSource.swift */; };
@@ -147,6 +149,7 @@
 		1EF3205B25839B5C3B86CE9E /* AuthStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStateMachineTests.swift; sourceTree = "<group>"; };
 		21B73ADCAA1B227B90E3B1AA /* AssetInfoFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetInfoFormatterTests.swift; sourceTree = "<group>"; };
 		26622FE9B92A0DFCF2A7EDBE /* PhotosCoreClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosCoreClientTests.swift; sourceTree = "<group>"; };
+		271B14DD1E9AA0D7D465F877 /* DetailVideoPlayerViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailVideoPlayerViewTests.swift; sourceTree = "<group>"; };
 		271D63AA455C96290DFEF262 /* FakePhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakePhotosCore.swift; sourceTree = "<group>"; };
 		2A06C5754F8669A8D883CA53 /* PhotoGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridView.swift; sourceTree = "<group>"; };
 		31BC99794475619316AE36D9 /* SynologyPhotosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SynologyPhotosTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -169,6 +172,7 @@
 		61C8C541A89432E18AE11C26 /* TempCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TempCacheTests.swift; sourceTree = "<group>"; };
 		66AAF71547574AB2C70C51D8 /* CrawlProgressModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrawlProgressModelTests.swift; sourceTree = "<group>"; };
 		69F68D25C32F775956648EF0 /* DiscoveryCoverCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryCoverCache.swift; sourceTree = "<group>"; };
+		7054BFA3764B1896AF8A6B21 /* DetailVideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailVideoPlayerView.swift; sourceTree = "<group>"; };
 		7657EE2CDC6D87A89FDA33A8 /* SynologyPhotos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SynologyPhotos.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		775FE46E23FB2AF20B3E5442 /* CoreError+Swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CoreError+Swift.swift"; sourceTree = "<group>"; };
 		7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreBridgeSmokeTests.swift; sourceTree = "<group>"; };
@@ -255,6 +259,7 @@
 				7BC23B90C9A5CE38EEA816EA /* CoreBridgeSmokeTests.swift */,
 				66AAF71547574AB2C70C51D8 /* CrawlProgressModelTests.swift */,
 				59F1BB6F6BF79ADE6403C562 /* DetailPagingModelTests.swift */,
+				271B14DD1E9AA0D7D465F877 /* DetailVideoPlayerViewTests.swift */,
 				48DC21E7E1699CD7AD4A5400 /* DetailZoomModelTests.swift */,
 				A8BA18DE37FF0F3B8947CFA7 /* DiscoveryTilesModelTests.swift */,
 				4C2AE4FDB73A0F3C890F411E /* DiscoveryTileTests.swift */,
@@ -434,6 +439,7 @@
 				CE8F23F7D2E1C87BC4C8C287 /* AssetInfoFormatter.swift */,
 				BB87B9766B67892624647B7D /* DetailPagingModel.swift */,
 				C1BABD02982B5D08ED3601C9 /* DetailQuickLookView.swift */,
+				7054BFA3764B1896AF8A6B21 /* DetailVideoPlayerView.swift */,
 				9A916BF5C0864E0825725A4A /* DetailZoomModel.swift */,
 			);
 			path = Detail;
@@ -646,6 +652,7 @@
 				03753ACEC9D98188820B20E6 /* DeleteComingSoonAlert.swift in Sources */,
 				22F37A1CC8E27E165F8C2B8C /* DetailPagingModel.swift in Sources */,
 				7F5D2228537668351F75629F /* DetailQuickLookView.swift in Sources */,
+				4A9D19E4AA605E800212C508 /* DetailVideoPlayerView.swift in Sources */,
 				7181F256F5EEB4EB7E34FF80 /* DetailZoomModel.swift in Sources */,
 				C12297CAEF14C651DA110826 /* DiscoveryCoverCache.swift in Sources */,
 				AFD9BAEB7A9F3570D0DD396E /* DiscoveryTile.swift in Sources */,
@@ -691,6 +698,7 @@
 				F3DF81EDC7A33D114986BE0D /* CoreBridgeSmokeTests.swift in Sources */,
 				A263DC9AA52F72AAD703B803 /* CrawlProgressModelTests.swift in Sources */,
 				45E5DCBBDF63BFFA1A2F186F /* DetailPagingModelTests.swift in Sources */,
+				EE3AE0B10B309928F5FD360F /* DetailVideoPlayerViewTests.swift in Sources */,
 				A1EB8E595E96192495218215 /* DetailZoomModelTests.swift in Sources */,
 				E8F637EAF875CC7E53D219B4 /* DiscoveryTileTests.swift in Sources */,
 				B4C757FA589B8EF1BAA728BA /* DiscoveryTilesModelTests.swift in Sources */,

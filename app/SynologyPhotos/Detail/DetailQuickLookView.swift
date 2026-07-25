@@ -328,6 +328,12 @@ struct DetailViewerHost: View {
     let space: Space
     let client: PhotosCoreClient
     let cache: TempFileCache
+    /// The current session's `syno_token`, forwarded to
+    /// `DetailVideoPlayerView` for a future streaming-URL playback source
+    /// (see that file's header comment); unused on the current
+    /// download-then-play-local path, but threaded through now so no
+    /// further plumbing is needed once a working Streaming method is found.
+    let synoToken: String?
     @Binding var currentIndex: Int
     let onClose: () -> Void
 
@@ -341,12 +347,29 @@ struct DetailViewerHost: View {
         ZStack(alignment: .topTrailing) {
             Color.black.opacity(0.9).ignoresSafeArea()
             if let asset = assetAt(currentIndex) {
-                DetailQuickLookView(
-                    asset: asset,
-                    space: space,
-                    client: client,
-                    cache: cache)
-                .padding(24)
+                // Only a true video (media_kind == video) takes the AVPlayer
+                // path. A "live" item (Live Photo still) decodes as
+                // MediaKind.unknown and is a plain JPEG on disk (verified
+                // against the real NAS: IMG_1870's downloaded bytes were a
+                // JPEG, not a video container), so it keeps going through
+                // QuickLook exactly like an ordinary photo, handling that
+                // case gracefully rather than trying to play a JPEG as a
+                // video.
+                if asset.mediaKind == .video {
+                    DetailVideoPlayerView(
+                        asset: asset,
+                        space: space,
+                        client: client,
+                        synoToken: synoToken)
+                    .padding(24)
+                } else {
+                    DetailQuickLookView(
+                        asset: asset,
+                        space: space,
+                        client: client,
+                        cache: cache)
+                    .padding(24)
+                }
                 if isShowingInfo {
                     HStack {
                         Spacer()

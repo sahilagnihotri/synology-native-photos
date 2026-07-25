@@ -241,6 +241,7 @@ struct LibraryView: View {
                 space: env.dataSource.space,
                 client: env.client,
                 cache: env.tempCache,
+                synoToken: currentSynoToken(),
                 currentIndex: Binding(
                     get: { detailIndex ?? 0 },
                     set: { detailIndex = $0 }
@@ -525,6 +526,15 @@ struct LibraryView: View {
     private func currentUsername() -> String {
         if case .valid(let session) = env.auth.phase { return session.username }
         return ""
+    }
+
+    /// The current session's `syno_token`, if any. Passed to
+    /// `DetailViewerHost` for the (currently unreachable, see
+    /// `DetailVideoPlayerView`'s file header) case where a future video
+    /// playback URL needs it attached as an `X-SYNO-TOKEN` header.
+    private func currentSynoToken() -> String? {
+        if case .valid(let session) = env.auth.phase { return session.synoToken }
+        return nil
     }
 }
 
