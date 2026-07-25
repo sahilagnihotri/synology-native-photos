@@ -20,6 +20,43 @@ Phase 1), not confirmed fact.
 
 ---
 
+## 0. Probe results and locked design (VERIFIED 2026-07-25)
+
+The delete-semantics probe (Task 1) and the album-mutation probe ran against the
+real NAS (DSM 7.3.2-86009 Update 4, DS925+, Personal space). Full transcript in
+`documentation/phase0-probe-results.md`. Outcomes that lock the design below:
+
+- The raw Foto delete IS recoverable but NOT via a Photos API. `SYNO.Foto.Browse.Item
+  method=delete` removes the item from the index and moves the physical original
+  to the home `#recycle`; there is no Foto trash/restore endpoint, and
+  `SYNO.Core.RecycleBin` is config-only (no file listing). So the everyday delete
+  is an app-owned hidden trash album (this plan's original design, now confirmed
+  as the right call), NOT the raw delete verb.
+- User decision (2026-07-25): HYBRID. Everyday Delete = move into the app trash
+  album (reversible, item identity preserved, never calls the destructive verb).
+  A separate, gated Delete Permanently = the raw `SYNO.Foto.Browse.Item delete`,
+  which we proved still lands in `#recycle` as a final filesystem safety net.
+
+Verified request shapes (these replace the UNVERIFIED candidates in Tasks 4/7/18):
+
+| Operation | API | method | params | notes |
+|-----------|-----|--------|--------|-------|
+| Create album | `SYNO.Foto.Browse.NormalAlbum` | `create` | `name`, `item=[]` | returns the new album object incl. `id` |
+| Add items to album | `SYNO.Foto.Browse.NormalAlbum` | `add_item` | `id=<album>`, `item=[<ids>]` | success envelope `{"error_list":[]}` |
+| Remove items from album | `SYNO.Foto.Browse.NormalAlbum` | `delete_item` | `id=<album>`, `item=[<ids>]` | |
+| Delete album | `SYNO.Foto.Browse.Album` | `delete` | `id=[<album>]` | note the generic `.Album` api, not `.NormalAlbum` |
+| Permanent-delete item | `SYNO.Foto.Browse.Item` | `delete` | `id=[<ids>]` | soft at fs level (moves to `#recycle`) |
+| Re-index after fs restore | `SYNO.Foto.Index` | `reindex` | none | brings a restored file back into the library (new item id) |
+
+All confirmed with the account's albums starting and ending at zero (probe was
+fully reversible). `SYNO.FileStation.Upload` needs the SynoToken in the URL query
+(header alone returns error 119) and the file part last in the multipart body.
+
+Consequence for the tasks below: the `move_item` abstraction (Task 4, `MoveTarget`)
+is replaced by direct `add_item`/`delete_item` album membership calls; "trash"
+is a normal album flagged `is_trash` locally. Task 18/19 (permanent-delete) take
+the recoverable branch and use the verified `SYNO.Foto.Browse.Item delete` shape.
+
 ## 1. Goal
 
 Add the first write-capable features to the app, in the order the design

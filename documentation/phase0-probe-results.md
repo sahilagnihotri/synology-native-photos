@@ -106,22 +106,51 @@ Procedure (run by a human against the real NAS; record every response verbatim):
    SMB file gone or moved to #recycle (path)? separate permanent-delete / empty-trash API?
 5. If a trash location holds it, probe the permanent-delete step separately (still on the throwaway).
 
-### Delete-semantics verdict (fill against real NAS)
+### Delete-semantics verdict (VERIFIED against the real NAS 2026-07-25)
+
+Probed end to end on one authorized victim (`IMG_8550.JPG`, item id 73412,
+unit_id 55758) with a verified local backup (2,588,804 bytes) taken first. The
+photo was deleted, observed, then fully restored and re-indexed (it is back in
+the library, with a new item id 73584). No data lost.
 
 | Field | Value |
 |-------|-------|
-| Date probed | pending |
-| DSM version | pending |
-| Delete API + method used | pending |
-| Delete request version | pending |
-| Response success/error.code | pending |
-| After delete: still in Browse.Item list? | pending |
-| After delete: appears in DSM trash/Recently Deleted? (API/album name) | pending |
-| After delete: SMB file gone or moved to #recycle? (path) | pending |
-| Separate permanent-delete / empty-trash API? (name+method) | pending |
-| Verdict: trash-move then gated permanent-delete confirmed? | pending |
-| Notes / surprises | pending |
+| Date probed | 2026-07-25 |
+| DSM version | DSM 7.3.2-86009 Update 4, model DS925+ |
+| Delete API + method used | `SYNO.Foto.Browse.Item` method `delete`, id array `id=[73412]` |
+| Delete request version | 7 (advertised range 1..7; any pinned value works) |
+| Response success/error.code | `{"success":true}` |
+| After delete: still in Browse.Item list? | No, removed from the Photos index immediately |
+| After delete: appears in DSM trash/Recently Deleted? | Not via any Foto API. Physically moved to the home recycle bin at the mirrored path `/home/#recycle/Photos/iPhone/2015/01/IMG_8550.JPG` |
+| After delete: SMB file gone or moved to #recycle? (path) | Moved to `#recycle` (soft delete at the filesystem level). Original path `/home/Photos/iPhone/2015/01/IMG_8550.JPG` (real `/volume1/homes/sahilagnihotri/...`) was emptied |
+| Separate permanent-delete / empty-trash API? | No Foto API. Permanent removal is a File Station delete of the `#recycle` copy (`SYNO.FileStation.Delete`). `SYNO.Core.RecycleBin`/`.User` are config/status only (`method=get` returns `{"is_cleaning":...}`); they have NO file-listing method (`list`/`enum` return error 103) |
+| Verdict | Recoverable (soft) delete confirmed, but there is NO Synology Photos API to list or restore the recycle state |
 
-Design implication (locked project invariant): whatever this probe finds, the future
-delete feature will be trash-move first, then a gated permanent-delete, with writes
-failing closed. Phase 0/1 ship NO delete UI and NO delete code in the core.
+Key facts learned (these drive the delete design):
+
+- `SYNO.Foto.Browse.Item method=delete` on this DSM is a SOFT delete: it removes
+  the item from the Photos index and moves the physical original into the home
+  folder `#recycle`, recoverable for the recycle bin's retention window.
+- Synology Photos exposes NO trash / recycle / "recently deleted" API of its own
+  (nothing across every `SYNO.Foto.*` endpoint). So the handover's original
+  design (list `SYNO.Core.RecycleBin`, restore from it) is NOT buildable: that
+  API only manages the bin, it does not enumerate contents.
+- File Station is fully available (`SYNO.FileStation.List`, `.Search`, `.CopyMove`,
+  `.Upload`, `.Delete`) and is the only API-level path to the recycle contents.
+  Recovery = move the file out of `#recycle` (or re-upload the original) then
+  `SYNO.Foto.Index method=reindex` to bring it back into the library (new item id).
+- `SYNO.FileStation.Upload` (POST, multipart) requires the SynoToken in the URL
+  query string (`?SynoToken=...`); the header alone returns error 119. The file
+  part must be last in the multipart body.
+- Searching INSIDE a `#recycle` path with `SYNO.FileStation.Search` does not find
+  files there; a direct `SYNO.FileStation.List` of the mirrored path does.
+
+Design implication: an everyday delete built on the raw Foto delete verb would
+leave "Recently Deleted" as a File-Station-level view of `#recycle` (raw files,
+no Foto listing), with restore requiring a re-index and depending on the home
+share having its recycle bin enabled (a NAS config that could be off on other
+setups, making the delete permanent). The safer, app-controlled alternative is
+to model delete as a move into an app-owned hidden album (never call the raw
+delete for everyday deletes), with a gated permanent-delete that DOES call the
+raw verb (which we now know still lands in `#recycle` as a final safety net).
+Design decision recorded in the phase 2 plan.
