@@ -296,9 +296,19 @@ RustBuffer uniffi_photoscore_fn_method_photoscore_crawl_progress(void*_Nonnull p
 uint64_t uniffi_photoscore_fn_method_photoscore_crawl_space(void*_Nonnull ptr, RustBuffer space, uint64_t observer
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DELETE_TO_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DELETE_TO_TRASH
+uint64_t uniffi_photoscore_fn_method_photoscore_delete_to_trash(void*_Nonnull ptr, RustBuffer space, RustBuffer asset_ids
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
 uint64_t uniffi_photoscore_fn_method_photoscore_download_original(void*_Nonnull ptr, RustBuffer space, int64_t unit_id, RustBuffer cache_key
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_ENSURE_TRASH_ALBUM
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_ENSURE_TRASH_ALBUM
+uint64_t uniffi_photoscore_fn_method_photoscore_ensure_trash_album(void*_Nonnull ptr, RustBuffer space
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_ALBUMS
@@ -351,9 +361,19 @@ uint64_t uniffi_photoscore_fn_method_photoscore_fetch_subjects(void*_Nonnull ptr
 uint64_t uniffi_photoscore_fn_method_photoscore_fetch_tags(void*_Nonnull ptr, uint32_t offset, uint32_t limit
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_FETCH_TRASH
+RustBuffer uniffi_photoscore_fn_method_photoscore_fetch_trash(void*_Nonnull ptr, RustBuffer space, uint32_t offset, uint32_t limit, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
 uint64_t uniffi_photoscore_fn_method_photoscore_login(void*_Nonnull ptr, RustBuffer connection, RustBuffer username, RustBuffer password, RustBuffer otp_code, RustBuffer device_token
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_PERMANENTLY_DELETE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_PERMANENTLY_DELETE
+uint64_t uniffi_photoscore_fn_method_photoscore_permanently_delete(void*_Nonnull ptr, RustBuffer space, RustBuffer asset_ids
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_PROBE_CAPABILITIES
@@ -364,6 +384,16 @@ uint64_t uniffi_photoscore_fn_method_photoscore_probe_capabilities(void*_Nonnull
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RECONCILE_DELTA
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RECONCILE_DELTA
 uint64_t uniffi_photoscore_fn_method_photoscore_reconcile_delta(void*_Nonnull ptr, RustBuffer space
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RECONCILE_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RECONCILE_TRASH
+uint64_t uniffi_photoscore_fn_method_photoscore_reconcile_trash(void*_Nonnull ptr, RustBuffer space
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_FROM_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_FROM_TRASH
+uint64_t uniffi_photoscore_fn_method_photoscore_restore_from_trash(void*_Nonnull ptr, RustBuffer space, RustBuffer asset_ids
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_RESTORE_SESSION
@@ -389,6 +419,11 @@ uint64_t uniffi_photoscore_fn_method_photoscore_sign_out(void*_Nonnull ptr
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_THUMBNAIL
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_THUMBNAIL
 uint64_t uniffi_photoscore_fn_method_photoscore_thumbnail(void*_Nonnull ptr, RustBuffer space, int64_t unit_id, RustBuffer cache_key, RustBuffer size
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_TRASH_COUNT
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_TRASH_COUNT
+uint32_t uniffi_photoscore_fn_method_photoscore_trash_count(void*_Nonnull ptr, RustBuffer space, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_VIDEO_PLAYBACK_SOURCE
@@ -711,9 +746,21 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_crawl_space(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DELETE_TO_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DELETE_TO_TRASH
+uint16_t uniffi_photoscore_checksum_method_photoscore_delete_to_trash(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_DOWNLOAD_ORIGINAL
 uint16_t uniffi_photoscore_checksum_method_photoscore_download_original(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_ENSURE_TRASH_ALBUM
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_ENSURE_TRASH_ALBUM
+uint16_t uniffi_photoscore_checksum_method_photoscore_ensure_trash_album(void
     
 );
 #endif
@@ -777,9 +824,21 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_tags(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FETCH_TRASH
+uint16_t uniffi_photoscore_checksum_method_photoscore_fetch_trash(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOGIN
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOGIN
 uint16_t uniffi_photoscore_checksum_method_photoscore_login(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_PERMANENTLY_DELETE
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_PERMANENTLY_DELETE
+uint16_t uniffi_photoscore_checksum_method_photoscore_permanently_delete(void
     
 );
 #endif
@@ -792,6 +851,18 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_probe_capabilities(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RECONCILE_DELTA
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RECONCILE_DELTA
 uint16_t uniffi_photoscore_checksum_method_photoscore_reconcile_delta(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RECONCILE_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RECONCILE_TRASH
+uint16_t uniffi_photoscore_checksum_method_photoscore_reconcile_trash(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_FROM_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_RESTORE_FROM_TRASH
+uint16_t uniffi_photoscore_checksum_method_photoscore_restore_from_trash(void
     
 );
 #endif
@@ -822,6 +893,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_sign_out(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_THUMBNAIL
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_THUMBNAIL
 uint16_t uniffi_photoscore_checksum_method_photoscore_thumbnail(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_TRASH_COUNT
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_TRASH_COUNT
+uint16_t uniffi_photoscore_checksum_method_photoscore_trash_count(void
     
 );
 #endif
