@@ -996,6 +996,36 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func restoreSession(connection: Connection, session: Session) async throws  -> SessionState
     
     /**
+     * NON-DESTRUCTIVE EDIT SAVE: uploads the already-rendered edited JPEG
+     * `jpeg` as a BRAND-NEW file named `filename` into a dedicated
+     * `/home/Photos/Edited` folder inside the Personal Photos library, then
+     * triggers ONE Photos re-index so the new photo is picked up and appears
+     * in the library.
+     *
+     * SAFETY (the whole point of the edit feature): this ONLY ever adds a new
+     * file. It never downloads-to-mutate, never overwrites, and never deletes
+     * the original the edit was derived from. `upload_file` pins
+     * `overwrite=false`, so even a name collision fails closed rather than
+     * clobbering an existing file, and the original NAS asset is never named
+     * in any request here. Landing the copy in an obviously-named `Edited`
+     * folder makes it plainly an ADDED asset, not a changed one.
+     *
+     * FAIL CLOSED on either step: if the upload fails, the re-index is never
+     * sent (there is nothing new to index) and the error propagates; if the
+     * re-index fails, the file is already safely uploaded and the error still
+     * surfaces so the caller can retry (a later crawl/reindex also picks it
+     * up). There is no local index row to write here: the new photo only
+     * enters the local mirror when a subsequent crawl re-reads the library.
+     *
+     * Reuses `recycle_call_context` for the session basics (transport + sid +
+     * syno_token); like the File Station recycle calls, both the upload and
+     * the re-index carry their own fixed API versions, so no capability-pinned
+     * version needs resolving. Requires a live session; fails closed with
+     * `CoreError::Auth` if none is held.
+     */
+    func saveEditedPhoto(filename: String, jpeg: Data) async throws 
+    
+    /**
      * Keyword search (`SYNO.Foto.Search.Search`, method `list_item`),
      * windowed the same way `fetch_assets_for` windows a discovery
      * collection: always a live NAS call, no local index. Personal space
@@ -2054,6 +2084,51 @@ open func restoreSession(connection: Connection, session: Session)async throws  
 }
     
     /**
+     * NON-DESTRUCTIVE EDIT SAVE: uploads the already-rendered edited JPEG
+     * `jpeg` as a BRAND-NEW file named `filename` into a dedicated
+     * `/home/Photos/Edited` folder inside the Personal Photos library, then
+     * triggers ONE Photos re-index so the new photo is picked up and appears
+     * in the library.
+     *
+     * SAFETY (the whole point of the edit feature): this ONLY ever adds a new
+     * file. It never downloads-to-mutate, never overwrites, and never deletes
+     * the original the edit was derived from. `upload_file` pins
+     * `overwrite=false`, so even a name collision fails closed rather than
+     * clobbering an existing file, and the original NAS asset is never named
+     * in any request here. Landing the copy in an obviously-named `Edited`
+     * folder makes it plainly an ADDED asset, not a changed one.
+     *
+     * FAIL CLOSED on either step: if the upload fails, the re-index is never
+     * sent (there is nothing new to index) and the error propagates; if the
+     * re-index fails, the file is already safely uploaded and the error still
+     * surfaces so the caller can retry (a later crawl/reindex also picks it
+     * up). There is no local index row to write here: the new photo only
+     * enters the local mirror when a subsequent crawl re-reads the library.
+     *
+     * Reuses `recycle_call_context` for the session basics (transport + sid +
+     * syno_token); like the File Station recycle calls, both the upload and
+     * the re-index carry their own fixed API versions, so no capability-pinned
+     * version needs resolving. Requires a live session; fails closed with
+     * `CoreError::Auth` if none is held.
+     */
+open func saveEditedPhoto(filename: String, jpeg: Data)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_save_edited_photo(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(filename),FfiConverterData.lower(jpeg)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_void,
+            completeFunc: ffi_photoscore_rust_future_complete_void,
+            freeFunc: ffi_photoscore_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
      * Keyword search (`SYNO.Foto.Search.Search`, method `list_item`),
      * windowed the same way `fetch_assets_for` windows a discovery
      * collection: always a live NAS call, no local index. Personal space
@@ -2954,6 +3029,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 22452) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_save_edited_photo() != 9388) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_search_assets() != 47405) {

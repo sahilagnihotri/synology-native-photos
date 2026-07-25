@@ -32,6 +32,12 @@ const RECENTLY_DELETED_ALBUM: &str = "Recently Deleted";
 /// "Recently Deleted" can never be adopted as trash.
 const TRASH_ALBUM_ID_KEY: &str = "trash_album_id";
 
+/// The dedicated folder inside the Personal Photos library that edited copies
+/// are uploaded into (created on demand via `create_parents`). Keeping edits in
+/// their own clearly-named directory makes a saved edit obviously an ADDED
+/// asset sitting next to the untouched originals, never a mutation of one.
+const EDITED_PHOTOS_FOLDER: &str = "/home/Photos/Edited";
+
 /// Trivial cross-boundary smoke function. Returns the core crate version.
 /// Proves Swift can call into Rust over UniFFI before the full PhotosCore lands.
 #[uniffi::export]
@@ -716,6 +722,39 @@ impl PhotosCore {
     pub async fn video_playback_source(&self, space: Space, asset: Asset) -> Result<VideoPlaybackSource, CoreError> {
         let path = self.download_original(space, asset.unit_id, asset.cache_key).await?;
         Ok(VideoPlaybackSource::LocalFile { path })
+    }
+
+    /// NON-DESTRUCTIVE EDIT SAVE: uploads the already-rendered edited JPEG
+    /// `jpeg` as a BRAND-NEW file named `filename` into a dedicated
+    /// `/home/Photos/Edited` folder inside the Personal Photos library, then
+    /// triggers ONE Photos re-index so the new photo is picked up and appears
+    /// in the library.
+    ///
+    /// SAFETY (the whole point of the edit feature): this ONLY ever adds a new
+    /// file. It never downloads-to-mutate, never overwrites, and never deletes
+    /// the original the edit was derived from. `upload_file` pins
+    /// `overwrite=false`, so even a name collision fails closed rather than
+    /// clobbering an existing file, and the original NAS asset is never named
+    /// in any request here. Landing the copy in an obviously-named `Edited`
+    /// folder makes it plainly an ADDED asset, not a changed one.
+    ///
+    /// FAIL CLOSED on either step: if the upload fails, the re-index is never
+    /// sent (there is nothing new to index) and the error propagates; if the
+    /// re-index fails, the file is already safely uploaded and the error still
+    /// surfaces so the caller can retry (a later crawl/reindex also picks it
+    /// up). There is no local index row to write here: the new photo only
+    /// enters the local mirror when a subsequent crawl re-reads the library.
+    ///
+    /// Reuses `recycle_call_context` for the session basics (transport + sid +
+    /// syno_token); like the File Station recycle calls, both the upload and
+    /// the re-index carry their own fixed API versions, so no capability-pinned
+    /// version needs resolving. Requires a live session; fails closed with
+    /// `CoreError::Auth` if none is held.
+    pub async fn save_edited_photo(&self, filename: String, jpeg: Vec<u8>) -> Result<(), CoreError> {
+        let (transport, sid, syno_token) = self.recycle_call_context()?;
+        synology_api::upload_file(&transport, &sid, syno_token.as_deref(), EDITED_PHOTOS_FOLDER, &filename, &jpeg)
+            .await?;
+        synology_api::trigger_reindex(&transport, &sid, syno_token.as_deref()).await
     }
 
     // --- Phase 2b: real delete + DSM recycle bin ------------------------
@@ -3584,6 +3623,102 @@ mod core_tests {
     async fn fetch_recently_deleted_without_login_returns_auth_error() {
         let core = core_at("fetch-recycle-noauth");
         let err = core.fetch_recently_deleted(0, 50).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    // --- Non-destructive edit save (upload NEW file, then reindex) --------
+
+    #[tokio::test]
+    async fn save_edited_photo_uploads_to_edited_folder_then_reindexes_once() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        // The upload lands the NEW edited copy in /home/Photos/Edited under the
+        // new filename; overwrite=false, so the original is never at risk.
+        let _upload = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::Any)
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("SYNO.FileStation.Upload".into()),
+                mockito::Matcher::Regex(r#"name="path"\r\n\r\n/home/Photos/Edited"#.into()),
+                mockito::Matcher::Regex(r#"name="overwrite"\r\n\r\nfalse"#.into()),
+                mockito::Matcher::Regex(r#"filename="sunset-edited-101010.jpg""#.into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let _reindex = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Index".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "reindex".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("save-edited", &server).await;
+        core.save_edited_photo("sunset-edited-101010.jpg".into(), b"EDITEDJPEGBYTES".to_vec())
+            .await
+            .expect("save_edited_photo ok");
+        _upload.assert_async().await;
+        _reindex.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn save_edited_photo_does_not_reindex_when_upload_fails() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _upload = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::Any)
+            .match_body(mockito::Matcher::Regex("SYNO.FileStation.Upload".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":false,"error":{"code":400}}"#)
+            .create_async()
+            .await;
+        // A failed upload must never trigger a re-index: there is nothing new
+        // to index, so this trap fails the test if reindex is ever sent.
+        let _reindex_trap = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=reindex".into()))
+            .expect(0)
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("save-edited-fail", &server).await;
+        let err = core
+            .save_edited_photo("broken-edited-1.jpg".into(), b"J".to_vec())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+        _reindex_trap.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn save_edited_photo_without_login_returns_auth_error() {
+        let core = core_at("save-edited-noauth");
+        let err = core.save_edited_photo("x-edited-1.jpg".into(), b"J".to_vec()).await.unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 }
