@@ -547,6 +547,11 @@ struct DetailViewerHost: View {
     let synoToken: String?
     @Binding var currentIndex: Int
     let onClose: () -> Void
+    /// Runs the everyday delete for the currently shown photo. Wired by
+    /// `LibraryView` to the SAME `DeleteController` flow the grid uses, so a
+    /// delete from full-photo view shows the identical confirm and, on
+    /// success, removes the item from the library and closes the viewer.
+    let onDelete: (Asset) -> Void
 
     /// Info panel visibility, toggled by the "i" button or Cmd-I. Not reset
     /// on paging: Photos keeps the info panel open across Left/Right moves.
@@ -645,6 +650,19 @@ struct DetailViewerHost: View {
             Spacer()
 
             Button {
+                requestDeleteCurrent()
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white)
+                    .frame(width: 28, height: 28)
+                    .background(.black.opacity(0.35), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("detail.delete")
+            .accessibilityLabel("Delete")
+
+            Button {
                 isShowingInfo.toggle()
             } label: {
                 Image(systemName: "info.circle")
@@ -664,35 +682,40 @@ struct DetailViewerHost: View {
     }
 
     private func handleKey(_ event: NSEvent) -> Bool {
-        let command = event.modifierFlags.contains(.command)
-        switch event.keyCode {
-        case KeyCode.escape:
+        guard let action = DetailKeyMapper.action(for: event) else { return false }
+        switch action {
+        case .close:
+            // Escape, Space, or Cmd+Up returns to the grid, the mirror of the
+            // grid's Cmd+Down "open into detail".
             onClose()
             return true
-        case KeyCode.upArrow where command:
-            // Cmd+Up returns to the grid, the mirror of the grid's Cmd+Down
-            // "open into detail".
-            onClose()
-            return true
-        case KeyCode.leftArrow:
+        case .previous:
             if let target = DetailPagingModel.index(before: currentIndex) {
                 currentIndex = target
             }
             return true
-        case KeyCode.rightArrow:
+        case .next:
             if let target = DetailPagingModel.index(after: currentIndex, count: assetCount) {
                 currentIndex = target
             }
             return true
-        case KeyCode.space:
-            onClose()
-            return true
-        case KeyCode.i where command:
+        case .toggleInfo:
             isShowingInfo.toggle()
             return true
-        default:
-            return false
+        case .delete:
+            requestDeleteCurrent()
+            return true
         }
+    }
+
+    /// Routes a delete gesture (toolbar Delete button or Delete/Cmd-Delete
+    /// key) for the currently shown photo into the injected `onDelete`, the
+    /// SAME `DeleteController` flow the grid uses. A no-op when the current
+    /// index has no loaded asset (a page not yet resolved), so a keypress
+    /// against a blank frame can never raise an empty confirm.
+    private func requestDeleteCurrent() {
+        guard let asset = assetAt(currentIndex) else { return }
+        onDelete(asset)
     }
 }
 
