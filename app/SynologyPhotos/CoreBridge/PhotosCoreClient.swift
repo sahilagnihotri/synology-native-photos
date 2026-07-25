@@ -34,6 +34,9 @@ actor PhotosCoreClient {
     func downloadOriginal(space: Space, unitId: Int64, cacheKey: String) async throws -> String {
         try await core.downloadOriginal(space: space, unitId: unitId, cacheKey: cacheKey)
     }
+    func videoPlaybackSource(space: Space, asset: Asset) async throws -> VideoPlaybackSource {
+        try await core.videoPlaybackSource(space: space, asset: asset)
+    }
 
     // MARK: - Discovery browse
 

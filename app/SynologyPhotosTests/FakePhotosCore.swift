@@ -21,6 +21,11 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         .success(ThumbnailData(cachedPath: "/tmp/fake.jpg", bytes: Data()))
     var downloadResult: Result<String, CoreError> = .success("/tmp/original.jpg")
 
+    /// Result for `videoPlaybackSource`. Defaults to a plausible LocalFile
+    /// payload so a test that never scripts it still gets something sensible.
+    var videoPlaybackSourceResult: Result<VideoPlaybackSource, CoreError> = .success(
+        .localFile(path: "/tmp/original.mov"))
+
     /// Result for `fetchCertificate`. Defaults to a plausible TOFU-approval
     /// payload so a test that never touches this still gets something
     /// sensible if it happens to call the method.
@@ -147,6 +152,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var reconcileDeltaCallCount = 0
     private(set) var thumbnailCallCount = 0
     private(set) var downloadOriginalCallCount = 0
+    private(set) var videoPlaybackSourceCallCount = 0
     private(set) var fetchCertificateCallCount = 0
 
     private(set) var lastOtpCode: String??
@@ -157,6 +163,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var lastReconciledSpace: Space?
     private(set) var lastThumbnailRequest: (space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize)?
     private(set) var lastDownloadRequest: (space: Space, unitId: Int64, cacheKey: String)?
+    private(set) var lastVideoPlaybackRequest: (space: Space, asset: Asset)?
 
     init() {}
 
@@ -282,6 +289,12 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         downloadOriginalCallCount += 1
         lastDownloadRequest = (space, unitId, cacheKey)
         return try downloadResult.get()
+    }
+
+    func videoPlaybackSource(space: Space, asset: Asset) async throws -> VideoPlaybackSource {
+        videoPlaybackSourceCallCount += 1
+        lastVideoPlaybackRequest = (space, asset)
+        return try videoPlaybackSourceResult.get()
     }
 
     // MARK: - Discovery browse
