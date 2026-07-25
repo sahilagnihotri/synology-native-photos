@@ -26,6 +26,12 @@ uniffi::setup_scaffolding!("photoscore");
 /// obviously-named recovery album rather than a cryptic app-internal one.
 const RECENTLY_DELETED_ALBUM: &str = "Recently Deleted";
 
+/// `app_state` key under which the id of the app-created trash album is
+/// persisted per space. The trash album is owned by this stored id, never by a
+/// name match, so a user's own album that happens to be named
+/// "Recently Deleted" can never be adopted as trash.
+const TRASH_ALBUM_ID_KEY: &str = "trash_album_id";
+
 /// Trivial cross-boundary smoke function. Returns the core crate version.
 /// Proves Swift can call into Rust over UniFFI before the full PhotosCore lands.
 #[uniffi::export]
@@ -130,8 +136,21 @@ pub struct PhotosCore {
     /// delete/restore/reconcile paths do not re-list albums on every call.
     /// Populated by `ensure_trash_album` on first resolve; a plain `HashMap`
     /// behind a `Mutex` since it is tiny (one entry per space) and only ever
-    /// touched under a short-lived lock, never across an `.await`.
+    /// touched under a short-lived lock, never across an `.await`. Refreshed
+    /// (not left stale) whenever `ensure_trash_album` finds the stored id no
+    /// longer exists on the NAS and creates a fresh album.
     trash_album_ids: Mutex<HashMap<Space, i64>>,
+    /// Serializes every trash-MUTATING operation (delete_to_trash,
+    /// restore_from_trash, permanently_delete, reconcile_trash, and
+    /// ensure_trash_album) so they never interleave. This is a `tokio::Mutex`,
+    /// not the std `Mutex` that guards `store`: it is deliberately held across
+    /// `.await` points for the whole operation, which closes a TOCTOU where a
+    /// concurrent restore could clear an item's `in_trash` flag in between
+    /// `permanently_delete`'s guard check and its network delete. Acquired
+    /// exactly once per public call; the internal `*_inner` helpers never
+    /// re-acquire it, so a public method that delegates to another
+    /// (delete_to_trash -> the trash-album resolve) cannot self-deadlock.
+    trash_lock: tokio::sync::Mutex<()>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -146,6 +165,7 @@ impl PhotosCore {
             cache_dir,
             live: Mutex::new(None),
             trash_album_ids: Mutex::new(HashMap::new()),
+            trash_lock: tokio::sync::Mutex::new(()),
         }))
     }
 
@@ -642,28 +662,24 @@ impl PhotosCore {
     // --- Phase 2a: hybrid safe delete -----------------------------------
 
     /// Resolves the app-owned `Recently Deleted` album for `space`, creating
-    /// it on the NAS if it does not exist yet. Lists albums
-    /// (`SYNO.Foto.Browse.Album`), returns the first named exactly
-    /// `Recently Deleted`, and otherwise creates one via
-    /// `SYNO.Foto.Browse.NormalAlbum` `create`. The resolved id is cached on
-    /// this instance so the delete/restore/reconcile paths do not re-list on
-    /// every call.
+    /// it on the NAS if it does not exist yet.
     ///
-    /// Requires a live session; fails closed with `CoreError::Auth`
-    /// otherwise. Never touches the raw delete verb: this only manages an
-    /// album.
+    /// OWNERSHIP BY ID, NEVER BY NAME (safety): the app persists the id of the
+    /// album it created (`app_state`), and this method adopts an existing
+    /// album ONLY when its id equals that stored id and it is still present on
+    /// the NAS. A user's own album that merely happens to be named
+    /// "Recently Deleted" is never adopted, so its contents can never be
+    /// silently flagged as trash (and thus permanent-delete eligible). If no
+    /// id is stored, or the stored id no longer exists on the NAS, a fresh
+    /// album is created, its returned id persisted, and the in-memory cache
+    /// refreshed to it (never left serving the dead id).
+    ///
+    /// Serialized with every other trash mutation via `trash_lock`. Requires a
+    /// live session; fails closed with `CoreError::Auth`. Never touches the
+    /// raw delete verb: this only manages an album.
     pub async fn ensure_trash_album(&self, space: Space) -> Result<Album, CoreError> {
-        let albums = self.list_all_albums(space).await?;
-        if let Some(found) = albums.into_iter().find(|a| a.name == RECENTLY_DELETED_ALBUM) {
-            self.cache_trash_album_id(space, found.id);
-            return Ok(found);
-        }
-        let (transport, sid, version, syno_token) = self.write_call_context(normal_album_api(space), 1)?;
-        let created =
-            synology_api::create_album(&transport, &sid, space, RECENTLY_DELETED_ALBUM, version, syno_token.as_deref())
-                .await?;
-        self.cache_trash_album_id(space, created.id);
-        Ok(created)
+        let _lock = self.trash_lock.lock().await;
+        self.ensure_trash_album_inner(space).await
     }
 
     /// Everyday delete: moves `asset_ids` into the `Recently Deleted` album on
@@ -674,14 +690,24 @@ impl PhotosCore {
     /// SAFETY: this NEVER calls the raw Foto delete verb; the move is fully
     /// reversible via `restore_from_trash`. Server confirms first: on any
     /// error from `add_items`, no local flag changes (fail closed). An empty
-    /// `asset_ids` is a no-op.
+    /// `asset_ids` is a no-op. Serialized with every other trash mutation via
+    /// `trash_lock`.
+    ///
+    /// ATOMICITY: the server move and the local flag write are each
+    /// individually transactional but NOT jointly atomic. The only failure
+    /// window is "server move succeeded, local flag write failed" (e.g. the
+    /// store was momentarily busy): the item is in the NAS trash album but not
+    /// yet hidden locally. That is the safe direction (nothing is lost or
+    /// permanently deleted) and self-heals on the next `reconcile_trash`,
+    /// which re-derives the local flags from the album's real membership.
     ///
     /// Requires a live session; fails closed with `CoreError::Auth`.
     pub async fn delete_to_trash(&self, space: Space, asset_ids: Vec<i64>) -> Result<(), CoreError> {
         if asset_ids.is_empty() {
             return Ok(());
         }
-        let album_id = self.trash_album_id(space).await?;
+        let _lock = self.trash_lock.lock().await;
+        let album_id = self.trash_album_id_inner(space).await?;
         let (transport, sid, version, syno_token) = self.write_call_context(normal_album_api(space), 1)?;
         synology_api::add_items(&transport, &sid, space, album_id, &asset_ids, version, syno_token.as_deref()).await?;
         // Server confirmed the move; now, and only now, mirror it locally.
@@ -693,14 +719,22 @@ impl PhotosCore {
     /// Restore: removes `asset_ids` from the `Recently Deleted` album on the
     /// NAS, then (ONLY on server success) clears their local `in_trash` flag
     /// so they return to the library grid. Reverses `delete_to_trash` exactly.
-    /// Fail closed on any error; empty `asset_ids` is a no-op.
+    /// Fail closed on any error; empty `asset_ids` is a no-op. Serialized with
+    /// every other trash mutation via `trash_lock`.
+    ///
+    /// ATOMICITY: same shape as `delete_to_trash`. The server remove and the
+    /// local flag clear are individually transactional but not jointly atomic;
+    /// the only failure window ("removed on the NAS, still flagged locally")
+    /// is the safe direction (the item stays visible in the trash view, never
+    /// lost) and self-heals on the next `reconcile_trash`.
     ///
     /// Requires a live session; fails closed with `CoreError::Auth`.
     pub async fn restore_from_trash(&self, space: Space, asset_ids: Vec<i64>) -> Result<(), CoreError> {
         if asset_ids.is_empty() {
             return Ok(());
         }
-        let album_id = self.trash_album_id(space).await?;
+        let _lock = self.trash_lock.lock().await;
+        let album_id = self.trash_album_id_inner(space).await?;
         let (transport, sid, version, syno_token) = self.write_call_context(normal_album_api(space), 1)?;
         synology_api::remove_items(&transport, &sid, space, album_id, &asset_ids, version, syno_token.as_deref())
             .await?;
@@ -739,11 +773,26 @@ impl PhotosCore {
     /// album automatically when the item is deleted, so no separate
     /// `remove_items` is needed). Empty `asset_ids` is a no-op.
     ///
+    /// SERIALIZED: holds `trash_lock` across the whole guard-then-delete
+    /// sequence, so a concurrent `restore_from_trash` cannot clear an item's
+    /// `in_trash` flag in the window between the guard check and the network
+    /// delete. Without that, the guard could pass on a still-trashed asset, a
+    /// restore could run, and the raw delete would then land on an asset the
+    /// user just restored. The lock makes the check-and-delete atomic against
+    /// every other trash mutation.
+    ///
+    /// ATOMICITY of the server-then-local steps: the network delete and the
+    /// local row removal are individually transactional but not jointly
+    /// atomic; the only failure window ("deleted on the NAS, local row still
+    /// present") is the safe direction (the item shows in the trash view until
+    /// the next reconcile drops it) and self-heals on `reconcile_trash`.
+    ///
     /// Requires a live session; fails closed with `CoreError::Auth`.
     pub async fn permanently_delete(&self, space: Space, asset_ids: Vec<i64>) -> Result<(), CoreError> {
         if asset_ids.is_empty() {
             return Ok(());
         }
+        let _lock = self.trash_lock.lock().await;
         // Dedup so the guard's distinct-count check is not tripped by a
         // repeated id in the caller's list.
         let mut ids = asset_ids;
@@ -767,13 +816,46 @@ impl PhotosCore {
     }
 
     /// Reconciles the local `in_trash` flags against the real membership of
-    /// the `Recently Deleted` album on the NAS. Sets `in_trash = 1` for every
-    /// current member not already flagged, and clears `in_trash` for any
-    /// locally-trashed id that is no longer a member (which is how a restore
-    /// performed from another Synology client, e.g. the mobile app, is picked
-    /// up). Safe to call after a crawl. Requires a live session.
+    /// the `Recently Deleted` album on the NAS. Flags `in_trash = 1` for every
+    /// current member not already flagged, and (guardedly) clears `in_trash`
+    /// for any locally-trashed id that is no longer a member, which is how a
+    /// restore performed from another Synology client (e.g. the mobile app) is
+    /// picked up. Safe to call after a crawl. Serialized with every other
+    /// trash mutation via `trash_lock`. Requires a live session.
+    ///
+    /// SAFETY against a spurious empty/short listing: clearing flags is the
+    /// only direction that can un-hide (and thus re-expose to permanent
+    /// delete) trashed items, so it is gated. This method resolves the trash
+    /// album by its stored id ONLY (never adopts by name, never creates here),
+    /// and treats the album's `item_count` as ground truth: it clears
+    /// non-member flags ONLY when the fully paged member set is authoritative,
+    /// i.e. the enumerated count equals `item_count`. If no trash album is
+    /// known, or the enumerated count does not match `item_count` (a truncated
+    /// or spurious-empty listing), it SKIPS the clear entirely and logs,
+    /// rather than mass-clearing every local trash flag. Flagging members as
+    /// trashed (the hide direction) is always safe and is applied regardless.
+    /// A member-fetch error propagates before any local mutation (fail
+    /// closed).
     pub async fn reconcile_trash(&self, space: Space) -> Result<(), CoreError> {
-        let album_id = self.trash_album_id(space).await?;
+        let _lock = self.trash_lock.lock().await;
+
+        // Resolve the trash album by its stored id ONLY. Never adopt by name,
+        // never create here: if we cannot positively identify the app's own
+        // trash album, we must not clear anything.
+        let albums = self.list_all_albums(space).await?;
+        let stored = self.stored_trash_album_id(space)?;
+        let album = match stored.and_then(|id| albums.iter().find(|a| a.id == id).cloned()) {
+            Some(a) => a,
+            None => {
+                tracing::warn!(
+                    "reconcile_trash: no identifiable trash album for {space:?} (none stored, or the stored id is absent from the album list); skipping to avoid mass-unhiding trash"
+                );
+                return Ok(());
+            }
+        };
+        let album_id = album.id;
+        let expected = album.item_count;
+
         let (transport, sid, version, syno_token) = self.write_call_context(browse_item_api(space), 1)?;
         let mut member_ids: Vec<i64> = Vec::new();
         let mut offset = 0u32;
@@ -796,6 +878,12 @@ impl PhotosCore {
             }
             offset += limit;
         }
+
+        // The clear step is authoritative only when the fully paged member set
+        // matches the album's reported size. A short/empty listing (network
+        // hiccup) would otherwise un-hide the entire trash.
+        let fully_enumerated = member_ids.len() as u32 == expected;
+
         let member_set: HashSet<i64> = member_ids.iter().copied().collect();
         let guard = self.store.lock().expect("store mutex poisoned");
         let store = guard.as_ref().ok_or_else(store_busy_err)?;
@@ -803,12 +891,19 @@ impl PhotosCore {
         let currently_set: HashSet<i64> = currently.iter().copied().collect();
         // Members not yet flagged locally get flagged (only these, so an
         // already-trashed item keeps its original trashed_at rather than
-        // having it reset to now on every reconcile).
+        // having it reset to now on every reconcile). Always safe (hide only).
         let to_add: Vec<i64> = member_ids.iter().copied().filter(|id| !currently_set.contains(id)).collect();
-        // Locally-trashed ids that are no longer album members get restored.
-        let to_remove: Vec<i64> = currently.iter().copied().filter(|id| !member_set.contains(id)).collect();
         store.set_trash_flag(space, &to_add, true, Some(now_secs()))?;
-        store.set_trash_flag(space, &to_remove, false, None)?;
+        if fully_enumerated {
+            // Locally-trashed ids that are no longer album members get restored.
+            let to_remove: Vec<i64> = currently.iter().copied().filter(|id| !member_set.contains(id)).collect();
+            store.set_trash_flag(space, &to_remove, false, None)?;
+        } else {
+            tracing::warn!(
+                "reconcile_trash: enumerated {} member(s) but album {album_id} reports item_count {expected}; skipping the clear step to avoid mass-unhiding trash",
+                member_ids.len()
+            );
+        }
         Ok(())
     }
 }
@@ -1007,16 +1102,60 @@ impl PhotosCore {
         Ok(out)
     }
 
+    /// The lock-free body of `ensure_trash_album` (owns the album by a
+    /// persisted id, never by name; see the public method's doc comment). The
+    /// caller MUST already hold `trash_lock`; this helper never acquires it,
+    /// so a public trash mutation that delegates here cannot self-deadlock.
+    async fn ensure_trash_album_inner(&self, space: Space) -> Result<Album, CoreError> {
+        let albums = self.list_all_albums(space).await?;
+        if let Some(stored) = self.stored_trash_album_id(space)? {
+            if let Some(found) = albums.iter().find(|a| a.id == stored).cloned() {
+                self.cache_trash_album_id(space, found.id);
+                return Ok(found);
+            }
+            // Stored id is stale (album deleted on the NAS or by another
+            // client): fall through and create a fresh one. Do NOT keep
+            // serving the dead id, and do NOT adopt a same-named album.
+        }
+        let (transport, sid, version, syno_token) = self.write_call_context(normal_album_api(space), 1)?;
+        let created =
+            synology_api::create_album(&transport, &sid, space, RECENTLY_DELETED_ALBUM, version, syno_token.as_deref())
+                .await?;
+        self.persist_trash_album_id(space, created.id)?;
+        self.cache_trash_album_id(space, created.id);
+        Ok(created)
+    }
+
     /// Returns the `Recently Deleted` album id for `space`, using the cached
     /// value if present and otherwise resolving (and caching) it via
-    /// `ensure_trash_album`. The delete/restore/reconcile paths call this
-    /// rather than `ensure_trash_album` directly so a repeat operation does
-    /// not re-list albums.
-    async fn trash_album_id(&self, space: Space) -> Result<i64, CoreError> {
+    /// `ensure_trash_album_inner`. The caller MUST already hold `trash_lock`
+    /// (this is the `_inner` path); it never acquires the lock itself. The
+    /// delete/restore paths call this rather than the public
+    /// `ensure_trash_album` so a repeat operation does not re-list albums and
+    /// so the lock is taken exactly once per public call.
+    async fn trash_album_id_inner(&self, space: Space) -> Result<i64, CoreError> {
         if let Some(id) = self.cached_trash_album_id(space) {
             return Ok(id);
         }
-        Ok(self.ensure_trash_album(space).await?.id)
+        Ok(self.ensure_trash_album_inner(space).await?.id)
+    }
+
+    /// Reads the persisted trash-album id for `space` from `app_state`,
+    /// parsing it back to an `i64`. A stored value that fails to parse is
+    /// treated as "no stored id" (fail closed toward re-resolving) rather than
+    /// erroring the whole operation.
+    fn stored_trash_album_id(&self, space: Space) -> Result<Option<i64>, CoreError> {
+        let guard = self.store.lock().expect("store mutex poisoned");
+        let store = guard.as_ref().ok_or_else(store_busy_err)?;
+        Ok(store.get_app_state(space, TRASH_ALBUM_ID_KEY)?.and_then(|v| v.parse::<i64>().ok()))
+    }
+
+    /// Persists the trash-album id for `space` into `app_state` so the album
+    /// is owned by id across restarts.
+    fn persist_trash_album_id(&self, space: Space, id: i64) -> Result<(), CoreError> {
+        let guard = self.store.lock().expect("store mutex poisoned");
+        let store = guard.as_ref().ok_or_else(store_busy_err)?;
+        store.set_app_state(space, TRASH_ALBUM_ID_KEY, &id.to_string())
     }
 
     fn cached_trash_album_id(&self, space: Space) -> Option<i64> {
@@ -2415,6 +2554,15 @@ mod core_tests {
         store.set_trash_flag(space, &[id], true, Some(1000)).unwrap();
     }
 
+    /// Persists the app's trash-album id for `space`, so a test exercises the
+    /// "own the album by stored id" path (FIX A) without first calling the
+    /// create flow.
+    fn seed_trash_album_id(core: &PhotosCore, space: Space, id: i64) {
+        let guard = core.store.lock().unwrap();
+        let store = guard.as_ref().unwrap();
+        store.set_app_state(space, super::TRASH_ALBUM_ID_KEY, &id.to_string()).unwrap();
+    }
+
     /// Mock a `Browse.Album` `list` returning `body` (the album list JSON).
     fn mock_album_list(server: &mut mockito::ServerGuard, body: &'static str) -> mockito::Mock {
         server
@@ -2455,6 +2603,7 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("delete-to-trash", &server).await;
+        seed_trash_album_id(&core, Space::Personal, 500);
         seed_asset(&core, Space::Personal, 1);
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
 
@@ -2490,6 +2639,7 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("delete-to-trash-fail", &server).await;
+        seed_trash_album_id(&core, Space::Personal, 500);
         seed_asset(&core, Space::Personal, 1);
 
         let err = core.delete_to_trash(Space::Personal, vec![1]).await.unwrap_err();
@@ -2527,6 +2677,7 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("restore-from-trash", &server).await;
+        seed_trash_album_id(&core, Space::Personal, 500);
         seed_trashed_asset(&core, Space::Personal, 1);
         assert_eq!(core.trash_count(Space::Personal).unwrap(), 1);
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
@@ -2637,7 +2788,7 @@ mod core_tests {
     }
 
     #[tokio::test]
-    async fn ensure_trash_album_reuses_existing_and_does_not_create() {
+    async fn ensure_trash_album_reuses_the_persisted_id_and_does_not_create() {
         let mut server = mockito::Server::new_async().await;
         let _login = server
             .mock("POST", "/webapi/entry.cgi")
@@ -2650,8 +2801,8 @@ mod core_tests {
             &mut server,
             r#"{"success":true,"data":{"list":[{"id":500,"name":"Recently Deleted","item_count":3}]}}"#,
         );
-        // If ensure_trash_album tries to create despite an existing album,
-        // this trap (expect 0) fails the test.
+        // If ensure_trash_album tries to create despite the stored id still
+        // existing on the NAS, this trap (expect 0) fails the test.
         let _create_trap = server
             .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=create".into()))
@@ -2662,9 +2813,93 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("ensure-trash-reuse", &server).await;
+        seed_trash_album_id(&core, Space::Personal, 500);
         let album = core.ensure_trash_album(Space::Personal).await.expect("ensure ok");
-        assert_eq!(album.id, 500, "must reuse the existing album, not create a second one");
+        assert_eq!(album.id, 500, "must reuse the album whose id is stored, not create a second one");
         _create_trap.assert_async().await;
+    }
+
+    /// FIX A (findings 2+5): a user's own album that merely happens to be
+    /// named "Recently Deleted" must NEVER be adopted as trash. With no stored
+    /// id, ensure_trash_album must create its OWN album and persist that id,
+    /// not hijack the same-named album (whose photos would otherwise become
+    /// permanent-delete eligible).
+    #[tokio::test]
+    async fn ensure_trash_album_never_adopts_a_same_named_album_by_name() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        // A user-created album named exactly "Recently Deleted" (id 42) that
+        // the app did NOT create.
+        let _albums = mock_album_list(
+            &mut server,
+            r#"{"success":true,"data":{"list":[{"id":42,"name":"Recently Deleted","item_count":9}]}}"#,
+        );
+        let _create = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=create".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"album":{"id":777,"name":"Recently Deleted","item_count":0}}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("ensure-trash-no-adopt", &server).await;
+        let album = core.ensure_trash_album(Space::Personal).await.expect("ensure ok");
+        assert_eq!(album.id, 777, "must create its own album, not adopt the user's same-named album 42");
+        assert_ne!(album.id, 42);
+        // And the freshly created id must be persisted for next time.
+        let stored = {
+            let guard = core.store.lock().unwrap();
+            guard.as_ref().unwrap().get_app_state(Space::Personal, super::TRASH_ALBUM_ID_KEY).unwrap()
+        };
+        assert_eq!(stored, Some("777".to_string()));
+        _create.assert_async().await;
+    }
+
+    /// FIX A: when the stored id no longer exists on the NAS (the album was
+    /// deleted elsewhere), ensure_trash_album must create a fresh one, persist
+    /// the new id, and NOT keep serving the dead id.
+    #[tokio::test]
+    async fn ensure_trash_album_recreates_when_the_stored_id_is_stale() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        // The album list does NOT contain the stored id 500 (it was deleted);
+        // only an unrelated album 42 remains.
+        let _albums = mock_album_list(
+            &mut server,
+            r#"{"success":true,"data":{"list":[{"id":42,"name":"Holiday","item_count":9}]}}"#,
+        );
+        let _create = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=create".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"album":{"id":888,"name":"Recently Deleted","item_count":0}}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("ensure-trash-stale", &server).await;
+        seed_trash_album_id(&core, Space::Personal, 500);
+        let album = core.ensure_trash_album(Space::Personal).await.expect("ensure ok");
+        assert_eq!(album.id, 888, "a stale stored id must be replaced by a freshly created album");
+        let stored = {
+            let guard = core.store.lock().unwrap();
+            guard.as_ref().unwrap().get_app_state(Space::Personal, super::TRASH_ALBUM_ID_KEY).unwrap()
+        };
+        assert_eq!(stored, Some("888".to_string()), "the new id must be persisted, not the dead one");
+        _create.assert_async().await;
     }
 
     #[tokio::test]
@@ -2725,6 +2960,7 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("reconcile-trash", &server).await;
+        seed_trash_album_id(&core, Space::Personal, 500);
         // Locally: item 1 is flagged trashed (stale, no longer a member),
         // item 2 is a live library asset (should become trashed).
         seed_trashed_asset(&core, Space::Personal, 1);
@@ -2738,5 +2974,128 @@ mod core_tests {
         assert_eq!(trash, vec![2], "only the real member is trashed");
         let library: Vec<i64> = core.fetch_assets(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
         assert_eq!(library, vec![1], "the non-member is restored to the library");
+    }
+
+    /// FIX C (finding 3): a spurious empty (or truncated) member listing must
+    /// NOT mass-clear the local trash. Here the album reports item_count 3 but
+    /// the member fetch comes back empty (a network hiccup); reconcile must
+    /// skip the clear step and leave the locally-trashed item hidden.
+    #[tokio::test]
+    async fn reconcile_trash_does_not_clear_on_a_spurious_empty_listing() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        // The album genuinely has 3 members per its item_count...
+        let _albums = mock_album_list(
+            &mut server,
+            r#"{"success":true,"data":{"list":[{"id":500,"name":"Recently Deleted","item_count":3}]}}"#,
+        );
+        // ...but the member listing spuriously returns empty.
+        let _members = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Item".into()),
+                mockito::Matcher::UrlEncoded("album_id".into(), "500".into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[]}}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("reconcile-spurious-empty", &server).await;
+        seed_trash_album_id(&core, Space::Personal, 500);
+        seed_trashed_asset(&core, Space::Personal, 1);
+        assert_eq!(core.trash_count(Space::Personal).unwrap(), 1);
+
+        core.reconcile_trash(Space::Personal).await.expect("reconcile ok");
+
+        // The clear step must have been skipped (enumerated 0 != item_count 3),
+        // so the locally-trashed item stays hidden rather than being un-hidden.
+        assert_eq!(core.trash_count(Space::Personal).unwrap(), 1, "a short listing must not mass-clear trash");
+        let trash: Vec<i64> = core.fetch_trash(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
+        assert_eq!(trash, vec![1]);
+    }
+
+    /// FIX C: when there is no identifiable trash album (nothing stored, so
+    /// the stored id is absent from the album list), reconcile must skip
+    /// entirely and never clear local trash flags.
+    #[tokio::test]
+    async fn reconcile_trash_skips_when_no_trash_album_is_known() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _albums = mock_album_list(&mut server, r#"{"success":true,"data":{"list":[]}}"#);
+        // If reconcile tried to enumerate members, this trap would be hit; it
+        // must not, because there is no known trash album.
+        let _members_trap = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("album_id".into(), "500".into()))
+            .expect(0)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[]}}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("reconcile-no-album", &server).await;
+        seed_trashed_asset(&core, Space::Personal, 1);
+
+        core.reconcile_trash(Space::Personal).await.expect("reconcile is a safe no-op");
+        assert_eq!(core.trash_count(Space::Personal).unwrap(), 1, "no known album must not clear trash");
+        _members_trap.assert_async().await;
+    }
+
+    /// FIX B (finding 1): trash mutations serialize on `trash_lock`. Holding
+    /// the lock blocks a concurrent `permanently_delete` BEFORE its guard
+    /// check and any network call, so a restore can never slip in between the
+    /// guard and the raw delete. Proven deterministically: while the test
+    /// holds the lock, the spawned permanently_delete makes no progress (the
+    /// item stays trashed and the delete verb is not sent); once released, it
+    /// completes.
+    #[tokio::test]
+    async fn trash_mutations_serialize_on_the_trash_lock() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _delete = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=delete".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("trash-serialize", &server).await;
+        seed_trashed_asset(&core, Space::Personal, 1);
+
+        // Hold the trash lock, then spawn permanently_delete; it must block on
+        // the lock before touching the store guard or the network.
+        let held = core.trash_lock.lock().await;
+        let core2 = core.clone();
+        let handle = tokio::spawn(async move { core2.permanently_delete(Space::Personal, vec![1]).await });
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!handle.is_finished(), "permanently_delete must block while the trash lock is held");
+        assert_eq!(core.trash_count(Space::Personal).unwrap(), 1, "no mutation while the lock is held");
+
+        // Release the lock; permanently_delete now proceeds and completes.
+        drop(held);
+        handle.await.unwrap().expect("permanently_delete completes after the lock is released");
+        assert_eq!(core.trash_count(Space::Personal).unwrap(), 0);
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
     }
 }
