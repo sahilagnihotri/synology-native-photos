@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS assets (
     height         INTEGER,
     file_size      INTEGER,
     server_version INTEGER,
+    in_trash       INTEGER NOT NULL DEFAULT 0,  -- 0/1: sitting in the app "Recently Deleted" album
+    trashed_at     INTEGER,                     -- epoch seconds the item was moved to trash, NULL when not trashed
     updated_at     INTEGER NOT NULL,
     UNIQUE (space, server_id)
 );
@@ -107,11 +109,26 @@ struct MigrationStep {
 /// steps here; never renumber or remove an existing one, since a database's
 /// `user_version` records exactly how far through this list it has already
 /// progressed.
-const STEPS: &[MigrationStep] = &[MigrationStep {
-    version: 1,
-    requires_recrawl: true,
-    apply: add_unit_id_column_if_missing,
-}];
+const STEPS: &[MigrationStep] = &[
+    MigrationStep {
+        version: 1,
+        requires_recrawl: true,
+        apply: add_unit_id_column_if_missing,
+    },
+    MigrationStep {
+        // Phase 2a hybrid safe-delete: local trash tracking. Adds in_trash /
+        // trashed_at to assets and the index the trash and library-grid
+        // queries page against. NOT `requires_recrawl`: unlike unit_id, these
+        // columns hold app-local state, not NAS-derived data. Their defaults
+        // (0 / NULL = "not trashed") are the correct value for every existing
+        // row, so no re-crawl is needed to backfill them; `reconcile_trash`
+        // in the facade is what later reconciles them against the real NAS
+        // trash-album membership.
+        version: 2,
+        requires_recrawl: false,
+        apply: add_trash_columns_if_missing,
+    },
+];
 
 /// Highest version among `STEPS`; also the schema version a freshly created
 /// database ends up at, since `BASE_DDL` already creates tables at their
@@ -146,34 +163,37 @@ fn set_user_version(conn: &Connection, version: i64) -> Result<(), CoreError> {
 /// `latest_version()` finds no pending steps and is a no-op.
 pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CoreError> {
     conn.execute_batch(BASE_DDL).map_err(map_sql)?;
-    conn.execute(
-        "INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '1')",
-        [],
-    )
-    .map_err(map_sql)?;
 
     let current = user_version(conn)?;
-    if current >= latest_version() {
-        return Ok(());
-    }
-    let pending: Vec<&MigrationStep> =
-        STEPS.iter().filter(|s| s.version > current).collect();
-    if pending.is_empty() {
-        return Ok(());
+    if current < latest_version() {
+        let pending: Vec<&MigrationStep> = STEPS.iter().filter(|s| s.version > current).collect();
+        if !pending.is_empty() {
+            conn.execute_batch("BEGIN IMMEDIATE").map_err(map_sql)?;
+            match run_pending_steps(conn, &pending) {
+                Ok(()) => {
+                    conn.execute_batch("COMMIT").map_err(map_sql)?;
+                }
+                Err(e) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                    return Err(e);
+                }
+            }
+        }
     }
 
-    conn.execute_batch("BEGIN IMMEDIATE").map_err(map_sql)?;
-    let result = run_pending_steps(conn, &pending);
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT").map_err(map_sql)?;
-            Ok(())
-        }
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK");
-            Err(e)
-        }
-    }
+    // Reconcile the human-readable `schema_meta.schema_version` mirror to the
+    // version actually applied (the authoritative `PRAGMA user_version`).
+    // Kept in sync on every open, including the already-current path, so a
+    // database that predates this mirror being maintained still reports the
+    // right number. `Store::schema_version()` reads this value.
+    let applied = user_version(conn)?;
+    conn.execute(
+        "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [applied.to_string()],
+    )
+    .map_err(map_sql)?;
+    Ok(())
 }
 
 /// Runs each pending step, then resets the crawl barrier once if any of them
@@ -237,6 +257,42 @@ fn add_unit_id_column_if_missing(conn: &Connection) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Migration step 2: adds the `in_trash` / `trashed_at` columns (and the
+/// trash index) to a pre-existing `assets` table that predates the hybrid
+/// safe-delete feature. Each `ALTER TABLE ADD COLUMN` is guarded by a
+/// `PRAGMA table_info` check rather than run unconditionally, because
+/// re-adding an existing column is a hard error in SQLite; this keeps the
+/// step idempotent (a re-run, or a fresh database whose `BASE_DDL` already
+/// created these columns, does nothing). The index is `CREATE INDEX IF NOT
+/// EXISTS` so it is naturally idempotent, and it is created HERE rather than
+/// in `BASE_DDL` because `BASE_DDL` runs before this step: on a legacy
+/// database the `in_trash` column does not exist yet when `BASE_DDL` runs, so
+/// an index referencing it there would fail. Existing rows default to
+/// `in_trash = 0` / `trashed_at = NULL` ("not trashed"), which is the correct
+/// value, so this step is deliberately NOT `requires_recrawl`.
+fn add_trash_columns_if_missing(conn: &Connection) -> Result<(), CoreError> {
+    let existing: Vec<String> = {
+        let mut stmt = conn.prepare("PRAGMA table_info(assets)").map_err(map_sql)?;
+        let names = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(map_sql)?
+            .filter_map(|r| r.ok())
+            .collect();
+        names
+    };
+    if !existing.iter().any(|name| name == "in_trash") {
+        conn.execute("ALTER TABLE assets ADD COLUMN in_trash INTEGER NOT NULL DEFAULT 0", [])
+            .map_err(map_sql)?;
+    }
+    if !existing.iter().any(|name| name == "trashed_at") {
+        conn.execute("ALTER TABLE assets ADD COLUMN trashed_at INTEGER", [])
+            .map_err(map_sql)?;
+    }
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_assets_space_trash ON assets (space, in_trash)", [])
+        .map_err(map_sql)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,10 +338,115 @@ mod tests {
         conn
     }
 
+    /// Builds a v1-shaped `assets` table: it already has `unit_id` (so the
+    /// step-1 migration is a no-op) but NOT the step-2 trash columns, with
+    /// `user_version` pinned at 1, mirroring a real database created after the
+    /// unit_id migration but before the hybrid-delete one.
+    fn open_v1_db_without_trash_columns() -> Connection {
+        let conn = rusqlite::Connection::open_in_memory().expect("open");
+        conn.execute_batch(
+            "CREATE TABLE assets (
+                rowid_pk       INTEGER PRIMARY KEY AUTOINCREMENT,
+                space          INTEGER NOT NULL,
+                server_id      INTEGER NOT NULL,
+                unit_id        INTEGER NOT NULL DEFAULT 0,
+                cache_key      TEXT    NOT NULL,
+                filename       TEXT    NOT NULL,
+                media_kind     INTEGER NOT NULL DEFAULT 2,
+                taken_at       INTEGER,
+                added_at       INTEGER,
+                width          INTEGER,
+                height         INTEGER,
+                file_size      INTEGER,
+                server_version INTEGER,
+                updated_at     INTEGER NOT NULL,
+                UNIQUE (space, server_id)
+            );
+            CREATE TABLE sync_state (
+                space                  INTEGER PRIMARY KEY,
+                initial_crawl_complete INTEGER NOT NULL DEFAULT 0,
+                expected_total         INTEGER NOT NULL DEFAULT 0,
+                last_offset            INTEGER NOT NULL DEFAULT 0,
+                last_page_limit        INTEGER NOT NULL DEFAULT 0,
+                highest_seen_version   INTEGER,
+                last_crawl_at          INTEGER,
+                last_reconcile_at      INTEGER
+            );
+            CREATE TABLE schema_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            PRAGMA user_version = 1;",
+        )
+        .expect("v1 tables");
+        conn
+    }
+
+    /// A database already migrated to v1 must gain the `in_trash` /
+    /// `trashed_at` columns on upgrade to v2, default them for existing rows,
+    /// bump both `user_version` and the `schema_meta` mirror to 2, and stay a
+    /// no-op on a second run (no duplicate-column error).
+    #[test]
+    fn migration_v1_to_v2_adds_trash_columns_defaulted_and_is_idempotent() {
+        let conn = open_v1_db_without_trash_columns();
+        conn.execute(
+            "INSERT INTO assets (space, server_id, unit_id, cache_key, filename, updated_at) VALUES (0, 1, 10, 'ck1', 'a.jpg', 0)",
+            [],
+        )
+        .expect("v1 row");
+
+        run_migrations(&conn).expect("migration adds trash columns");
+
+        let (in_trash, trashed_at): (i64, Option<i64>) = conn
+            .query_row("SELECT in_trash, trashed_at FROM assets WHERE server_id = 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("trash columns readable");
+        assert_eq!(in_trash, 0, "existing row defaults to not-trashed");
+        assert_eq!(trashed_at, None, "existing row has a NULL trashed_at");
+        assert_eq!(user_version(&conn).unwrap(), 2);
+        let meta: String = conn
+            .query_row("SELECT value FROM schema_meta WHERE key = 'schema_version'", [], |r| r.get(0))
+            .expect("schema_meta mirror set");
+        assert_eq!(meta, "2");
+
+        // Second run must not fail with a duplicate-column error and must stay
+        // a no-op at v2.
+        run_migrations(&conn).expect("second run is a no-op");
+        assert_eq!(user_version(&conn).unwrap(), 2);
+    }
+
+    /// A v1 database that had already completed its crawl must NOT have its
+    /// crawl barrier reset by the v2 migration: the trash columns are
+    /// app-local state with correct defaults, so step 2 is not
+    /// `requires_recrawl` and must not force a needless full re-crawl.
+    #[test]
+    fn v1_to_v2_migration_does_not_reset_the_crawl_barrier() {
+        let conn = open_v1_db_without_trash_columns();
+        conn.execute(
+            "INSERT INTO sync_state (space, initial_crawl_complete, expected_total, last_offset, last_page_limit)
+             VALUES (0, 1, 151, 151, 200)",
+            [],
+        )
+        .expect("personal sync_state");
+
+        run_migrations(&conn).expect("v1 to v2 migration");
+
+        let (complete, offset): (i64, i64) = conn
+            .query_row(
+                "SELECT initial_crawl_complete, last_offset FROM sync_state WHERE space = 0",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(complete, 1, "a non-data-bearing migration must leave a completed crawl completed");
+        assert_eq!(offset, 151, "the paging cursor must not be rewound by a non-data-bearing migration");
+    }
+
     #[test]
     fn migrations_create_all_tables_and_seed_version() {
         let store = crate::Store::open_in_memory().expect("open");
-        assert_eq!(store.schema_version().expect("version"), 1);
+        assert_eq!(store.schema_version().expect("version"), 2);
         let names: Vec<String> = {
             let mut stmt = store
                 .conn
@@ -309,7 +470,7 @@ mod tests {
         let store = crate::Store::open_in_memory().expect("open");
         assert_eq!(user_version(&store.conn).unwrap(), latest_version());
         run_migrations(&store.conn).expect("rerun");
-        assert_eq!(store.schema_version().expect("version"), 1);
+        assert_eq!(store.schema_version().expect("version"), 2);
         assert_eq!(user_version(&store.conn).unwrap(), latest_version());
     }
 
