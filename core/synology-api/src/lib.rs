@@ -19,7 +19,9 @@ pub mod upload;
 
 pub use album_write::{add_items, create_album, delete_album, remove_items};
 pub use auth::{login, logout};
-pub use browse::{list_albums, list_items, list_items_filtered, search, search_filtered, CollectionFilter};
+pub use browse::{
+    filter_items, list_albums, list_items, list_items_filtered, search, search_filtered, CollectionFilter,
+};
 pub use delete_item::permanent_delete;
 pub use discovery::{list_people, list_places, list_subjects, list_tags};
 pub use download::download_original;
@@ -43,6 +45,7 @@ mod facade_tests {
         let _ = crate::pin_version as usize;
         let _ = crate::list_items as usize;
         let _ = crate::list_items_filtered as usize;
+        let _ = crate::filter_items as usize;
         let _ = crate::list_albums as usize;
         let _ = crate::create_album as usize;
         let _ = crate::add_items as usize;

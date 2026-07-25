@@ -524,6 +524,50 @@ impl PhotosCore {
             .await
     }
 
+    /// SERVER-side People/Geolocation + date filter over the library, windowed
+    /// live the same way `fetch_assets_for` windows a discovery collection: a
+    /// single `SYNO.Foto.Browse.Item method=list` request that AND-combines any
+    /// of a `person_id`, a `geocoding_id`, and a `start_time`/`end_time`
+    /// taken-at range (all unix-second / cluster-id integers, all optional and
+    /// only the set ones sent). This backs the library Quick Filter whenever a
+    /// People or Geolocation facet is chosen: those are Browse.Item query params
+    /// on the NAS, not local-index columns, so they cannot go through the local
+    /// `filter_assets` path (which stays the accurate route for file type +
+    /// rating + date with no person/geo). See `synology_api::filter_items` for
+    /// the real-NAS verification and why `type` is never sent (file type stays
+    /// local).
+    ///
+    /// Always a live NAS call, no local index. Uses the `Browse.Item` pinned
+    /// version (v2+, like the discovery path), via `discovery_call_context`.
+    /// Requires a live session; fails closed with `CoreError::Auth` otherwise.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn filter_items_remote(
+        &self,
+        space: Space,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        person_id: Option<i64>,
+        geocoding_id: Option<i64>,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Asset>, CoreError> {
+        let (transport, sid, version, syno_token) = self.discovery_call_context(browse_item_api(space))?;
+        synology_api::filter_items(
+            &transport,
+            &sid,
+            space,
+            start_time,
+            end_time,
+            person_id,
+            geocoding_id,
+            offset,
+            limit,
+            version,
+            syno_token.as_deref(),
+        )
+        .await
+    }
+
     /// Keyword search (`SYNO.Foto.Search.Search`, method `list_item`),
     /// windowed the same way `fetch_assets_for` windows a discovery
     /// collection: always a live NAS call, no local index. Personal space

@@ -839,6 +839,26 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func filterCount(space: Space, mediaKind: MediaKind?, takenAfter: Int64?, takenBefore: Int64?, minRating: UInt8?) throws  -> UInt64
     
     /**
+     * SERVER-side People/Geolocation + date filter over the library, windowed
+     * live the same way `fetch_assets_for` windows a discovery collection: a
+     * single `SYNO.Foto.Browse.Item method=list` request that AND-combines any
+     * of a `person_id`, a `geocoding_id`, and a `start_time`/`end_time`
+     * taken-at range (all unix-second / cluster-id integers, all optional and
+     * only the set ones sent). This backs the library Quick Filter whenever a
+     * People or Geolocation facet is chosen: those are Browse.Item query params
+     * on the NAS, not local-index columns, so they cannot go through the local
+     * `filter_assets` path (which stays the accurate route for file type +
+     * rating + date with no person/geo). See `synology_api::filter_items` for
+     * the real-NAS verification and why `type` is never sent (file type stays
+     * local).
+     *
+     * Always a live NAS call, no local index. Uses the `Browse.Item` pinned
+     * version (v2+, like the discovery path), via `discovery_call_context`.
+     * Requires a live session; fails closed with `CoreError::Auth` otherwise.
+     */
+    func filterItemsRemote(space: Space, startTime: Int64?, endTime: Int64?, personId: Int64?, geocodingId: Int64?, offset: UInt32, limit: UInt32) async throws  -> [Asset]
+    
+    /**
      * Log in against `connection` with the given credentials.
      *
      * `otp_code` and `device_token` are forwarded to `synology_api::login`
@@ -1789,6 +1809,41 @@ open func filterCount(space: Space, mediaKind: MediaKind?, takenAfter: Int64?, t
         FfiConverterOptionUInt8.lower(minRating),$0
     )
 })
+}
+    
+    /**
+     * SERVER-side People/Geolocation + date filter over the library, windowed
+     * live the same way `fetch_assets_for` windows a discovery collection: a
+     * single `SYNO.Foto.Browse.Item method=list` request that AND-combines any
+     * of a `person_id`, a `geocoding_id`, and a `start_time`/`end_time`
+     * taken-at range (all unix-second / cluster-id integers, all optional and
+     * only the set ones sent). This backs the library Quick Filter whenever a
+     * People or Geolocation facet is chosen: those are Browse.Item query params
+     * on the NAS, not local-index columns, so they cannot go through the local
+     * `filter_assets` path (which stays the accurate route for file type +
+     * rating + date with no person/geo). See `synology_api::filter_items` for
+     * the real-NAS verification and why `type` is never sent (file type stays
+     * local).
+     *
+     * Always a live NAS call, no local index. Uses the `Browse.Item` pinned
+     * version (v2+, like the discovery path), via `discovery_call_context`.
+     * Requires a live session; fails closed with `CoreError::Auth` otherwise.
+     */
+open func filterItemsRemote(space: Space, startTime: Int64?, endTime: Int64?, personId: Int64?, geocodingId: Int64?, offset: UInt32, limit: UInt32)async throws  -> [Asset]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_filter_items_remote(
+                    self.uniffiClonePointer(),
+                    FfiConverterTypeSpace_lower(space),FfiConverterOptionInt64.lower(startTime),FfiConverterOptionInt64.lower(endTime),FfiConverterOptionInt64.lower(personId),FfiConverterOptionInt64.lower(geocodingId),FfiConverterUInt32.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeAsset.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
 }
     
     /**
@@ -3002,6 +3057,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_filter_count() != 64872) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_filter_items_remote() != 48458) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_login() != 52991) {

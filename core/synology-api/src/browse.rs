@@ -497,20 +497,95 @@ async fn list_items_inner(
         query.push(filter.query_param());
     }
     let body = get_body(transport, &query, syno_token).await?;
-    let parsed: ItemList = decode_envelope(&body)?;
+    decode_item_list(&body, space, "browse item")
+}
+
+/// `SYNO.Foto.Browse.Item` / `SYNO.FotoTeam.Browse.Item`, `method=list`,
+/// narrowed by any combination of a `start_time`/`end_time` taken-at range
+/// (unix seconds) and a `person_id` and/or `geocoding_id` cluster. Every
+/// narrowing param is optional and only the set ones are sent (an unset one is
+/// omitted entirely, never sent as an empty string); passing all four `None`
+/// is exactly a plain `list_items` for `space`.
+///
+/// VERIFIED against the real NAS (with bogus-value controls): `person_id`,
+/// `geocoding_id`, and `start_time`+`end_time` are genuine server-side filters
+/// on `Browse.Item method=list` (v2+) that AND-combine in one request
+/// (geocoding_id=768 -> 1 item, =99999 -> 0; person_id honored, returns fewer
+/// than the full set; geo+time+person together AND correctly). The
+/// `geocoding_id` value MUST come from `SYNO.Foto.Browse.Geocoding` (its own id
+/// namespace; the Search.Filter geocoding ids are a different namespace and
+/// were proven to return 0 here). `person_id` comes from
+/// `SYNO.Foto.Browse.Person`. Both bare integers, same shape as
+/// `CollectionFilter` uses.
+///
+/// The `type` param is deliberately NOT sent: it is quirky on this NAS
+/// (`type=photo` returns ALL items, and Live Photo videos are `type=live` not
+/// `type=video`), so file type stays a LOCAL filter (accurate via
+/// `media_kind`), never a server one.
+///
+/// Same decode discipline, `ITEM_ADDITIONAL` key set, and `X-SYNO-TOKEN`
+/// handling as `list_items` (it shares the same per-element tolerant decoder).
+pub async fn filter_items(
+    transport: &Transport,
+    sid: &str,
+    space: Space,
+    start_time: Option<i64>,
+    end_time: Option<i64>,
+    person_id: Option<i64>,
+    geocoding_id: Option<i64>,
+    offset: u32,
+    limit: u32,
+    version: u32,
+    syno_token: Option<&str>,
+) -> Result<Vec<Asset>, CoreError> {
+    let mut query: Vec<(&str, String)> = vec![
+        ("api", browse_item_api(space).to_string()),
+        ("version", version.to_string()),
+        ("method", "list".to_string()),
+        ("offset", offset.to_string()),
+        ("limit", limit.to_string()),
+        ("additional", ITEM_ADDITIONAL.to_string()),
+        ("_sid", sid.to_string()),
+    ];
+    if let Some(start) = start_time {
+        query.push(("start_time", start.to_string()));
+    }
+    if let Some(end) = end_time {
+        query.push(("end_time", end.to_string()));
+    }
+    if let Some(person) = person_id {
+        query.push(("person_id", person.to_string()));
+    }
+    if let Some(geo) = geocoding_id {
+        query.push(("geocoding_id", geo.to_string()));
+    }
+    let body = get_body(transport, &query, syno_token).await?;
+    decode_item_list(&body, space, "filter item")
+}
+
+/// Decode a `{"data":{"list":[...]}}` item-list response body into `Asset`s,
+/// per-element and tolerantly (see the module doc comment). Shared by every
+/// item-list path in this module (`list_items`/`list_items_filtered`,
+/// `search`/`search_filtered`, and `filter_items`) so they decode identically
+/// and stay in lockstep. `space` is stamped onto each returned `Asset` (the
+/// payload carries no space marker of its own); `kind_label` appears only in
+/// the skip/warn log lines, so a caller can tell a browse skip from a search
+/// or filter skip in the logs.
+fn decode_item_list(body: &str, space: Space, kind_label: &str) -> Result<Vec<Asset>, CoreError> {
+    let parsed: ItemList = decode_envelope(body)?;
     let total = parsed.list.len();
     let mut skipped = 0usize;
     let assets: Vec<Asset> = parsed
         .list
         .iter()
         .filter_map(|raw| {
-            let item: RawItem = decode_one(raw, "browse item")?;
+            let item: RawItem = decode_one(raw, kind_label)?;
             let additional = item.additional.unwrap_or_default();
             let thumb = additional.thumbnail;
             let cache_key = thumb.as_ref().map(|t| t.cache_key.clone()).unwrap_or_default();
             if cache_key.is_empty() {
                 tracing::warn!(
-                    "skipping browse item (id={}): missing cache_key, not usable for thumbnails/downloads",
+                    "skipping {kind_label} (id={}): missing cache_key, not usable for thumbnails/downloads",
                     item.id
                 );
                 skipped += 1;
@@ -523,7 +598,7 @@ async fn list_items_inner(
             // cannot be thumbnailed/downloaded, so this is logged loudly.
             let unit_id = thumb.and_then(|t| t.unit_id).unwrap_or_else(|| {
                 tracing::warn!(
-                    "browse item (id={}): missing additional.thumbnail.unit_id, thumbnails/downloads for it will fail (defaulting unit_id=0)",
+                    "{kind_label} (id={}): missing additional.thumbnail.unit_id, thumbnails/downloads for it will fail (defaulting unit_id=0)",
                     item.id
                 );
                 0
@@ -565,7 +640,7 @@ async fn list_items_inner(
     let hard_skipped = total - (assets.len() + skipped);
     if hard_skipped > 0 || skipped > 0 {
         tracing::warn!(
-            "browse item list: skipped {} of {} elements ({} failed to decode, {} missing cache_key)",
+            "{kind_label} list: skipped {} of {} elements ({} failed to decode, {} missing cache_key)",
             hard_skipped + skipped,
             total,
             hard_skipped,
@@ -667,77 +742,9 @@ pub async fn search_filtered(
         query.push(("end_time", end.to_string()));
     }
     let body = get_body(transport, &query, syno_token).await?;
-    let parsed: ItemList = decode_envelope(&body)?;
-    let total = parsed.list.len();
-    let mut skipped = 0usize;
-    let assets: Vec<Asset> = parsed
-        .list
-        .iter()
-        .filter_map(|raw| {
-            let item: RawItem = decode_one(raw, "search item")?;
-            let additional = item.additional.unwrap_or_default();
-            let thumb = additional.thumbnail;
-            let cache_key = thumb.as_ref().map(|t| t.cache_key.clone()).unwrap_or_default();
-            if cache_key.is_empty() {
-                tracing::warn!(
-                    "skipping search item (id={}): missing cache_key, not usable for thumbnails/downloads",
-                    item.id
-                );
-                skipped += 1;
-                return None;
-            }
-            let unit_id = thumb.and_then(|t| t.unit_id).unwrap_or_else(|| {
-                tracing::warn!(
-                    "search item (id={}): missing additional.thumbnail.unit_id, thumbnails/downloads for it will fail (defaulting unit_id=0)",
-                    item.id
-                );
-                0
-            });
-            let (width, height) = match additional.resolution {
-                Some(r) => (r.width, r.height),
-                None => (None, None),
-            };
-            let exif = additional.exif.unwrap_or_default();
-            let video = additional.video_meta.unwrap_or_default();
-            Some(Asset {
-                id: item.id,
-                unit_id,
-                cache_key,
-                filename: item.filename.unwrap_or_else(|| item.id.to_string()),
-                media_kind: parse_media_kind(&item.kind, item.live_type.as_deref()),
-                taken_at: item.time,
-                added_at: item.create_time,
-                width,
-                height,
-                file_size: item.filesize,
-                space: Space::Personal,
-                server_version: item.version,
-                rating: additional.rating,
-                description: additional.description,
-                camera: exif.camera,
-                aperture: exif.aperture,
-                exposure_time: exif.exposure_time,
-                focal_length: exif.focal_length,
-                iso: exif.iso,
-                lens: exif.lens,
-                duration: video.duration,
-                framerate: video.framerate,
-                video_codec: video.video_codec,
-                container_type: video.container_type,
-            })
-        })
-        .collect();
-    let hard_skipped = total - (assets.len() + skipped);
-    if hard_skipped > 0 || skipped > 0 {
-        tracing::warn!(
-            "search item list: skipped {} of {} elements ({} failed to decode, {} missing cache_key)",
-            hard_skipped + skipped,
-            total,
-            hard_skipped,
-            skipped
-        );
-    }
-    Ok(assets)
+    // Search is Personal-space only (no FotoTeam equivalent in scope), so its
+    // rows are always stamped Personal.
+    decode_item_list(&body, Space::Personal, "search item")
 }
 
 /// `SYNO.Foto.Browse.Album` / `SYNO.FotoTeam.Browse.Album`, `method=list`.
