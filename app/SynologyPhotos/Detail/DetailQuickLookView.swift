@@ -641,13 +641,13 @@ struct DetailViewerHost: View {
     }
 }
 
-/// The detail viewer's info panel content: date, filename, dimensions, and
-/// file size, read straight off `Asset` via `AssetInfoFields`. Per the
-/// brief, camera/EXIF and location are not shown here since neither is a
-/// field the core's `Asset` model or any read-only API call currently
-/// exposes per-asset (see `AssetInfoFormatter`'s doc comment); a plain
-/// note says so instead of a blank or invented field, and it is logged as
-/// a follow-up rather than blocking this panel.
+/// The detail viewer's info panel content, read straight off `Asset` via
+/// `AssetInfoFields` and laid out to resemble Synology's own Information
+/// panel: the filename and a star rating up top, then the basics
+/// (date/dimensions/size), an optional caption, an EXIF group, and, for
+/// videos, a playback group. Every field is drawn only when
+/// `AssetInfoFields` carries a value for it, so a screenshot with no EXIF or
+/// an unrated photo simply shows fewer rows rather than blank ones.
 struct AssetInfoPanelView: View {
     let fields: AssetInfoFields
 
@@ -657,6 +657,13 @@ struct AssetInfoPanelView: View {
                 .font(.headline)
                 .lineLimit(2)
                 .accessibilityIdentifier("info.filename")
+
+            if let stars = fields.starRating {
+                Text(stars)
+                    .font(.title3)
+                    .accessibilityIdentifier("info.rating")
+                    .accessibilityLabel("Rating")
+            }
 
             Divider()
 
@@ -668,12 +675,56 @@ struct AssetInfoPanelView: View {
                 row(label: "File Size", value: fileSize, identifier: "info.filesize")
             }
 
-            Divider()
+            if let description = fields.description {
+                Divider()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Description")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(description)
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityIdentifier("info.description")
+            }
 
-            Text(AssetInfoFormatter.exifFollowUpNote)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("info.exifnote")
+            if fields.hasExif {
+                Divider()
+                if let camera = fields.camera {
+                    row(label: "Camera", value: camera, identifier: "info.camera")
+                }
+                if let lens = fields.lens {
+                    row(label: "Lens", value: lens, identifier: "info.lens")
+                }
+                if let aperture = fields.aperture {
+                    row(label: "Aperture", value: aperture, identifier: "info.aperture")
+                }
+                if let exposureTime = fields.exposureTime {
+                    row(label: "Exposure", value: exposureTime, identifier: "info.exposure")
+                }
+                if let focalLength = fields.focalLength {
+                    row(label: "Focal Length", value: focalLength, identifier: "info.focallength")
+                }
+                if let iso = fields.iso {
+                    row(label: "ISO", value: iso, identifier: "info.iso")
+                }
+            }
+
+            if fields.hasVideoDetails {
+                Divider()
+                if let duration = fields.duration {
+                    row(label: "Duration", value: duration, identifier: "info.duration")
+                }
+                if let framerate = fields.framerate {
+                    row(label: "Frame Rate", value: framerate, identifier: "info.framerate")
+                }
+                if let videoCodec = fields.videoCodec {
+                    row(label: "Codec", value: videoCodec, identifier: "info.codec")
+                }
+                if let containerType = fields.containerType {
+                    row(label: "Container", value: containerType, identifier: "info.container")
+                }
+            }
         }
         .padding(16)
         .frame(width: 260, alignment: .leading)
@@ -689,6 +740,7 @@ struct AssetInfoPanelView: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.body)
+                .textSelection(.enabled)
         }
         .accessibilityIdentifier(identifier)
     }
