@@ -29,6 +29,17 @@ Completed work with commit hashes. Newest at top.
   (`99afb50`).
 - Also fixed `scripts/test.sh` to find the Cargo workspace at the repo root
   (`42ad949`). Full app suite green throughout: 460 -> 463 tests, 48 suites.
+- **Thumbnail error-page bug** (reported as "Places drill-in empty"): probed the
+  real NAS and found the Place tile DID open its 1 photo, but the photo
+  (`IMG_8550`, just restored in delete testing) had its `sm/m/xl` thumbnails
+  still `converting`, so the Thumbnail endpoint returned HTTP 404 + an HTML
+  error page. `fetch_thumbnail` ignored the status and `map_binary_or_error`
+  only rejected `application/json`, so the HTML was handed back as image bytes:
+  the UI decoded garbage (`CGImageSourceCreateThumbnailAtIndex failed [-50]`)
+  and showed a permanent grey cell. Now both the non-2xx status and a
+  `text/html` body are rejected, so the cell shows a placeholder and re-fetches
+  once the NAS finishes converting (`a95580e`, +1 envelope test). The app's
+  thumbnail cache already avoided negative-caching, so no app change was needed.
 
 ## Session 2026-07-26: People + Geolocation Quick Filter
 

@@ -35,24 +35,14 @@ timeline date-section headers + date scrubber, and Quick Filter (file type / dat
   (`deleteToTrash`/`restoreFromTrash`/`fetchTrash`/`trashCount`/`reconcileTrash`/
   `ensureTrashAlbum` and the app-trash `permanentlyDelete`), superseded by real delete.
 
-## Bugs to fix (feedback 2026-07-26)
+## Bugs (feedback 2026-07-26)
 
-- [ ] **Places drill-in shows empty.** Clicking a Place tile (e.g. "Rjukan,
-  Vestfold og Telemark, 1 item") opens an empty grid. Only 1 place lists now
-  (was ~22 earlier). NOT yet root-caused (needs a NAS probe; deferred under the
-  session limit). The drill-in uses `fetch_assets_for(Place(geocoding_id))` ->
-  `list_items_filtered` with `("geocoding_id", id)` at Browse.Item v2 (same
-  param+version the geo filter verified as working: `geocoding_id=768 -> 1
-  item`). Leading hypothesis: the `geocoding_id` on the Places TILE (from
-  `SYNO.Foto.Browse.Geocoding` / `list_places`) is a different hierarchy level
-  or id than the item filter matches, so the count (from Geocoding) and the
-  item list (from Browse.Item) disagree. NOTE only `fetch_assets_for(Person)`
-  was ever verified to return photos; Place drill-in may never have worked.
-  Probe plan (with the saved device-token session): `list_places` -> take an id
-  -> `list_items_filtered(Place(id))` vs `filter_items(geocoding_id=id)`; if the
-  filter returns rows but the tile id doesn't match, fix the id mapping in
-  `list_places`/the tile; also check whether Geocoding needs a level/parent
-  param to list leaf regions.
+- [ ] Optional thumbnail enhancement: when a photo's requested size is still
+  `converting` (only `preview` ready), fall back to a `ready` size or poll so
+  the cell fills in without needing a re-scroll. The core no longer returns the
+  error page as image bytes (fixed, see `Fixed.md`), so the cell now shows a
+  clean placeholder and re-fetches when re-displayed; this would just make it
+  fill in automatically. Low priority.
 
 ## Map view (DONE 2026-07-26)
 
