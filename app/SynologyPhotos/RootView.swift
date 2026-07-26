@@ -273,6 +273,11 @@ struct LibraryView: View {
             }
         }
         .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search Photos")
+        // The window title carries the library context (Library/Personal/
+        // Shared, a search, a drilled-in person/place). The header controls
+        // that used to sit in a custom bar are now real toolbar items.
+        .navigationTitle(headerTitle)
+        .toolbar { libraryToolbar }
         // Publish the running library/viewer's menu-command closures so the
         // app's menu bar (`LibraryCommands`) can invoke them. Recomputed on
         // every body pass, so an item greys out the moment its action stops
@@ -482,89 +487,12 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var content: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text(headerTitle)
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                Spacer()
-                // The crawl status line only ever applies to the space-backed
-                // Library grid: discovery collections have no crawl barrier
-                // at all (they are fetched live), so showing "Importing..."
-                // over a tile grid, a discovery photo grid, or search
-                // results would be a meaningless, permanently-stuck status.
-                if activeSearch == nil, activeFilter == nil, case .grid = currentRoute, !env.crawl.isComplete {
-                    Text(env.crawl.statusText).accessibilityIdentifier("crawl.status")
-                }
-                // The Quick Filter applies only to the space-backed library
-                // grid: the facets it filters (file type, date taken, rating)
-                // are local-index columns. People/Places/Tags/Favorites are
-                // server-side clusters with their own sidebar destinations, so
-                // they are intentionally not folded in here. Hidden while a
-                // search is active, which has its own filter bar.
-                if activeSearch == nil, isLibraryGridRoute {
-                    QuickFilterBarView(model: env.quickFilter, client: env.client, onApply: {
-                        Task { await applyQuickFilter() }
-                    }, onClear: {
-                        Task { await clearQuickFilter() }
-                    })
-                }
-                // Filters only make sense once a keyword search is active:
-                // the NAS has no way to run a date-only search (see
-                // `runSearch`'s doc comment), so the filter button only
-                // appears alongside actual search results, matching Photos'
-                // own placement of its filter control next to active search.
-                if activeSearch != nil {
-                    SearchFilterBarView(model: env.searchFilters) {
-                        Task { await runSearch(activeSearch ?? searchQuery) }
-                    }
-                }
-                if isShowingPhotoGrid {
-                    if controller.selection.count > 0 {
-                        Text("\(controller.selection.count) selected")
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("selection.count")
-                        // The everyday delete: a real delete into the Synology
-                        // recycle bin, recoverable from Recently Deleted.
-                        Button(role: .destructive) { requestDeleteSelected() } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        .accessibilityIdentifier("grid.delete")
-                    }
-                    // Refresh re-runs a delta reconcile for the current space
-                    // so NAS-side changes made elsewhere (and this app's own
-                    // deletes) show up. Only meaningful for the space-backed
-                    // library grid: discovery collections and search are
-                    // fetched live on every load and have no crawl to reconcile.
-                    if isLibraryGridRoute {
-                        Button { Task { await syncLibrary() } } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                        .accessibilityIdentifier("library.refresh")
-                    }
-                    ZoomSliderView(zoom: zoom) { size in
-                        controller.applyZoom(itemSize: size)
-                    }
-                }
-                Button("Sign Out") {
-                    Task {
-                        let so = SignOutController(
-                            client: env.client, auth: env.auth,
-                            keychainHost: env.host,
-                            keychainUsername: currentUsername(),
-                            accountCacheDir: env.accountCacheDir,
-                            thumbnailCache: env.thumbnailCache,
-                            clearTempCache: {
-                                await env.tempCache.clearAll()
-                                await env.originalCache.clear()
-                            })
-                        await so.signOut()
-                    }
-                }
-                .accessibilityIdentifier("session.signout")
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
+        // The library's controls (title, crawl status, filter, selection
+        // count, Delete, Refresh, zoom, and the account/Sign Out menu) live in
+        // the real window toolbar now (see `libraryToolbar`), not a custom
+        // header bar; the content area is just the grid / state view filling
+        // the pane.
+        Group {
             // The photo grid lives at exactly ONE structural position (the
             // `.grid` case here), shared by the plain (date-sectioned) library,
             // search results, Quick Filter results, and a discovery drill-in.
@@ -887,6 +815,115 @@ struct LibraryView: View {
         guard env.crawl.isComplete else { return }
         guard AutoSyncGate.shouldSync(lastSyncAt: lastAutoSyncAt, now: Date()) else { return }
         await syncLibrary()
+    }
+
+    // MARK: - Toolbar
+
+    /// The window toolbar for the library: the same controls the old custom
+    /// header bar carried (crawl status, Filter, selection count + Delete,
+    /// Refresh, zoom), plus an account menu that holds Sign Out instead of a
+    /// prominent always-visible button. Every library control is hidden while
+    /// the full-photo viewer is open (the viewer has its own chrome), matching
+    /// how the old header sat underneath the viewer and was covered by it.
+    @ToolbarContentBuilder
+    private var libraryToolbar: some ToolbarContent {
+        if detailIndex == nil {
+            // The crawl status line only ever applies to the space-backed
+            // library grid (discovery/search have no crawl barrier), so an
+            // "Importing..." status over anything else would be meaningless.
+            if isImportingLibraryGrid {
+                ToolbarItem(placement: .principal) {
+                    Text(env.crawl.statusText).accessibilityIdentifier("crawl.status")
+                }
+            }
+            // The Quick Filter is a library-grid-only affordance; the search
+            // filter bar only makes sense once a keyword search is active.
+            if activeSearch == nil, isLibraryGridRoute {
+                ToolbarItem(placement: .automatic) {
+                    QuickFilterBarView(model: env.quickFilter, client: env.client, onApply: {
+                        Task { await applyQuickFilter() }
+                    }, onClear: {
+                        Task { await clearQuickFilter() }
+                    })
+                }
+            }
+            if activeSearch != nil {
+                ToolbarItem(placement: .automatic) {
+                    SearchFilterBarView(model: env.searchFilters) {
+                        Task { await runSearch(activeSearch ?? searchQuery) }
+                    }
+                }
+            }
+            if isShowingPhotoGrid, controller.selection.count > 0 {
+                ToolbarItem(placement: .automatic) {
+                    Text("\(controller.selection.count) selected")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("selection.count")
+                }
+                ToolbarItem(placement: .automatic) {
+                    // The everyday delete: a real delete into the Synology
+                    // recycle bin, recoverable from Recently Deleted.
+                    Button(role: .destructive) { requestDeleteSelected() } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .accessibilityIdentifier("grid.delete")
+                }
+            }
+            if isLibraryGridRoute {
+                ToolbarItem(placement: .automatic) {
+                    Button { Task { await syncLibrary() } } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .accessibilityIdentifier("library.refresh")
+                }
+            }
+            if isShowingPhotoGrid {
+                ToolbarItem(placement: .automatic) {
+                    ZoomSliderView(zoom: zoom) { size in
+                        controller.applyZoom(itemSize: size)
+                    }
+                }
+            }
+        }
+        // The account affordance stays available at all times: Sign Out now
+        // lives inside this menu rather than as a prominent always-visible
+        // button, matching Photos' own account placement.
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button("Sign Out", role: .destructive) { signOut() }
+                    .accessibilityIdentifier("session.signout")
+            } label: {
+                Label("Account", systemImage: "person.crop.circle")
+            }
+            .accessibilityIdentifier("session.account")
+        }
+    }
+
+    /// Whether the importing (crawl-in-progress) status should show: only for
+    /// the space-backed library grid, never over search, a filter, a tile
+    /// grid, or the recycle bin. Mirrors the condition the old header used.
+    private var isImportingLibraryGrid: Bool {
+        guard activeSearch == nil, activeFilter == nil else { return false }
+        if case .grid = currentRoute { return !env.crawl.isComplete }
+        return false
+    }
+
+    /// Runs the sign-out flow, extracted from the old header button so the
+    /// account menu item can call it.
+    private func signOut() {
+        Task {
+            let so = SignOutController(
+                client: env.client, auth: env.auth,
+                keychainHost: env.host,
+                keychainUsername: currentUsername(),
+                accountCacheDir: env.accountCacheDir,
+                thumbnailCache: env.thumbnailCache,
+                clearTempCache: {
+                    await env.tempCache.clearAll()
+                    await env.originalCache.clear()
+                })
+            await so.signOut()
+        }
     }
 
     // MARK: - Menu commands
