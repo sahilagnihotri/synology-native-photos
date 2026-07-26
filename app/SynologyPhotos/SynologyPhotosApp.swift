@@ -135,6 +135,10 @@ struct SynologyPhotosApp: App {
             CommandGroup(replacing: .appInfo) {
                 AboutMenuButton()
             }
+            // The real menu bar: Edit/View items surfacing the grid and viewer
+            // commands the app already implements (undo delete, zoom, info,
+            // sidebar), wired to the running window via FocusedValues.
+            LibraryCommands()
         }
 
         // Fixed-size, non-resizable About window, opened by id from the menu

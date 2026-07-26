@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0020BEA65B5CB4AFECDCA917 /* PhotosCoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89AD5885314385A5C5FAA5A8 /* PhotosCoreClient.swift */; };
 		02F8DDE00661AEBACB2D9A37 /* PhotoSelectionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECC36AA88795AF34E3072A20 /* PhotoSelectionModel.swift */; };
+		0574D4E7E2A52B65CAED4C74 /* LibraryCommandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB62563BE3A66E43C97160A4 /* LibraryCommandsTests.swift */; };
 		0825F1C50486990199C76C50 /* PhotoSelectionModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E0A72BB4ED0B2A01AEB8A1 /* PhotoSelectionModelTests.swift */; };
 		0CAAE0B56C2B775746CEE2B4 /* SynologyPhotosApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D65797EEE04B6F9658674A2 /* SynologyPhotosApp.swift */; };
 		10208756C70C4D2EE9B605CC /* PhotoEditorModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C42BDB67DFE6BF0F4687BD /* PhotoEditorModelTests.swift */; };
@@ -75,6 +76,7 @@
 		95D528A305471E65390D3F57 /* ImportProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24E700BE934BC17C20A127A /* ImportProgressView.swift */; };
 		97A47CF001D87D84F8F7C2AE /* DateSectionFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6584BDCF8C663451725DB36C /* DateSectionFormatterTests.swift */; };
 		9A11AB83700B9F88CDB11F85 /* OriginalImageCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294FEBF672CDA404A94A1C77 /* OriginalImageCacheTests.swift */; };
+		9B0DEC592D9E59C89DD0609D /* LibraryCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99DFFA9DCFC88419473A9566 /* LibraryCommands.swift */; };
 		9B7E62A39CDAD710563060AD /* DiscoveryTileGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF50C704ABAE92E624DAE426 /* DiscoveryTileGridView.swift */; };
 		9DAB76C72D6F90182C84CDF1 /* GitVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C5E5DC0623F2A3A12A54D91 /* GitVersion.swift */; };
 		9EAD320923B96157FE0F7FD4 /* CacheSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9324E8B184CFCDA426A9A81C /* CacheSettingsView.swift */; };
@@ -244,6 +246,7 @@
 		9618494206B3D8C9C8D1DD07 /* FilterQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterQuery.swift; sourceTree = "<group>"; };
 		963BFD800ADD8A86EE152301 /* PhotosCoreLinkSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosCoreLinkSmokeUITests.swift; sourceTree = "<group>"; };
 		99DAD0641E501BF3262C208F /* GridZoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridZoomModel.swift; sourceTree = "<group>"; };
+		99DFFA9DCFC88419473A9566 /* LibraryCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCommands.swift; sourceTree = "<group>"; };
 		9A916BF5C0864E0825725A4A /* DetailZoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailZoomModel.swift; sourceTree = "<group>"; };
 		9B32E43E3703CB875694B637 /* AboutInfoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutInfoTests.swift; sourceTree = "<group>"; };
 		9ED7BE589F9EAC160E9D5CF2 /* GridDateSectionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridDateSectionsTests.swift; sourceTree = "<group>"; };
@@ -270,6 +273,7 @@
 		D47EE427A3E9626140AF79FE /* SpaceToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceToggle.swift; sourceTree = "<group>"; };
 		D81153EE86521E5FA5BB907B /* OriginalImageCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OriginalImageCache.swift; sourceTree = "<group>"; };
 		DA8A7EB2843B1889B47AA6DA /* WindowedDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowedDataSource.swift; sourceTree = "<group>"; };
+		DB62563BE3A66E43C97160A4 /* LibraryCommandsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCommandsTests.swift; sourceTree = "<group>"; };
 		E0B9EC3A0740CA414B5E1CE0 /* DetailKeyActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailKeyActionTests.swift; sourceTree = "<group>"; };
 		E196A12DA01B778895850A5D /* WindowedDataSourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowedDataSourceTests.swift; sourceTree = "<group>"; };
 		E3B5A556BC6D75D787EC6353 /* ImageDownsample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownsample.swift; sourceTree = "<group>"; };
@@ -347,6 +351,7 @@
 				5C5E25DCDDB5F134220A9E7F /* GridZoomModelTests.swift */,
 				5261051EEA590BD7268673F8 /* ImageDownsampleTests.swift */,
 				EE99F2531E1D21E6A4EFF105 /* KeychainSIDTests.swift */,
+				DB62563BE3A66E43C97160A4 /* LibraryCommandsTests.swift */,
 				8667BF98AE3EE89E3D3D1E2A /* LoginViewModelTests.swift */,
 				4392382113CD6CFF1ED7FACC /* MapModelTests.swift */,
 				294FEBF672CDA404A94A1C77 /* OriginalImageCacheTests.swift */,
@@ -384,6 +389,7 @@
 				2EF4DB5D5568E1F1AF6EE124 /* Filter */,
 				2224556009F95DC904618E01 /* Grid */,
 				2B1110F2AB2A2DD2F1D5F15C /* Map */,
+				24D3FDDE0E26E9CF97C13A30 /* Menu */,
 				7806B3CDD7747E751B39EC57 /* Reachability */,
 				C0636E0E01E33B4D7FA68CB2 /* Resources */,
 				FF736B600674F0189CCF27C6 /* Search */,
@@ -437,6 +443,14 @@
 				148A77DD8DD39D08CECC497B /* SynologyPhotosUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		24D3FDDE0E26E9CF97C13A30 /* Menu */ = {
+			isa = PBXGroup;
+			children = (
+				99DFFA9DCFC88419473A9566 /* LibraryCommands.swift */,
+			);
+			path = Menu;
 			sourceTree = "<group>";
 		};
 		2B1110F2AB2A2DD2F1D5F15C /* Map */ = {
@@ -842,6 +856,7 @@
 				E8936FC2A8E25821FDA0ED64 /* ImageDownsample.swift in Sources */,
 				95D528A305471E65390D3F57 /* ImportProgressView.swift in Sources */,
 				559A4CE3AE0FCE63660CB2CE /* KeychainSID.swift in Sources */,
+				9B0DEC592D9E59C89DD0609D /* LibraryCommands.swift in Sources */,
 				5E1804A43F2696A9B01C8EE4 /* LoginPreferences.swift in Sources */,
 				86DB0E0DF2F5341B0064EF03 /* LoginView.swift in Sources */,
 				E971513EBAFD60EDF51342EE /* MapDestinationView.swift in Sources */,
@@ -903,6 +918,7 @@
 				49342E84F94410F6FF29C43D /* GridZoomModelTests.swift in Sources */,
 				4A102FE0D8B5ED56831E327C /* ImageDownsampleTests.swift in Sources */,
 				A7516BBFB26FE8A4BB8E7C71 /* KeychainSIDTests.swift in Sources */,
+				0574D4E7E2A52B65CAED4C74 /* LibraryCommandsTests.swift in Sources */,
 				14BEA273EB20B88ABCF7B18D /* LoginViewModelTests.swift in Sources */,
 				2D77755A4C4A3EAB0930F802 /* MapModelTests.swift in Sources */,
 				9A11AB83700B9F88CDB11F85 /* OriginalImageCacheTests.swift in Sources */,

@@ -691,9 +691,12 @@ struct DetailViewerHost: View {
     /// photo and leaves the original untouched.
     let onEdit: (Asset) -> Void
 
-    /// Info panel visibility, toggled by the "i" button or Cmd-I. Not reset
-    /// on paging: Photos keeps the info panel open across Left/Right moves.
-    @State private var isShowingInfo = false
+    /// Info panel visibility, toggled by the "i" button, Cmd-I, the context
+    /// menu, or the View > Show/Hide Info menu item. Owned by `LibraryView`
+    /// (a binding) so the menu bar can flip it while the viewer is open; not
+    /// reset on paging, matching Photos keeping the info panel open across
+    /// Left/Right moves.
+    @Binding var isShowingInfo: Bool
 
     /// The current photo's zoom, shared between the toolbar slider and the
     /// image view. Reset to fit on every paging move so a new photo always

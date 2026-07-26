@@ -10,10 +10,27 @@ import PhotosCore
 /// ahead, if ever enabled) is not broken by this subclass existing.
 final class KeyHandlingCollectionView: NSCollectionView {
     var keyHandler: ((NSEvent) -> Bool)?
+    /// Runs the grid's Select All, set by the controller so the standard Edit
+    /// menu's "Select All" (dispatched down the responder chain to this
+    /// first-responder view) drives the SAME selection path Cmd-A does. Only
+    /// runs when the grid itself is focused; a focused text field keeps its
+    /// own field-editor Select All, so this never hijacks text selection.
+    var selectAllHandler: (() -> Void)?
+    /// Runs the grid's delete, wired the same way for the standard Edit menu's
+    /// "Delete" item.
+    var deleteHandler: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if keyHandler?(event) == true { return }
         super.keyDown(with: event)
+    }
+
+    override func selectAll(_ sender: Any?) {
+        if let selectAllHandler { selectAllHandler() } else { super.selectAll(sender) }
+    }
+
+    @objc func delete(_ sender: Any?) {
+        deleteHandler?()
     }
 }
 
@@ -225,6 +242,10 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         collectionView.keyHandler = { [weak self] event in
             self?.handleKey(event) ?? false
         }
+        // Route the standard Edit-menu Select All / Delete (dispatched to this
+        // first-responder view) through the same action path the keyboard uses.
+        collectionView.selectAllHandler = { [weak self] in self?.perform(.selectAll) }
+        collectionView.deleteHandler = { [weak self] in self?.perform(.delete) }
         // Double-click opens the detail viewer (Apple Photos: single click
         // selects, double-click opens). A gesture recognizer set to require
         // two clicks fires only on the second click and leaves AppKit's own
@@ -270,6 +291,17 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
     @discardableResult
     func handleKey(_ event: NSEvent) -> Bool {
         guard let action = GridKeyMapper.action(for: event) else { return false }
+        return perform(action)
+    }
+
+    /// Runs a single `GridKeyAction`, the one dispatch path shared by the
+    /// keyboard (`handleKey`), the right-click context menu, and the app's
+    /// Edit-menu Select All / Delete (via the responder-chain handlers on
+    /// `KeyHandlingCollectionView`). Returns `true` when the action was
+    /// consumed. Keeping every surface on this one method is what guarantees a
+    /// menu click and a keypress do exactly the same thing.
+    @discardableResult
+    func perform(_ action: GridKeyAction) -> Bool {
         // Bounded by the collection view's own applied item count, not
         // `dataSource.totalCount` directly: the two can disagree (e.g.
         // before `applySnapshot()` has ever run, or between the data

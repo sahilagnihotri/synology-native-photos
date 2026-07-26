@@ -197,6 +197,13 @@ struct LibraryView: View {
     @State private var isSyncing = false
     @State private var sidebarSelection: SidebarItem? = .library
     @State private var zoom = GridZoomModel()
+    /// Sidebar column visibility, owned here so the View > Show/Hide Sidebar
+    /// menu item can toggle it (and any toolbar sidebar control stays in sync).
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    /// The detail viewer's info-panel visibility, lifted out of
+    /// `DetailViewerHost` so the View > Show/Hide Info menu item can flip it
+    /// while a photo is open. Persists across paging, matching Photos.
+    @State private var isShowingInfo = false
     @State private var deleteController: DeleteController
     /// Backs the Recently Deleted (recycle bin) view. Long-lived alongside the
     /// grid controller so its loaded contents and selection survive navigating
@@ -249,7 +256,7 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(selection: $sidebarSelection)
         } detail: {
             // The detail viewer renders INLINE in the split view's detail
@@ -266,6 +273,11 @@ struct LibraryView: View {
             }
         }
         .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search Photos")
+        // Publish the running library/viewer's menu-command closures so the
+        // app's menu bar (`LibraryCommands`) can invoke them. Recomputed on
+        // every body pass, so an item greys out the moment its action stops
+        // applying (nothing to undo, viewer closed, a tile grid on screen).
+        .focusedSceneValue(\.libraryCommands, libraryCommandActions)
         .task {
             wireGridCallbacks()
             await env.crawl.startCrawl(space: env.spaceSelection.current)
@@ -423,7 +435,8 @@ struct LibraryView: View {
             // Edit opens the non-destructive crop/rotate editor for this photo.
             // Saving there uploads a NEW photo and leaves the original
             // untouched; the sheet's onSaved refreshes the library.
-            onEdit: { asset in editorTarget = EditorTarget(asset: asset) }
+            onEdit: { asset in editorTarget = EditorTarget(asset: asset) },
+            isShowingInfo: $isShowingInfo
         )
     }
 
@@ -874,6 +887,39 @@ struct LibraryView: View {
         guard env.crawl.isComplete else { return }
         guard AutoSyncGate.shouldSync(lastSyncAt: lastAutoSyncAt, now: Date()) else { return }
         await syncLibrary()
+    }
+
+    // MARK: - Menu commands
+
+    /// The menu-bar command closures for the current UI state, published via
+    /// `.focusedSceneValue`. A `nil` closure greys its menu item out; the
+    /// enable rules live in the pure `LibraryCommandAvailability`.
+    private var libraryCommandActions: LibraryCommandActions {
+        let availability = LibraryCommandAvailability.compute(
+            isShowingPhotoGrid: isShowingPhotoGrid,
+            isViewerOpen: detailIndex != nil,
+            canUndoDelete: deleteController.canUndoDelete)
+        return LibraryCommandActions(
+            undoDelete: availability.canUndoDelete ? { Task { await undoLastDelete() } } : nil,
+            zoomIn: availability.canZoom ? { stepGridZoom(by: Self.menuZoomStep) } : nil,
+            zoomOut: availability.canZoom ? { stepGridZoom(by: -Self.menuZoomStep) } : nil,
+            toggleInfo: availability.canToggleInfo ? { isShowingInfo.toggle() } : nil,
+            toggleSidebar: { toggleSidebar() })
+    }
+
+    /// How much one Zoom In / Zoom Out menu step changes the grid item size.
+    private static let menuZoomStep: CGFloat = 24
+
+    /// Nudges the grid's zoom by `delta` and applies it live, the menu-bar
+    /// equivalent of dragging the zoom slider.
+    private func stepGridZoom(by delta: CGFloat) {
+        zoom.step(by: delta)
+        controller.applyZoom(itemSize: zoom.itemSize)
+    }
+
+    /// Toggles the sidebar for the View > Show/Hide Sidebar menu item.
+    private func toggleSidebar() {
+        columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
     }
 
     // MARK: - Delete actions
