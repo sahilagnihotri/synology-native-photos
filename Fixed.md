@@ -8,12 +8,16 @@ Completed work with commit hashes. Newest at top.
   `dist/SynologyPhotos-<version>.dmg` (Release `.app` next to an `/Applications`
   alias, the standard drag-to-install layout). Zero extra tooling (uses
   `hdiutil`), self-healing (rebuilds the xcframework first, regenerates the
-  Xcode project if missing), version derived from the latest git tag. Signed
-  with the existing Apple Development identity, so it runs on the build machine
-  and Macs on that developer account; NOT notarized (unregistered Macs need a
-  right-click -> Open the first time). The script honours CODE_SIGN_IDENTITY /
-  DEVELOPMENT_TEAM env overrides so a future Developer ID + notarize path can
-  reuse it. `dist/` is gitignored.
+  Xcode project if missing), version derived from the latest git tag. `dist/`
+  is gitignored.
+- Signing pinned to the Agnihotri AS team (`5W67TF3579`) explicitly in the
+  script, NOT the Hexagon work identity that is also installed on this machine
+  (it belongs to a different team, so it is never eligible once this team is
+  pinned). After the build the script VERIFIES the app's `TeamIdentifier`
+  matches and refuses to package an unsigned/ad-hoc or wrong-team build.
+  Override with `DEVELOPMENT_TEAM` / `CODE_SIGN_IDENTITY` env vars for a future
+  Developer ID + notarize path. Currently Apple-Development signed and NOT
+  notarized, so an unregistered Mac needs a right-click -> Open the first time.
 
 ## Session 2026-07-26 (cont.): Map view, UX quick wins, map-cluster-into-grid
 

@@ -37,6 +37,13 @@ for arg in "$@"; do
   esac
 done
 
+# Sign with the Agnihotri AS developer team by default. This machine also has a
+# Hexagon (work) Apple Development identity installed, but it belongs to a
+# different team and so is never eligible once this team is pinned, the release
+# is always signed under the personal/AS account, never the work one. Override
+# by exporting DEVELOPMENT_TEAM (e.g. for a Developer ID + notarize build).
+DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-5W67TF3579}"
+
 APP_NAME="SynologyPhotos"
 SCHEME="SynologyPhotos"
 PROJECT="$ROOT/app/$APP_NAME.xcodeproj"
@@ -82,10 +89,26 @@ build_app() {
     -destination 'platform=macOS' \
     -derivedDataPath "$BUILD_DD" \
     ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+    DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
     ${CODE_SIGN_IDENTITY:+CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY"} \
-    ${DEVELOPMENT_TEAM:+DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM"} \
     | { have xcpretty && xcpretty || cat; }
   ok "Release build done"
+}
+
+verify_signing() {
+  local app team
+  app="$BUILD_DD/Build/Products/Release/$APP_NAME.app"
+  step "Verifying the app is signed with the expected team"
+  team="$(codesign -dvvv "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p' | head -n1)"
+  if [ -z "$team" ] || [ "$team" = "not set" ]; then
+    err "the built app is not signed with a team identifier (got: '${team:-none}'). Refusing to package an unsigned/ad-hoc build."
+    exit 1
+  fi
+  if [ "$team" != "$DEVELOPMENT_TEAM" ]; then
+    err "app signed with team '$team', expected '$DEVELOPMENT_TEAM'. Refusing to package with the wrong developer account."
+    exit 1
+  fi
+  ok "signed with team $team"
 }
 
 make_dmg() {
@@ -129,6 +152,7 @@ make_dmg() {
 ensure_project
 ensure_core
 build_app
+verify_signing
 make_dmg
 echo
 ok "DMG packaging complete."
