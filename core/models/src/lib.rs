@@ -153,6 +153,11 @@ pub struct Asset {
     pub video_codec: String,
     /// Video container type, e.g. "mov". "" for non-videos.
     pub container_type: String,
+    /// GPS latitude in decimal degrees, from Browse.Item additional.gps. None
+    /// when the NAS reports no location for this item.
+    pub latitude: Option<f64>,
+    /// GPS longitude in decimal degrees. None when unlocated.
+    pub longitude: Option<f64>,
 }
 
 /// A neutral, empty `Asset`. Not produced by any real decode path (those set
@@ -187,6 +192,8 @@ impl Default for Asset {
             framerate: String::new(),
             video_codec: String::new(),
             container_type: String::new(),
+            latitude: None,
+            longitude: None,
         }
     }
 }
@@ -490,6 +497,8 @@ mod tests {
             framerate: String::new(),
             video_codec: String::new(),
             container_type: String::new(),
+            latitude: Some(59.908775),
+            longitude: Some(10.7447916666667),
         };
         assert_eq!(a.id, 42);
         assert_eq!(a.unit_id, 4242);
@@ -500,6 +509,8 @@ mod tests {
         assert_eq!(a.description, "sunset");
         assert_eq!(a.camera, "Apple iPhone 12");
         assert_eq!(a.iso, "100");
+        assert_eq!(a.latitude, Some(59.908775));
+        assert_eq!(a.longitude, Some(10.7447916666667));
     }
 
     #[test]

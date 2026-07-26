@@ -261,6 +261,42 @@ async fn item_missing_enrichment_blocks_defaults_gracefully() {
     assert_eq!(a.framerate, "");
 }
 
+/// `additional.gps` carries per-photo latitude/longitude (VERIFIED shape:
+/// {"latitude": f64, "longitude": f64}). A located item decodes both onto the
+/// Asset as `Some`; an item that omits the gps block decodes to `None`/`None`
+/// rather than failing the item (the future Map view plots only the located
+/// subset).
+#[tokio::test]
+async fn item_decodes_gps_and_defaults_none_when_absent() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_body(
+            r#"{"success":true,"data":{"list":[
+            {"id":701,"filename":"IMG_0701.JPG","type":"photo",
+             "additional":{
+               "thumbnail":{"cache_key":"CK701","unit_id":7010},
+               "gps":{"latitude":1.5,"longitude":2.5}
+             }},
+            {"id":702,"filename":"IMG_0702.JPG","type":"photo",
+             "additional":{"thumbnail":{"cache_key":"CK702","unit_id":7020}}}
+        ]}}"#,
+        )
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None).await.expect("list ok");
+    assert_eq!(assets.len(), 2);
+    let located = assets.iter().find(|a| a.id == 701).expect("located item present");
+    assert_eq!(located.latitude, Some(1.5));
+    assert_eq!(located.longitude, Some(2.5));
+    let unlocated = assets.iter().find(|a| a.id == 702).expect("unlocated item present");
+    assert_eq!(unlocated.latitude, None);
+    assert_eq!(unlocated.longitude, None);
+}
+
 #[tokio::test]
 async fn unknown_media_type_decodes_as_unknown_not_error() {
     let mut server = mockito::Server::new_async().await;

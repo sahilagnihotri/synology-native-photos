@@ -401,6 +401,11 @@ uint64_t uniffi_photoscore_fn_method_photoscore_filter_count(void*_Nonnull ptr, 
 uint64_t uniffi_photoscore_fn_method_photoscore_filter_items_remote(void*_Nonnull ptr, RustBuffer space, RustBuffer start_time, RustBuffer end_time, RustBuffer person_id, RustBuffer geocoding_id, uint32_t offset, uint32_t limit
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOCATED_ASSETS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOCATED_ASSETS
+RustBuffer uniffi_photoscore_fn_method_photoscore_located_assets(void*_Nonnull ptr, RustBuffer space, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_FN_METHOD_PHOTOSCORE_LOGIN
 uint64_t uniffi_photoscore_fn_method_photoscore_login(void*_Nonnull ptr, RustBuffer connection, RustBuffer username, RustBuffer password, RustBuffer otp_code, RustBuffer device_token
@@ -919,6 +924,12 @@ uint16_t uniffi_photoscore_checksum_method_photoscore_filter_count(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FILTER_ITEMS_REMOTE
 #define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_FILTER_ITEMS_REMOTE
 uint16_t uniffi_photoscore_checksum_method_photoscore_filter_items_remote(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOCATED_ASSETS
+#define UNIFFI_FFIDEF_UNIFFI_PHOTOSCORE_CHECKSUM_METHOD_PHOTOSCORE_LOCATED_ASSETS
+uint16_t uniffi_photoscore_checksum_method_photoscore_located_assets(void
     
 );
 #endif

@@ -140,11 +140,12 @@ fn parse_media_kind(kind: &str, live_type: Option<&str>) -> MediaKind {
 /// lockstep. `thumbnail` yields `cache_key`/`unit_id` (needed for thumbnails/
 /// downloads), `resolution` yields pixel dimensions, and `exif`/`description`/
 /// `rating`/`video_meta` yield the per-asset metadata the info panel and the
-/// rating filter consume. All four metadata blocks decode tolerantly, so
+/// rating filter consume, and `gps` yields the per-photo latitude/longitude the
+/// future Map view plots. All five metadata blocks decode tolerantly, so
 /// requesting them never risks failing an item on a DSM build that omits or
 /// reshapes one.
 const ITEM_ADDITIONAL: &str =
-    "[\"thumbnail\",\"resolution\",\"exif\",\"description\",\"rating\",\"video_meta\"]";
+    "[\"thumbnail\",\"resolution\",\"exif\",\"description\",\"rating\",\"video_meta\",\"gps\"]";
 
 /// The `additional` keys requested on `SYNO.Foto.Search.Search list_item`.
 /// Deliberately leaner than `ITEM_ADDITIONAL`: `Search.Search` rejects the
@@ -226,6 +227,8 @@ struct ItemAdditional {
     rating: i32,
     #[serde(default)]
     video_meta: Option<VideoMeta>,
+    #[serde(default)]
+    gps: Option<Gps>,
 }
 
 /// `additional.exif`: per-photo EXIF. All fields VERIFIED to arrive as strings
@@ -263,6 +266,17 @@ struct VideoMeta {
     video_codec: String,
     #[serde(default, deserialize_with = "string_from_scalar")]
     container_type: String,
+}
+
+/// `additional.gps`: per-photo GPS. VERIFIED shape against the real NAS:
+/// {"latitude": f64, "longitude": f64}. Both optional/tolerant so a build
+/// that omits or reshapes it decodes to None rather than failing the item.
+#[derive(Debug, Deserialize, Default)]
+struct Gps {
+    #[serde(default)]
+    latitude: Option<f64>,
+    #[serde(default)]
+    longitude: Option<f64>,
 }
 
 /// Tolerantly decode a JSON scalar the NAS reports for a metadata field into a
@@ -609,6 +623,7 @@ fn decode_item_list(body: &str, space: Space, kind_label: &str) -> Result<Vec<As
             };
             let exif = additional.exif.unwrap_or_default();
             let video = additional.video_meta.unwrap_or_default();
+            let gps = additional.gps.unwrap_or_default();
             Some(Asset {
                 id: item.id,
                 unit_id,
@@ -634,6 +649,8 @@ fn decode_item_list(body: &str, space: Space, kind_label: &str) -> Result<Vec<As
                 framerate: video.framerate,
                 video_codec: video.video_codec,
                 container_type: video.container_type,
+                latitude: gps.latitude,
+                longitude: gps.longitude,
             })
         })
         .collect();

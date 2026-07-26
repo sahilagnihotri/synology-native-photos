@@ -464,6 +464,22 @@ fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterDouble: FfiConverterPrimitive {
+    typealias FfiType = Double
+    typealias SwiftType = Double
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
+        return try lift(readDouble(&buf))
+    }
+
+    public static func write(_ value: Double, into buf: inout [UInt8]) {
+        writeDouble(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -837,6 +853,15 @@ public struct Asset {
      * Video container type, e.g. "mov". "" for non-videos.
      */
     public var containerType: String
+    /**
+     * GPS latitude in decimal degrees, from Browse.Item additional.gps. None
+     * when the NAS reports no location for this item.
+     */
+    public var latitude: Double?
+    /**
+     * GPS longitude in decimal degrees. None when unlocated.
+     */
+    public var longitude: Double?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -885,7 +910,14 @@ public struct Asset {
          */videoCodec: String, 
         /**
          * Video container type, e.g. "mov". "" for non-videos.
-         */containerType: String) {
+         */containerType: String, 
+        /**
+         * GPS latitude in decimal degrees, from Browse.Item additional.gps. None
+         * when the NAS reports no location for this item.
+         */latitude: Double?, 
+        /**
+         * GPS longitude in decimal degrees. None when unlocated.
+         */longitude: Double?) {
         self.id = id
         self.unitId = unitId
         self.cacheKey = cacheKey
@@ -910,6 +942,8 @@ public struct Asset {
         self.framerate = framerate
         self.videoCodec = videoCodec
         self.containerType = containerType
+        self.latitude = latitude
+        self.longitude = longitude
     }
 }
 
@@ -992,6 +1026,12 @@ extension Asset: Equatable, Hashable {
         if lhs.containerType != rhs.containerType {
             return false
         }
+        if lhs.latitude != rhs.latitude {
+            return false
+        }
+        if lhs.longitude != rhs.longitude {
+            return false
+        }
         return true
     }
 
@@ -1020,6 +1060,8 @@ extension Asset: Equatable, Hashable {
         hasher.combine(framerate)
         hasher.combine(videoCodec)
         hasher.combine(containerType)
+        hasher.combine(latitude)
+        hasher.combine(longitude)
     }
 }
 
@@ -1055,7 +1097,9 @@ public struct FfiConverterTypeAsset: FfiConverterRustBuffer {
                 duration: FfiConverterString.read(from: &buf), 
                 framerate: FfiConverterString.read(from: &buf), 
                 videoCodec: FfiConverterString.read(from: &buf), 
-                containerType: FfiConverterString.read(from: &buf)
+                containerType: FfiConverterString.read(from: &buf), 
+                latitude: FfiConverterOptionDouble.read(from: &buf), 
+                longitude: FfiConverterOptionDouble.read(from: &buf)
         )
     }
 
@@ -1084,6 +1128,8 @@ public struct FfiConverterTypeAsset: FfiConverterRustBuffer {
         FfiConverterString.write(value.framerate, into: &buf)
         FfiConverterString.write(value.videoCodec, into: &buf)
         FfiConverterString.write(value.containerType, into: &buf)
+        FfiConverterOptionDouble.write(value.latitude, into: &buf)
+        FfiConverterOptionDouble.write(value.longitude, into: &buf)
     }
 }
 
@@ -3123,6 +3169,30 @@ fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
+    typealias SwiftType = Double?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDouble.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDouble.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

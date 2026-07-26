@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS assets (
     framerate      TEXT    NOT NULL DEFAULT '',  -- video frame rate, raw server value
     video_codec    TEXT    NOT NULL DEFAULT '',  -- video codec
     container_type TEXT    NOT NULL DEFAULT '',  -- video container type
+    latitude       REAL,                        -- GPS latitude, NULL when unlocated (NAS-derived)
+    longitude      REAL,                        -- GPS longitude, NULL when unlocated (NAS-derived)
     updated_at     INTEGER NOT NULL,
     UNIQUE (space, server_id)
 );
@@ -168,6 +170,20 @@ const STEPS: &[MigrationStep] = &[
         version: 3,
         requires_recrawl: true,
         apply: add_metadata_columns_if_missing,
+    },
+    MigrationStep {
+        // Per-asset GPS for the Map view: latitude / longitude. Adds the two
+        // nullable REAL columns to a pre-existing assets table.
+        // `requires_recrawl: true` for the same reason as the v3 metadata step:
+        // lat/lon are NAS-derived (Browse.Item `additional.gps`), and
+        // `ALTER TABLE ADD COLUMN` can only backfill existing rows with NULL,
+        // never the real coordinate. Left un-recrawled, every existing row
+        // would read as unlocated forever; marking it forces one resumable,
+        // idempotent re-crawl that populates the true coordinates. Does not
+        // touch in_trash/trashed_at (v2) so the app trash survives untouched.
+        version: 4,
+        requires_recrawl: true,
+        apply: add_location_columns_if_missing,
     },
 ];
 
@@ -381,6 +397,35 @@ fn add_metadata_columns_if_missing(conn: &Connection) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Migration step 4: adds the `latitude` / `longitude` columns to a pre-existing
+/// `assets` table. Each `ALTER TABLE ADD COLUMN` is guarded by a `PRAGMA
+/// table_info` check so a re-run, or a fresh database whose `BASE_DDL` already
+/// created these columns, is a no-op rather than a duplicate-column error
+/// (keeping the step idempotent). The columns are nullable REAL with no default:
+/// NULL is the correct "unlocated" value, and unlike unit_id there is no
+/// sentinel to invent. Existing rows come out NULL (unlocated), which is stale
+/// for any photo that actually carries GPS, which is exactly why the step is
+/// marked `requires_recrawl` in `STEPS`.
+fn add_location_columns_if_missing(conn: &Connection) -> Result<(), CoreError> {
+    let existing: Vec<String> = {
+        let mut stmt = conn.prepare("PRAGMA table_info(assets)").map_err(map_sql)?;
+        let names = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(map_sql)?
+            .filter_map(|r| r.ok())
+            .collect();
+        names
+    };
+    let columns: &[(&str, &str)] = &[("latitude", "REAL"), ("longitude", "REAL")];
+    for (name, def) in columns {
+        if !existing.iter().any(|c| c == name) {
+            conn.execute(&format!("ALTER TABLE assets ADD COLUMN {name} {def}"), [])
+                .map_err(map_sql)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,6 +562,130 @@ mod tests {
         conn
     }
 
+    /// Builds a v3-shaped `assets` table: it has `unit_id`, the hybrid-delete
+    /// columns, and all twelve media-enrichment columns, but NOT the step-4
+    /// `latitude`/`longitude` columns, with `user_version` pinned at 3. Mirrors
+    /// a real database created after the metadata enrichment but before GPS.
+    fn open_v3_db_without_location_columns() -> Connection {
+        let conn = rusqlite::Connection::open_in_memory().expect("open");
+        conn.execute_batch(
+            "CREATE TABLE assets (
+                rowid_pk       INTEGER PRIMARY KEY AUTOINCREMENT,
+                space          INTEGER NOT NULL,
+                server_id      INTEGER NOT NULL,
+                unit_id        INTEGER NOT NULL DEFAULT 0,
+                cache_key      TEXT    NOT NULL,
+                filename       TEXT    NOT NULL,
+                media_kind     INTEGER NOT NULL DEFAULT 2,
+                taken_at       INTEGER,
+                added_at       INTEGER,
+                width          INTEGER,
+                height         INTEGER,
+                file_size      INTEGER,
+                server_version INTEGER,
+                in_trash       INTEGER NOT NULL DEFAULT 0,
+                trashed_at     INTEGER,
+                rating         INTEGER NOT NULL DEFAULT 0,
+                description    TEXT    NOT NULL DEFAULT '',
+                camera         TEXT    NOT NULL DEFAULT '',
+                aperture       TEXT    NOT NULL DEFAULT '',
+                exposure_time  TEXT    NOT NULL DEFAULT '',
+                focal_length   TEXT    NOT NULL DEFAULT '',
+                iso            TEXT    NOT NULL DEFAULT '',
+                lens           TEXT    NOT NULL DEFAULT '',
+                duration       TEXT    NOT NULL DEFAULT '',
+                framerate      TEXT    NOT NULL DEFAULT '',
+                video_codec    TEXT    NOT NULL DEFAULT '',
+                container_type TEXT    NOT NULL DEFAULT '',
+                updated_at     INTEGER NOT NULL,
+                UNIQUE (space, server_id)
+            );
+            CREATE INDEX idx_assets_space_trash ON assets (space, in_trash);
+            CREATE TABLE sync_state (
+                space                  INTEGER PRIMARY KEY,
+                initial_crawl_complete INTEGER NOT NULL DEFAULT 0,
+                expected_total         INTEGER NOT NULL DEFAULT 0,
+                last_offset            INTEGER NOT NULL DEFAULT 0,
+                last_page_limit        INTEGER NOT NULL DEFAULT 0,
+                highest_seen_version   INTEGER,
+                last_crawl_at          INTEGER,
+                last_reconcile_at      INTEGER
+            );
+            CREATE TABLE schema_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            PRAGMA user_version = 3;",
+        )
+        .expect("v3 tables");
+        conn
+    }
+
+    /// A v3 database must gain the `latitude`/`longitude` columns on upgrade to
+    /// v4, default them to NULL (unlocated) for existing rows, bump
+    /// `user_version` and the `schema_meta` mirror to 4 (== `latest_version()`),
+    /// and stay a no-op (no duplicate-column error) on a second run.
+    #[test]
+    fn migration_v3_to_v4_adds_location_columns_defaulted_and_is_idempotent() {
+        let conn = open_v3_db_without_location_columns();
+        conn.execute(
+            "INSERT INTO assets (space, server_id, unit_id, cache_key, filename, updated_at) VALUES (0, 1, 10, 'ck1', 'a.jpg', 0)",
+            [],
+        )
+        .expect("v3 row");
+
+        run_migrations(&conn).expect("migration adds location columns");
+
+        // The two new columns exist and default to NULL for the existing row.
+        let (latitude, longitude): (Option<f64>, Option<f64>) = conn
+            .query_row(
+                "SELECT latitude, longitude FROM assets WHERE server_id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("location columns readable");
+        assert_eq!(latitude, None, "existing row defaults latitude to NULL (unlocated)");
+        assert_eq!(longitude, None, "existing row defaults longitude to NULL (unlocated)");
+        assert_eq!(user_version(&conn).unwrap(), 4);
+        assert_eq!(user_version(&conn).unwrap(), latest_version());
+        let meta: String = conn
+            .query_row("SELECT value FROM schema_meta WHERE key = 'schema_version'", [], |r| r.get(0))
+            .expect("schema_meta mirror set");
+        assert_eq!(meta, "4");
+
+        // Second run must not fail with a duplicate-column error and must stay
+        // a no-op at the latest version.
+        run_migrations(&conn).expect("second run is a no-op");
+        assert_eq!(user_version(&conn).unwrap(), latest_version());
+    }
+
+    /// The v4 location migration is NAS-derived (`requires_recrawl: true`), so a
+    /// v3 database that had already completed its crawl must have its barrier
+    /// reset and cursor rewound, exactly like the metadata migration, so the
+    /// real coordinates get backfilled instead of every row staying unlocated.
+    #[test]
+    fn v3_to_v4_migration_resets_crawl_barrier_for_completed_space() {
+        let conn = open_v3_db_without_location_columns();
+        conn.execute(
+            "INSERT INTO sync_state (space, initial_crawl_complete, expected_total, last_offset, last_page_limit)
+             VALUES (0, 1, 151, 151, 200)",
+            [],
+        )
+        .expect("personal sync_state");
+
+        run_migrations(&conn).expect("v3 to v4 migration");
+
+        let (complete, offset): (i64, i64) = conn
+            .query_row(
+                "SELECT initial_crawl_complete, last_offset FROM sync_state WHERE space = 0",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(complete, 0, "a data-bearing migration must reset a completed crawl");
+        assert_eq!(offset, 0, "the paging cursor must rewind so the crawl restarts and backfills GPS");
+    }
+
     /// A v2 database must gain all twelve media-enrichment columns on upgrade
     /// to v3, default them for existing rows, bump `user_version` and the
     /// `schema_meta` mirror to 3, and stay a no-op (no duplicate-column error)
@@ -543,16 +712,18 @@ mod tests {
         assert_eq!(description, "", "existing row defaults description to ''");
         assert_eq!(camera, "", "existing row defaults camera to ''");
         assert_eq!(duration, "", "existing row defaults duration to ''");
-        assert_eq!(user_version(&conn).unwrap(), 3);
+        // A v2 database runs every pending step in one batch, so it lands on
+        // the latest version (v3 metadata + v4 location), not just v3.
+        assert_eq!(user_version(&conn).unwrap(), latest_version());
         let meta: String = conn
             .query_row("SELECT value FROM schema_meta WHERE key = 'schema_version'", [], |r| r.get(0))
             .expect("schema_meta mirror set");
-        assert_eq!(meta, "3");
+        assert_eq!(meta, latest_version().to_string());
 
         // Second run must not fail with a duplicate-column error and must stay
-        // a no-op at v3.
+        // a no-op at the latest version.
         run_migrations(&conn).expect("second run is a no-op");
-        assert_eq!(user_version(&conn).unwrap(), 3);
+        assert_eq!(user_version(&conn).unwrap(), latest_version());
     }
 
     /// REGRESSION GUARD for the hybrid-delete work: the v3 migration must not
@@ -684,7 +855,7 @@ mod tests {
     #[test]
     fn migrations_create_all_tables_and_seed_version() {
         let store = crate::Store::open_in_memory().expect("open");
-        assert_eq!(store.schema_version().expect("version"), 3);
+        assert_eq!(store.schema_version().expect("version"), latest_version());
         let names: Vec<String> = {
             let mut stmt = store
                 .conn
@@ -708,7 +879,7 @@ mod tests {
         let store = crate::Store::open_in_memory().expect("open");
         assert_eq!(user_version(&store.conn).unwrap(), latest_version());
         run_migrations(&store.conn).expect("rerun");
-        assert_eq!(store.schema_version().expect("version"), 3);
+        assert_eq!(store.schema_version().expect("version"), latest_version());
         assert_eq!(user_version(&store.conn).unwrap(), latest_version());
     }
 

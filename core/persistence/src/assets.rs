@@ -100,10 +100,10 @@ fn build_filter_where(
 const ASSET_SELECT_COLUMNS: &str = "server_id, unit_id, cache_key, filename, media_kind, taken_at, \
      added_at, width, height, file_size, server_version, space, \
      rating, description, camera, aperture, exposure_time, focal_length, \
-     iso, lens, duration, framerate, video_codec, container_type";
+     iso, lens, duration, framerate, video_codec, container_type, latitude, longitude";
 
 /// Maps one row selected in `ASSET_SELECT_COLUMNS` order into an `Asset`.
-/// Shared by `fetch_assets` and `fetch_trash` so the (now 24-field) mapping
+/// Shared by `fetch_assets` and `fetch_trash` so the (now 26-field) mapping
 /// lives in exactly one place. `in_trash`/`trashed_at` are intentionally not
 /// read back: they are storage-only bookkeeping that partitions the two
 /// queries, never surfaced on the `Asset` model.
@@ -133,6 +133,8 @@ fn row_to_asset(r: &rusqlite::Row) -> rusqlite::Result<Asset> {
         framerate: r.get(21)?,
         video_codec: r.get(22)?,
         container_type: r.get(23)?,
+        latitude: r.get::<_, Option<f64>>(24)?,
+        longitude: r.get::<_, Option<f64>>(25)?,
     })
 }
 
@@ -146,16 +148,18 @@ impl Store {
         // un-trash an item the user moved to the app trash. Leaving those two
         // columns out of the SET is exactly what preserves them across a
         // re-crawl (regression-tested in `upsert_preserves_trash_flag_*`). The
-        // v3 metadata columns ARE in the SET so a re-crawl refreshes EXIF/
-        // rating/video metadata as the NAS reports it.
+        // v3 metadata columns and the v4 latitude/longitude columns ARE in the
+        // SET so a re-crawl refreshes EXIF/rating/video metadata and GPS as the
+        // NAS reports it.
         self.conn
             .execute(
                 "INSERT INTO assets
                     (space, server_id, unit_id, cache_key, filename, media_kind,
                      taken_at, added_at, width, height, file_size, server_version,
                      rating, description, camera, aperture, exposure_time, focal_length,
-                     iso, lens, duration, framerate, video_codec, container_type, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)
+                     iso, lens, duration, framerate, video_codec, container_type,
+                     latitude, longitude, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)
                  ON CONFLICT(space, server_id) DO UPDATE SET
                      unit_id        = excluded.unit_id,
                      cache_key      = excluded.cache_key,
@@ -179,6 +183,8 @@ impl Store {
                      framerate      = excluded.framerate,
                      video_codec    = excluded.video_codec,
                      container_type = excluded.container_type,
+                     latitude       = excluded.latitude,
+                     longitude      = excluded.longitude,
                      updated_at     = excluded.updated_at",
                 params![
                     space_to_int(asset.space),
@@ -205,6 +211,8 @@ impl Store {
                     asset.framerate,
                     asset.video_codec,
                     asset.container_type,
+                    asset.latitude,
+                    asset.longitude,
                     now_secs(),
                 ],
             )
@@ -299,6 +307,28 @@ impl Store {
                 row_to_asset,
             )
             .map_err(map_sql)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(map_sql)?);
+        }
+        Ok(out)
+    }
+
+    /// Returns every asset in `space` that has a GPS coordinate (both latitude
+    /// and longitude non-null), newest first. Backs the Map view, which plots
+    /// located photos. Not windowed: the located subset is small relative to the
+    /// library and the map needs them all at once to cluster. Trashed items
+    /// (`in_trash = 1`) are excluded, matching `fetch_assets`.
+    pub fn located_assets(&self, space: Space) -> Result<Vec<Asset>, CoreError> {
+        let sql = format!(
+            "SELECT {ASSET_SELECT_COLUMNS}
+                 FROM assets
+                 WHERE space = ?1 AND in_trash = 0
+                   AND latitude IS NOT NULL AND longitude IS NOT NULL
+                 ORDER BY taken_at DESC, server_id DESC"
+        );
+        let mut stmt = self.conn.prepare(&sql).map_err(map_sql)?;
+        let rows = stmt.query_map(params![space_to_int(space)], row_to_asset).map_err(map_sql)?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row.map_err(map_sql)?);
@@ -1366,6 +1396,8 @@ mod tests {
             framerate: "29.97".to_string(),
             video_codec: "hevc".to_string(),
             container_type: "mov".to_string(),
+            latitude: Some(59.908775),
+            longitude: Some(10.7447916666667),
         };
         store.upsert_asset(&original).unwrap();
         let page = store.fetch_assets(Space::Shared, 0, 10).unwrap();
@@ -1396,6 +1428,59 @@ mod tests {
         assert_eq!(round_tripped.framerate, original.framerate);
         assert_eq!(round_tripped.video_codec, original.video_codec);
         assert_eq!(round_tripped.container_type, original.container_type);
+        // GPS columns (schema v4) round-trip too.
+        assert_eq!(round_tripped.latitude, original.latitude);
+        assert_eq!(round_tripped.longitude, original.longitude);
+    }
+
+    /// `located_assets` returns only the rows with BOTH latitude and longitude
+    /// set, newest-first, and never the unlocated ones. It also round-trips the
+    /// exact coordinates so the Map view plots real positions.
+    #[test]
+    fn located_assets_returns_only_located_rows_newest_first() {
+        let store = Store::open_in_memory().unwrap();
+
+        // Two located photos (different taken_at so order is unambiguous) and
+        // one unlocated photo, all in Personal.
+        let mut oslo = asset(Space::Personal, 1, Some(100), Some(1));
+        oslo.latitude = Some(59.908775);
+        oslo.longitude = Some(10.7447916666667);
+        let mut paris = asset(Space::Personal, 2, Some(300), Some(1));
+        paris.latitude = Some(48.8566);
+        paris.longitude = Some(2.3522);
+        let unlocated = asset(Space::Personal, 3, Some(200), Some(1)); // lat/lon None
+        store.upsert_asset(&oslo).unwrap();
+        store.upsert_asset(&paris).unwrap();
+        store.upsert_asset(&unlocated).unwrap();
+
+        let located = store.located_assets(Space::Personal).unwrap();
+        let ids: Vec<i64> = located.iter().map(|a| a.id).collect();
+        assert_eq!(ids, vec![2, 1], "only located rows, newest taken_at first");
+        // Coordinates survive the round-trip exactly.
+        assert_eq!(located[0].latitude, Some(48.8566));
+        assert_eq!(located[0].longitude, Some(2.3522));
+        assert_eq!(located[1].latitude, Some(59.908775));
+        assert_eq!(located[1].longitude, Some(10.7447916666667));
+    }
+
+    /// A row with only ONE of latitude/longitude set is not "located": the Map
+    /// view cannot plot half a coordinate, so `located_assets` requires both.
+    #[test]
+    fn located_assets_requires_both_coordinates() {
+        let store = Store::open_in_memory().unwrap();
+        let mut lat_only = asset(Space::Personal, 1, Some(100), Some(1));
+        lat_only.latitude = Some(59.9);
+        lat_only.longitude = None;
+        let mut lon_only = asset(Space::Personal, 2, Some(200), Some(1));
+        lon_only.latitude = None;
+        lon_only.longitude = Some(10.7);
+        store.upsert_asset(&lat_only).unwrap();
+        store.upsert_asset(&lon_only).unwrap();
+
+        assert!(
+            store.located_assets(Space::Personal).unwrap().is_empty(),
+            "a half-coordinate row is not located"
+        );
     }
 
     /// An asset that carries no enrichment metadata (the common case, e.g. a

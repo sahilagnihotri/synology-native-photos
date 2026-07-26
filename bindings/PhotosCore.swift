@@ -859,6 +859,16 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func filterItemsRemote(space: Space, startTime: Int64?, endTime: Int64?, personId: Int64?, geocodingId: Int64?, offset: UInt32, limit: UInt32) async throws  -> [Asset]
     
     /**
+     * Local-only read of every asset in `space` that carries a GPS coordinate
+     * (both latitude and longitude present), newest-first. Backs the future
+     * Map view, which plots the located subset. Deliberately not windowed: the
+     * located subset is small relative to the full library and the map needs
+     * them all at once to cluster. No network access at all; same lock
+     * discipline as `fetch_assets`.
+     */
+    func locatedAssets(space: Space) throws  -> [Asset]
+    
+    /**
      * Log in against `connection` with the given credentials.
      *
      * `otp_code` and `device_token` are forwarded to `synology_api::login`
@@ -1844,6 +1854,22 @@ open func filterItemsRemote(space: Space, startTime: Int64?, endTime: Int64?, pe
             liftFunc: FfiConverterSequenceTypeAsset.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
+}
+    
+    /**
+     * Local-only read of every asset in `space` that carries a GPS coordinate
+     * (both latitude and longitude present), newest-first. Backs the future
+     * Map view, which plots the located subset. Deliberately not windowed: the
+     * located subset is small relative to the full library and the map needs
+     * them all at once to cluster. No network access at all; same lock
+     * discipline as `fetch_assets`.
+     */
+open func locatedAssets(space: Space)throws  -> [Asset]  {
+    return try  FfiConverterSequenceTypeAsset.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_photoscore_fn_method_photoscore_located_assets(self.uniffiClonePointer(),
+        FfiConverterTypeSpace_lower(space),$0
+    )
+})
 }
     
     /**
@@ -3060,6 +3086,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_filter_items_remote() != 48458) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_located_assets() != 6785) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_login() != 52991) {

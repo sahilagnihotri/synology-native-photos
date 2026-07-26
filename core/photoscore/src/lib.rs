@@ -377,6 +377,18 @@ impl PhotosCore {
         store.fetch_assets(space, offset, limit)
     }
 
+    /// Local-only read of every asset in `space` that carries a GPS coordinate
+    /// (both latitude and longitude present), newest-first. Backs the future
+    /// Map view, which plots the located subset. Deliberately not windowed: the
+    /// located subset is small relative to the full library and the map needs
+    /// them all at once to cluster. No network access at all; same lock
+    /// discipline as `fetch_assets`.
+    pub fn located_assets(&self, space: Space) -> Result<Vec<Asset>, CoreError> {
+        let guard = self.store.lock().expect("store mutex poisoned");
+        let store = guard.as_ref().ok_or_else(store_busy_err)?;
+        store.located_assets(space)
+    }
+
     /// Windowed local read of assets in `space` matching the Quick Filter
     /// facets (media kind, a `taken_at` floor/ceiling in unix seconds, and a
     /// minimum star rating), newest-first with the exact same ordering as
