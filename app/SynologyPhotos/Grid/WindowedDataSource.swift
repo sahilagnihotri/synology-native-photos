@@ -44,6 +44,13 @@ private enum FetchSource: Equatable {
     /// count/readiness estimated from short pages exactly like `.collection`/
     /// `.search`, and a single flat section (no date headers).
     case remoteFilter(Space, personId: Int64?, geocodingId: Int64?, startTime: Int64?, endTime: Int64?)
+    /// An explicit, already-in-memory set of assets (the photos behind a tapped
+    /// map cluster or pin), served straight from the array with no network or
+    /// index read. Like `.filter` its count is exact and it is ready
+    /// immediately, and it stays a single flat section (no date headers). This
+    /// is what lets a map cluster open in the REAL library grid, inheriting
+    /// selection, delete, the full detail viewer, and context menus.
+    case fixed(Space, [Asset])
 }
 
 /// Bridges the NSCollectionView grid to the core's windowed reads.
@@ -98,6 +105,7 @@ final class WindowedDataSource {
         case .space(let s): return s
         case .filter(let s, _): return s
         case .remoteFilter(let s, _, _, _, _): return s
+        case .fixed(let s, _): return s
         case .collection, .search(_, _): return .personal
         }
     }
@@ -163,6 +171,14 @@ final class WindowedDataSource {
                 isReady = false
                 dateSections = nil
             }
+        case .fixed(_, let assets):
+            // The map-cluster set is already in memory: its count is exact and
+            // it is ready to page immediately, exactly like a `.filter` read but
+            // with the count taken straight from the array rather than a
+            // `filterCount` call. A single flat section, never date-sectioned.
+            totalCount = assets.count
+            isReady = true
+            dateSections = nil
         case .collection, .search, .remoteFilter:
             // No local count for a live-fetched source (discovery, search, or a
             // server-side People/Geolocation filter): totalCount/isReady are
@@ -224,6 +240,13 @@ final class WindowedDataSource {
                 // means this was the last one.
                 isReady = rows.count < limit
                 totalCount = max(totalCount, offset + rows.count)
+            case .fixed(_, let assets):
+                // Served straight from the in-memory array; count/readiness are
+                // owned by `refreshCount` (from the array length), so this only
+                // slices the requested window and never touches them.
+                let lower = min(offset, assets.count)
+                let upper = min(offset + limit, assets.count)
+                rows = lower < upper ? Array(assets[lower..<upper]) : []
             }
             for (i, asset) in rows.enumerated() { resident[offset + i] = asset }
             markPagesLoaded(coveringOffset: offset, limit: rows.count)
@@ -344,6 +367,19 @@ final class WindowedDataSource {
         totalCount = 0
         isReady = false
         dateSections = nil
+    }
+
+    /// Switches to windowing an explicit in-memory set of `assets` (the photos
+    /// behind a tapped map cluster/pin) in `space`, instead of any indexed or
+    /// live source. Same reset discipline as `setSpace`; like `setFilter` it
+    /// then calls `refreshCount`, which for a `.fixed` source seeds the exact
+    /// count from the array and clears the date-section geometry so the grid
+    /// renders as a single flat section. Callers `loadWindow` + re-apply the
+    /// snapshot after this, the same way `LibraryView` does after `setSpace`.
+    func setFixedAssets(space: Space, assets: [Asset]) async {
+        source = .fixed(space, assets)
+        resetResident()
+        await refreshCount()
     }
 
     private func resetResident() {

@@ -372,6 +372,54 @@ struct WindowedDataSourceTests {
         #expect(ds.totalCount == 10, "back to the full library count")
     }
 
+    // MARK: - Fixed source (map cluster into the real grid)
+
+    @Test func setFixedAssetsServesTheArrayWithoutTouchingTheClient() async {
+        let fake = FakePhotosCore()
+        // The space's own library is unrelated to the fixed set; a fixed source
+        // must read neither the local index nor any live path.
+        fake.assets[.personal] = (0..<100).map { asset(Int64($0)) }
+        let cluster = [asset(7), asset(3), asset(42)]
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setFixedAssets(space: .personal, assets: cluster)
+        #expect(ds.totalCount == 3, "exact count from the array, seeded up front")
+        #expect(ds.isReady == true, "an in-memory set is ready to page immediately")
+        #expect(ds.dateSections == nil, "a cluster grid is a single flat section")
+
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(window.map(\.id) == [7, 3, 42], "served in the array's own order, not sorted")
+        #expect(fake.filterAssetsCallCount == 0)
+        #expect(fake.fetchAssetsForCallCount == 0)
+        #expect(fake.filterItemsRemoteCallCount == 0, "a fixed source never calls the core")
+    }
+
+    @Test func fixedSourceWindowsTheArrayAndClampsPastTheEnd() async {
+        let fake = FakePhotosCore()
+        let cluster = (0..<5).map { asset(Int64($0)) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 2)
+        await ds.setFixedAssets(space: .personal, assets: cluster)
+        let page = await ds.loadWindow(offset: 2, limit: 2)
+        #expect(page.map(\.id) == [2, 3])
+        let tail = await ds.loadWindow(offset: 4, limit: 50)
+        #expect(tail.map(\.id) == [4], "a window past the end clamps to what exists")
+        let beyond = await ds.loadWindow(offset: 10, limit: 50)
+        #expect(beyond.isEmpty, "an offset past the end is empty, not a crash")
+    }
+
+    @Test func clearingAFixedSourceRestoresTheDateSectionedLibrary() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setFixedAssets(space: .personal, assets: [asset(1), asset(2)])
+        #expect(ds.dateSections == nil)
+        // Selecting a sidebar row returns to the space source (what RootView
+        // does on sidebar change), restoring the sectioned library.
+        await ds.setSpace(.personal)
+        #expect(ds.dateSections != nil, "the sectioned library returns after leaving the cluster")
+        #expect(ds.totalCount == 10)
+    }
+
     @Test func filterWithNoMatchesReportsEmptyReadyResult() async {
         let fake = FakePhotosCore()
         // Only photos exist, so a video filter matches nothing.
