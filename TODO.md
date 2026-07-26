@@ -95,6 +95,16 @@ Bigger bets:
 
 - [ ] Detail viewer is slow to open images/videos and slower than the old QuickLook. Cause: `DetailImageView` calls `downloadOriginal` on EVERY open (no download cache, does not consult the tiny FIFO TempFileCache first) and decodes with `NSImage(contentsOf:)` at FULL resolution (does not use `ImageDownsample` like the grid does), with no decoded-image RAM cache. Fix (next pass, after Edit; same Detail files): a keyed on-disk original cache (by `cache_key`, shared by photo + video so re-opens never re-download), a byte-cost-bounded `NSCache` of decoded images, downsampled decode for the initial display (reuse `ImageDownsample`, full-res on zoom), and progressive thumbnail-first display. Generous cache sizes (user has 128/64 GB RAM + NVMe).
 
+## Distribution
+
+- [ ] `make dmg` produces a working installer but the app is Apple-Development
+  signed, not notarized, so other Macs need a right-click -> Open the first
+  time. For real distribution: get a "Developer ID Application" cert, build the
+  dmg with `CODE_SIGN_IDENTITY="Developer ID Application: ..."`, then notarize
+  with `xcrun notarytool submit ... --wait` and `xcrun stapler staple` the dmg.
+  The script already accepts the signing env overrides; only the notarytool
+  step needs adding.
+
 ## Build infra
 
 - [ ] Make the xcframework rebuild self-healing. The `ensure-xcframework` preBuildScript only builds `PhotosCore.xcframework` when it is MISSING, not when the Rust core changed, so after any core pass the app build fails with "cannot find uniffi_..._checksum" until `make xcframework` is run by hand. Fix the preBuildScript to rebuild when the core sources are newer than the packaged xcframework (compare mtimes, run `make xcframework`). Until fixed: run `make xcframework` after every core change before building the app.

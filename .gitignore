@@ -27,3 +27,6 @@ DerivedData/
 
 # SDD scratch (subagent-driven-development ledger and briefs)
 .superpowers/
+
+# Packaged dmg installers (built by scripts/package/dmg.sh / make dmg)
+/dist

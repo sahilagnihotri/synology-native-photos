@@ -3,7 +3,7 @@ LIB = target/aarch64-apple-darwin/release/libphotoscore.a
 BINDINGS_DIR = bindings
 XCF = PhotosCore.xcframework
 
-.PHONY: test-rust bindings xcframework clean
+.PHONY: test-rust bindings xcframework dmg clean
 
 test-rust:
 	cargo test --workspace
@@ -35,5 +35,11 @@ xcframework: bindings
 		-headers $(BINDINGS_DIR) \
 		-output $(XCF)
 
+# Build a distributable dmg installer (Release .app + /Applications alias).
+# Delegates to the packaging script, which rebuilds the xcframework first so
+# the app never links a stale core. Output: dist/SynologyPhotos-<version>.dmg.
+dmg:
+	scripts/package/dmg.sh
+
 clean:
-	cargo clean && rm -rf $(BINDINGS_DIR) $(XCF)
+	cargo clean && rm -rf $(BINDINGS_DIR) $(XCF) build dist

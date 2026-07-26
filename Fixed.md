@@ -2,6 +2,19 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-07-26 (cont.): DMG installer
+
+- `scripts/package/dmg.sh` + `make dmg` build a distributable
+  `dist/SynologyPhotos-<version>.dmg` (Release `.app` next to an `/Applications`
+  alias, the standard drag-to-install layout). Zero extra tooling (uses
+  `hdiutil`), self-healing (rebuilds the xcframework first, regenerates the
+  Xcode project if missing), version derived from the latest git tag. Signed
+  with the existing Apple Development identity, so it runs on the build machine
+  and Macs on that developer account; NOT notarized (unregistered Macs need a
+  right-click -> Open the first time). The script honours CODE_SIGN_IDENTITY /
+  DEVELOPMENT_TEAM env overrides so a future Developer ID + notarize path can
+  reuse it. `dist/` is gitignored.
+
 ## Session 2026-07-26 (cont.): Map view, UX quick wins, map-cluster-into-grid
 
 - **Map view.** New `Map` sidebar destination plotting located photos on an
