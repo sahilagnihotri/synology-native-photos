@@ -227,6 +227,13 @@ struct LibraryView: View {
     /// re-entering the same tiles section) always drops back out of a
     /// drilled-in collection first.
     @State private var drilledInCollection: DiscoveryCollection?
+    /// The photos behind a tapped map cluster/pin, shown in the REAL library
+    /// grid while set (see `WindowedDataSource.setFixedAssets`). `nil` means the
+    /// Map route shows the map itself. Like `drilledInCollection` it overlays
+    /// its route and is cleared on every sidebar change, so leaving Map (or any
+    /// row) drops back to the normal view; a Back control clears it to return to
+    /// the pins without changing the sidebar selection.
+    @State private var mapClusterAssets: [Asset]?
     /// The toolbar search field's live text, bound directly to `.searchable`.
     /// Read-only search: there is no saved-search list, and clearing this
     /// back to empty simply returns to whatever the sidebar was already
@@ -293,6 +300,10 @@ struct LibraryView: View {
         .onChange(of: sidebarSelection) { _, newValue in
             guard let newValue else { return }
             drilledInCollection = nil
+            // Leaving the Map (to any row, including re-selecting a different
+            // one) drops out of a tapped cluster back to the normal view, the
+            // same way a drilled-in collection is dropped above.
+            mapClusterAssets = nil
             // A Quick Filter only ever applies to the library grid it was set
             // from; leaving that grid (to another space, discovery, or the
             // recycle bin) drops it so it never lingers over an unrelated view.
@@ -395,7 +406,14 @@ struct LibraryView: View {
         // refreshes the current grid so the deleted rows disappear.
         .deleteConfirm(deleteController, space: env.dataSource.space) {
             detailIndex = nil
-            await refreshCurrentGrid()
+            if mapClusterAssets != nil {
+                // A map cluster is a fixed in-memory snapshot, so a plain grid
+                // refresh would re-serve the just-deleted rows. Prune them from
+                // the cluster set (and the fixed source) instead.
+                await pruneMapClusterAfterDelete(deletedIds: deleteController.lastDeletedIds)
+            } else {
+                await refreshCurrentGrid()
+            }
         }
         // The non-destructive crop/rotate editor. Saving there uploads a NEW
         // photo (the original is never touched); on save the sheet dismisses
@@ -532,17 +550,15 @@ struct LibraryView: View {
                     await reconcileAndReloadGrid()
                 }
             case .map:
-                // The Map is its own full view: it plots located photos, loads
-                // itself on appear (and on space change), and opens the photos
-                // behind a tapped cluster/pin in the app's detail stack. Like
-                // the recycle bin it is not the photo grid and has no crawl.
+                // The Map plots located photos and loads itself on appear (and
+                // on space change). Tapping a cluster/pin routes those photos
+                // into the REAL grid (via `mapClusterAssets` + the fixed data
+                // source), so the cluster grid is rendered by the `.grid` case
+                // above, not here; this case only ever shows the map itself.
                 MapDestinationView(
                     client: env.client,
                     space: env.spaceSelection.current,
-                    thumbnailCache: env.thumbnailCache,
-                    tempCache: env.tempCache,
-                    originalCache: env.originalCache,
-                    synoToken: currentSynoToken())
+                    onOpenCluster: { assets in openMapCluster(assets) })
             }
         }
     }
@@ -642,6 +658,18 @@ struct LibraryView: View {
         case .recentlyDeleted:
             return .recentlyDeleted
         case .map:
+            // A tapped cluster overlays the map with the REAL grid, driven by
+            // the fixed data source's (exact, immediate) readiness exactly like
+            // a discovery grid; with no cluster selected the map itself shows.
+            if mapClusterAssets != nil {
+                switch LibraryContentRoute.route(
+                    isComplete: env.dataSource.isReady, itemCount: env.dataSource.totalCount) {
+                case .importing: return .importing(label: "Loading...", accessibilityId: "mapcluster.progressview")
+                case .empty: return .empty(.discovery(title: headerTitle))
+                case .grid: return .grid
+                case .failed(let message): return .failed(message: message, retry: {})
+                }
+            }
             return .map
         }
     }
@@ -666,6 +694,9 @@ struct LibraryView: View {
     /// e.g. "Sahil" rather than "People", matching how Photos itself titles
     /// a person's page.
     private var headerTitle: String {
+        if let mapClusterAssets {
+            return mapClusterAssets.count == 1 ? "1 Photo" : "\(mapClusterAssets.count) Photos"
+        }
         if let activeSearch { return "Search: \(activeSearch)" }
         if let activeFilter {
             return activeFilter.summary.isEmpty ? "Filtered" : "Filtered: \(activeFilter.summary)"
@@ -701,6 +732,9 @@ struct LibraryView: View {
     /// header controls, which only make sense against an actual photo grid.
     private var isShowingPhotoGrid: Bool {
         if activeSearch != nil { return true }
+        // A tapped map cluster is shown in the real grid, so the grid-only
+        // toolbar controls (selection count, zoom, Delete) apply to it too.
+        if mapClusterAssets != nil { return true }
         switch currentRoute {
         case .grid, .discoveryGrid: return true
         case .discoveryTiles, .recentlyDeleted, .map: return false
@@ -758,6 +792,50 @@ struct LibraryView: View {
     private func switchCollection(to collection: DiscoveryCollection) async {
         controller.clearSelection()
         await env.dataSource.setCollection(collection)
+        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+        await controller.applySnapshot()
+    }
+
+    /// Opens the photos behind a tapped map cluster/pin in the REAL library
+    /// grid: records them in `mapClusterAssets` (which flips the Map route's
+    /// display to the grid and lights up the grid toolbar controls) and points
+    /// the shared data source at the fixed set, then loads the first page.
+    /// Same reset/load dance as `switchCollection`. The user gets selection,
+    /// delete, the full detail viewer, and context menus for free because this
+    /// is the same controller/data source the library uses.
+    private func openMapCluster(_ assets: [Asset]) {
+        mapClusterAssets = assets
+        Task {
+            controller.clearSelection()
+            await env.dataSource.setFixedAssets(space: env.spaceSelection.current, assets: assets)
+            await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+            await controller.applySnapshot()
+        }
+    }
+
+    /// Returns from a tapped map cluster back to the map pins, without changing
+    /// the sidebar selection (still "Map"). Clearing `mapClusterAssets` alone
+    /// flips the Map route's display back to `MapDestinationView`, which
+    /// reloads its own located set; the stale fixed data source is harmless
+    /// once the grid is no longer shown, and is replaced the next time any grid
+    /// route is entered.
+    private func closeMapCluster() {
+        mapClusterAssets = nil
+        controller.clearSelection()
+    }
+
+    /// After a delete inside a map cluster, drops the just-deleted assets from
+    /// the fixed set so they stop showing (the delete already landed on the
+    /// NAS; the cluster is only a snapshot). Keeps the user in the cluster with
+    /// the survivors; if nothing is left, returns to the map pins.
+    private func pruneMapClusterAfterDelete(deletedIds: [Int64]) async {
+        guard let current = mapClusterAssets else { return }
+        let deleted = Set(deletedIds)
+        let remaining = current.filter { !deleted.contains($0.id) }
+        guard !remaining.isEmpty else { closeMapCluster(); return }
+        mapClusterAssets = remaining
+        controller.clearSelection()
+        await env.dataSource.setFixedAssets(space: env.spaceSelection.current, assets: remaining)
         await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
         await controller.applySnapshot()
     }
@@ -828,6 +906,18 @@ struct LibraryView: View {
     @ToolbarContentBuilder
     private var libraryToolbar: some ToolbarContent {
         if detailIndex == nil {
+            // Back to the map pins from a tapped cluster's grid. Needed as an
+            // explicit control because the sidebar row is still "Map", so
+            // re-clicking it fires no selection change; this returns without
+            // leaving the Map route.
+            if mapClusterAssets != nil {
+                ToolbarItem(placement: .navigation) {
+                    Button { closeMapCluster() } label: {
+                        Label("Map", systemImage: "chevron.left")
+                    }
+                    .accessibilityIdentifier("mapcluster.back")
+                }
+            }
             // The crawl status line only ever applies to the space-backed
             // library grid (discovery/search have no crawl barrier), so an
             // "Importing..." status over anything else would be meaningless.

@@ -40,6 +40,12 @@ final class DeleteController {
     /// successful delete and cleared once an undo runs, so only ever the
     /// single most-recent delete is undoable (matching Apple Photos).
     private(set) var lastDeletedFilenames: [String] = []
+    /// The asset ids of the most recent SUCCESSFUL delete. Kept so a caller can
+    /// reconcile an in-memory view (e.g. a map-cluster grid backed by a fixed
+    /// asset set) against exactly what was just removed, without re-querying.
+    /// Overwritten by the next successful delete, same lifetime as
+    /// `lastDeletedFilenames`.
+    private(set) var lastDeletedIds: [Int64] = []
     /// Whether there is a just-deleted set the next Cmd-Z can bring back.
     var canUndoDelete: Bool { !lastDeletedFilenames.isEmpty }
 
@@ -81,6 +87,7 @@ final class DeleteController {
         do {
             try await client.deleteAssets(space: space, assetIds: ids)
             lastDeletedFilenames = filenames
+            lastDeletedIds = ids
             await onDone()
         } catch {
             errorMessage = (error as? CoreError)?.userMessage ?? "Could not delete the selected items."
