@@ -10,6 +10,10 @@ import PhotosCore
 /// ahead, if ever enabled) is not broken by this subclass existing.
 final class KeyHandlingCollectionView: NSCollectionView {
     var keyHandler: ((NSEvent) -> Bool)?
+    /// Builds the right-click / control-click context menu for a click event,
+    /// set by the controller so the menu offers the same actions the keyboard
+    /// does (see `PhotoGridController.contextMenu(for:)`).
+    var menuProvider: ((NSEvent) -> NSMenu?)?
     /// Runs the grid's Select All, set by the controller so the standard Edit
     /// menu's "Select All" (dispatched down the responder chain to this
     /// first-responder view) drives the SAME selection path Cmd-A does. Only
@@ -23,6 +27,10 @@ final class KeyHandlingCollectionView: NSCollectionView {
     override func keyDown(with event: NSEvent) {
         if keyHandler?(event) == true { return }
         super.keyDown(with: event)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        menuProvider?(event) ?? super.menu(for: event)
     }
 
     override func selectAll(_ sender: Any?) {
@@ -246,6 +254,9 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         // first-responder view) through the same action path the keyboard uses.
         collectionView.selectAllHandler = { [weak self] in self?.perform(.selectAll) }
         collectionView.deleteHandler = { [weak self] in self?.perform(.delete) }
+        // Right-click / control-click context menu, offering the same actions
+        // the keyboard does and routing them through `perform(_:)`.
+        collectionView.menuProvider = { [weak self] event in self?.contextMenu(for: event) }
         // Double-click opens the detail viewer (Apple Photos: single click
         // selects, double-click opens). A gesture recognizer set to require
         // two clicks fires only on the second click and leaves AppKit's own
@@ -841,6 +852,65 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         guard dataSource.dateSections != nil else { return .zero }
         return NSSize(width: collectionView.bounds.width, height: Self.headerHeight)
     }
+
+    // MARK: - Context menu
+
+    /// One right-click context-menu entry, as a pure value so the label and
+    /// enabled decision are unit-testable without a live event or on-screen
+    /// collection view (`contextMenuItems(selectionCount:)` below).
+    struct GridContextMenuItem: Equatable {
+        let title: String
+        let isEnabled: Bool
+    }
+
+    /// The context-menu entries for a given selection count, in order: Open
+    /// (only for a single selection, since opening the viewer is a single-
+    /// photo action), Delete (any non-empty selection, pluralized), and Undo
+    /// Delete (always offered; a safe no-op when there is nothing to undo).
+    static func contextMenuItems(selectionCount: Int) -> [GridContextMenuItem] {
+        [
+            GridContextMenuItem(title: "Open", isEnabled: selectionCount == 1),
+            GridContextMenuItem(
+                title: selectionCount <= 1 ? "Delete" : "Delete \(selectionCount) Photos",
+                isEnabled: selectionCount > 0),
+            GridContextMenuItem(title: "Undo Delete", isEnabled: true),
+        ]
+    }
+
+    /// Builds the grid's right-click menu, routing every item through
+    /// `perform(_:)` so a menu click and the matching keypress are one code
+    /// path. Right-clicking a cell outside the current selection selects it
+    /// first (matching Finder/Photos), so the action targets what was clicked.
+    private func contextMenu(for event: NSEvent) -> NSMenu? {
+        let point = collectionView.convert(event.locationInWindow, from: nil)
+        if let indexPath = collectionView.indexPathForItem(at: point) {
+            let index = absoluteIndex(for: indexPath)
+            if index < snapshotItemCount(), !selection.isSelected(index) {
+                selection.click(index)
+                syncSelectionHighlight()
+                onSelectionChanged?(currentIndex())
+            }
+        }
+        let specs = Self.contextMenuItems(selectionCount: selection.count)
+        let selectors: [Selector] = [
+            #selector(contextOpen(_:)), #selector(contextDelete(_:)), #selector(contextUndoDelete(_:))]
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for (i, spec) in specs.enumerated() {
+            // A separator sets the everyday Open apart from the destructive
+            // Delete / recoverable Undo pair below it.
+            if i == 1 { menu.addItem(.separator()) }
+            let item = NSMenuItem(title: spec.title, action: selectors[i], keyEquivalent: i == 0 ? "\r" : "")
+            item.target = self
+            item.isEnabled = spec.isEnabled
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func contextOpen(_ sender: Any?) { perform(.openDetail) }
+    @objc private func contextDelete(_ sender: Any?) { perform(.delete) }
+    @objc private func contextUndoDelete(_ sender: Any?) { perform(.undoDelete) }
 
     // MARK: - Date scrubber (Part F)
 

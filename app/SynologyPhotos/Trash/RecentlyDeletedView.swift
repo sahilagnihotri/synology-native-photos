@@ -95,6 +95,24 @@ struct RecentlyDeletedView: View {
                             client: client
                         )
                         .onTapGesture { model.toggle(item.recyclePath) }
+                        // Right-click a recycle-bin entry for its two actions,
+                        // routed through the same model methods the action bar
+                        // uses. Selects the entry first if it is not already
+                        // selected, so the action targets what was clicked.
+                        .contextMenu {
+                            Button {
+                                if !model.isSelected(item.recyclePath) { model.toggle(item.recyclePath) }
+                                Task { await model.restoreSelected { await onLibraryShouldRefresh() } }
+                            } label: {
+                                Label("Restore", systemImage: "arrow.uturn.backward")
+                            }
+                            Button(role: .destructive) {
+                                if !model.isSelected(item.recyclePath) { model.toggle(item.recyclePath) }
+                                model.requestEmpty()
+                            } label: {
+                                Label("Delete Permanently", systemImage: "trash.slash")
+                            }
+                        }
                     }
                 }
                 .padding(12)

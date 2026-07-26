@@ -732,6 +732,19 @@ struct DetailViewerHost: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Right-click the photo for the same chrome actions the top
+                // bar and keyboard already offer, routed through the identical
+                // closures so there is one path per action.
+                .contextMenu {
+                    Button { onClose() } label: { Label("Back", systemImage: "chevron.left") }
+                    Button { isShowingInfo.toggle() } label: {
+                        Label(isShowingInfo ? "Hide Info" : "Get Info", systemImage: "info.circle")
+                    }
+                    Divider()
+                    Button(role: .destructive) { requestDeleteCurrent() } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
 
                 if isShowingInfo {
                     HStack {

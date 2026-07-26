@@ -778,4 +778,29 @@ struct PhotoGridControllerTests {
 
         #expect(controller.handleKey(keyEvent(KeyCode.rightArrow)) == false)
     }
+
+    // MARK: - Context menu items (pure builder)
+
+    @Test func contextMenuForSingleSelectionEnablesOpenAndDelete() {
+        let items = PhotoGridController.contextMenuItems(selectionCount: 1)
+        #expect(items.map(\.title) == ["Open", "Delete", "Undo Delete"])
+        #expect(items[0].isEnabled) // Open: a single-photo action
+        #expect(items[1].isEnabled) // Delete
+        #expect(items[2].isEnabled) // Undo Delete is always offered
+    }
+
+    @Test func contextMenuForMultipleSelectionPluralizesDeleteAndDisablesOpen() {
+        let items = PhotoGridController.contextMenuItems(selectionCount: 3)
+        #expect(items[0].title == "Open")
+        #expect(!items[0].isEnabled, "Open is a single-photo action")
+        #expect(items[1].title == "Delete 3 Photos")
+        #expect(items[1].isEnabled)
+    }
+
+    @Test func contextMenuForEmptySelectionDisablesOpenAndDelete() {
+        let items = PhotoGridController.contextMenuItems(selectionCount: 0)
+        #expect(!items[0].isEnabled)
+        #expect(!items[1].isEnabled)
+        #expect(items[2].isEnabled, "Undo Delete stays available with nothing selected")
+    }
 }
