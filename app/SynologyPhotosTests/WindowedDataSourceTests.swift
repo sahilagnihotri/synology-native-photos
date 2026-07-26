@@ -410,4 +410,73 @@ struct WindowedDataSourceTests {
         await ds.setFilter(space: .shared, query: FilterQuery(mediaKind: .video, takenAfter: nil, takenBefore: nil, minRating: nil))
         #expect(ds.space == .shared, "unlike search/collections, a filter is space-scoped and keeps its space")
     }
+
+    // MARK: - Server-side (People/Geolocation) remote filter source
+
+    @Test func setRemoteFilterLoadsFromFilterItemsRemoteNotTheLocalPath() async {
+        let fake = FakePhotosCore()
+        // The local index has unrelated rows the remote filter must NOT read.
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.filterItemsRemoteResult = .success([asset(100), asset(101)])
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+
+        await ds.setRemoteFilter(space: .personal, personId: nil, geocodingId: 768, startTime: 1_400_000_000, endTime: nil)
+        let window = await ds.loadWindow(offset: 0, limit: 50)
+
+        #expect(window.map(\.id) == [100, 101], "rows come from the live remote filter, not the local index")
+        #expect(fake.filterItemsRemoteCallCount == 1)
+        #expect(fake.filterAssetsCallCount == 0, "a server filter must never hit the local filterAssets path")
+        #expect(fake.fetchAssetsForCallCount == 0, "nor the discovery path")
+        // The People/Geolocation + date args pass straight through.
+        #expect(fake.lastRemoteFilterGeocodingId == 768)
+        #expect(fake.lastRemoteFilterPersonId == nil)
+        #expect(fake.lastRemoteFilterStartTime == 1_400_000_000)
+        #expect(fake.lastRemoteFilterEndTime == nil)
+        #expect(fake.lastRemoteFilterSpace == .personal)
+    }
+
+    @Test func remoteFilterEstimatesReadinessFromShortPageAndStaysFlat() async {
+        let fake = FakePhotosCore()
+        fake.filterItemsRemoteResult = .success([asset(1), asset(2), asset(3)])
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+
+        await ds.setRemoteFilter(space: .personal, personId: 42, geocodingId: nil, startTime: nil, endTime: nil)
+        // A live-fetch source starts unseeded (no cheap local count), same as
+        // search/collection.
+        #expect(ds.totalCount == 0)
+        #expect(ds.isReady == false)
+        #expect(ds.dateSections == nil, "a server filter is a single flat section, never date-sectioned")
+
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        // A short page (3 < 50) means that was the last one: ready, count settles.
+        #expect(ds.isReady)
+        #expect(ds.totalCount == 3)
+        #expect(ds.dateSections == nil)
+    }
+
+    @Test func clearingARemoteFilterRestoresTheDateSectionedLibrary() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        fake.filterItemsRemoteResult = .success([asset(100)])
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+
+        await ds.setRemoteFilter(space: .personal, personId: nil, geocodingId: 768, startTime: nil, endTime: nil)
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.dateSections == nil)
+
+        // Clearing routes back to the space source (what clearQuickFilter does),
+        // exactly as clearing a local filter does.
+        await ds.setSpace(.personal)
+        #expect(ds.dateSections != nil, "the sectioned library returns after clearing the server filter")
+        #expect(ds.totalCount == 10, "back to the full library count")
+    }
+
+    @Test func remoteFilterKeepsItsGivenSpace() async {
+        let fake = FakePhotosCore()
+        fake.filterItemsRemoteResult = .success([asset(1)])
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setRemoteFilter(space: .personal, personId: 42, geocodingId: nil, startTime: nil, endTime: nil)
+        #expect(ds.space == .personal)
+    }
 }

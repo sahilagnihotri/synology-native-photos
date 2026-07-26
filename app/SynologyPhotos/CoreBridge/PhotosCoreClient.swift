@@ -114,6 +114,15 @@ actor PhotosCoreClient {
     func fetchAssetsFor(collection: DiscoveryCollection, offset: UInt32, limit: UInt32) async throws -> [Asset] {
         try await core.fetchAssetsFor(collection: collection, offset: offset, limit: limit)
     }
+    /// SERVER-side People/Geolocation + date filter over the library, fetched
+    /// live from the NAS on every page (no local index). Backs the library
+    /// Quick Filter whenever a People or Geolocation facet is chosen: those are
+    /// Browse.Item query params, not local-index columns, so they cannot go
+    /// through `filterAssets`. Only the set params are sent; file type stays a
+    /// local filter and is never forwarded here.
+    func filterItemsRemote(space: Space, startTime: Int64?, endTime: Int64?, personId: Int64?, geocodingId: Int64?, offset: UInt32, limit: UInt32) async throws -> [Asset] {
+        try await core.filterItemsRemote(space: space, startTime: startTime, endTime: endTime, personId: personId, geocodingId: geocodingId, offset: offset, limit: limit)
+    }
     func searchAssets(keyword: String, offset: UInt32, limit: UInt32) async throws -> [Asset] {
         try await core.searchAssets(keyword: keyword, offset: offset, limit: limit)
     }

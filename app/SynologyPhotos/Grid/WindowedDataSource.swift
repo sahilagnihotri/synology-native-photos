@@ -37,6 +37,13 @@ private enum FetchSource: Equatable {
     /// `filterCount`, not a page-size estimate. It stays a single flat section
     /// (no date-section headers or scrubber) while active.
     case filter(Space, FilterQuery)
+    /// The library's Quick Filter routed SERVER-side, for a People and/or
+    /// Geolocation cluster (optionally narrowed by a taken-at date range).
+    /// Unlike `.filter`, these clusters are Browse.Item query params with no
+    /// local index, so this is a live windowed fetch (`filterItemsRemote`) with
+    /// count/readiness estimated from short pages exactly like `.collection`/
+    /// `.search`, and a single flat section (no date headers).
+    case remoteFilter(Space, personId: Int64?, geocodingId: Int64?, startTime: Int64?, endTime: Int64?)
 }
 
 /// Bridges the NSCollectionView grid to the core's windowed reads.
@@ -90,6 +97,7 @@ final class WindowedDataSource {
         switch source {
         case .space(let s): return s
         case .filter(let s, _): return s
+        case .remoteFilter(let s, _, _, _, _): return s
         case .collection, .search(_, _): return .personal
         }
     }
@@ -155,7 +163,10 @@ final class WindowedDataSource {
                 isReady = false
                 dateSections = nil
             }
-        case .collection, .search:
+        case .collection, .search, .remoteFilter:
+            // No local count for a live-fetched source (discovery, search, or a
+            // server-side People/Geolocation filter): totalCount/isReady are
+            // driven by `loadWindow`'s page-size heuristic as pages arrive.
             break
         }
     }
@@ -199,6 +210,20 @@ final class WindowedDataSource {
                     minRating: query.minRating,
                     offset: UInt32(offset),
                     limit: UInt32(limit))
+            case .remoteFilter(let space, let personId, let geocodingId, let startTime, let endTime):
+                rows = try await client.filterItemsRemote(
+                    space: space,
+                    startTime: startTime,
+                    endTime: endTime,
+                    personId: personId,
+                    geocodingId: geocodingId,
+                    offset: UInt32(offset),
+                    limit: UInt32(limit))
+                // Same live-fetch, no-local-index estimate as `.collection`/
+                // `.search`: a full page means there may be more, a short page
+                // means this was the last one.
+                isReady = rows.count < limit
+                totalCount = max(totalCount, offset + rows.count)
             }
             for (i, asset) in rows.enumerated() { resident[offset + i] = asset }
             markPagesLoaded(coveringOffset: offset, limit: rows.count)
@@ -303,6 +328,22 @@ final class WindowedDataSource {
         source = .filter(space, query)
         resetResident()
         await refreshCount()
+    }
+
+    /// Switches to windowing `space`'s library narrowed SERVER-side by a People
+    /// (`personId`) and/or Geolocation (`geocodingId`) cluster, optionally with
+    /// a taken-at date range. Used when the Quick Filter's built query
+    /// `usesServerFilter`. Same reset discipline and live-fetch bookkeeping as
+    /// `setCollection`/`setSearch` (there is no cheap local count, so
+    /// `totalCount`/`isReady` start at zero/false and are populated by the first
+    /// `loadWindow`), and the grid stays a single flat section (no date
+    /// geometry). Callers `loadWindow` + re-apply the snapshot after this.
+    func setRemoteFilter(space: Space, personId: Int64?, geocodingId: Int64?, startTime: Int64?, endTime: Int64?) async {
+        source = .remoteFilter(space, personId: personId, geocodingId: geocodingId, startTime: startTime, endTime: endTime)
+        resetResident()
+        totalCount = 0
+        isReady = false
+        dateSections = nil
     }
 
     private func resetResident() {

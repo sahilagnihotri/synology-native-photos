@@ -2,17 +2,21 @@ import SwiftUI
 import PhotosCore
 
 /// The Quick Filter affordance on the library toolbar: a button that opens a
-/// popover with the three local-index facets (file type, date taken, rating).
-/// Applying narrows the library grid to the matching photos; clearing returns
-/// to the plain library. Mirrors `SearchFilterBarView`'s button+popover shape
-/// so the two filter controls read the same, but this one is local-only (no
-/// facet catalog to fetch) and applies to the space-backed library grid rather
-/// than to search results.
+/// popover with the local-index facets (file type, date taken, rating) plus the
+/// two server-side cluster facets (People, Geolocation). Applying narrows the
+/// library grid to the matching photos; clearing returns to the plain library.
+/// Mirrors `SearchFilterBarView`'s button+popover shape so the two filter
+/// controls read the same.
 ///
-/// People, Places, Tags, and Favorites are intentionally absent: those are
-/// server-side clusters reached from the sidebar, not local-index facets.
+/// Favorites is intentionally absent: there is no API read path for it on this
+/// NAS. When a People or Geolocation cluster is chosen the filter runs
+/// server-side and the local-only file-type/rating controls are disabled (they
+/// do not combine); the date range combines on either route.
 struct QuickFilterBarView: View {
     let model: QuickFilterModel
+    /// The client used to load the People/Geolocation cluster lists when the
+    /// popover opens.
+    let client: PhotosCoreClient
     /// Called when Apply is pressed, so the caller can switch the grid over to
     /// the built `FilterQuery`.
     let onApply: () -> Void
@@ -40,6 +44,10 @@ struct QuickFilterBarView: View {
             })
             .frame(width: 300)
             .padding()
+            // Load the People/Geolocation cluster lists each time the popover
+            // opens (the content view is recreated per presentation, so this
+            // runs on open), matching Synology's on-open population.
+            .task { await model.loadFacets(using: client) }
         }
     }
 }
@@ -63,6 +71,7 @@ private struct QuickFilterPopoverContent: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .disabled(model.usesServerFilter)
             .accessibilityIdentifier("quickfilter.filetype")
 
             Divider()
@@ -96,7 +105,35 @@ private struct QuickFilterPopoverContent: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
+            .disabled(model.usesServerFilter)
             .accessibilityIdentifier("quickfilter.rating")
+
+            // File type and rating are local-only facets that do not combine
+            // with a server-side People/Geolocation filter (the NAS `type` param
+            // is unreliable and rating has no server filter), so they are
+            // disabled while a person/place is chosen, with this short hint.
+            if model.usesServerFilter {
+                Text("File type and rating filter separately from People and Places.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("quickfilter.serverhint")
+            }
+
+            Divider()
+
+            Text("People").font(.headline)
+            clusterSection(
+                items: model.people.map { ($0.id, $0.name.isEmpty ? "Unnamed Person" : $0.name) },
+                selection: personBinding,
+                accessibilityId: "quickfilter.people")
+
+            Divider()
+
+            Text("Geolocation").font(.headline)
+            clusterSection(
+                items: model.places.map { ($0.id, $0.name.isEmpty ? "Unknown Place" : $0.name) },
+                selection: geocodingBinding,
+                accessibilityId: "quickfilter.geolocation")
 
             Divider()
 
@@ -108,6 +145,39 @@ private struct QuickFilterPopoverContent: View {
                     .keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier("quickfilter.apply")
             }
+        }
+    }
+
+    /// A single-select cluster list (People or Geolocation). Shows a loading
+    /// spinner until the catalog has been fetched, "No conditions available"
+    /// (matching Synology) once loaded but empty, or an "Any" + one-row-per-
+    /// cluster menu when populated. `items` are `(id, label)` pairs; `0` is the
+    /// "Any" sentinel the `selection` binding maps to `nil`.
+    @ViewBuilder
+    private func clusterSection(
+        items: [(Int64, String)],
+        selection: Binding<Int64>,
+        accessibilityId: String
+    ) -> some View {
+        if items.isEmpty {
+            if model.facetsLoaded {
+                Text("No conditions available")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("\(accessibilityId).empty")
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        } else {
+            Picker("", selection: selection) {
+                Text("Any").tag(Int64(0))
+                ForEach(items, id: \.0) { id, label in
+                    Text(label).tag(id)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .accessibilityIdentifier(accessibilityId)
         }
     }
 
@@ -160,6 +230,26 @@ private struct QuickFilterPopoverContent: View {
 
     private var endDateBinding: Binding<Date> {
         Binding(get: { model.endDate ?? Date() }, set: { model.endDate = $0 })
+    }
+
+    /// Selected People cluster id, with `0` standing in for Any so the menu can
+    /// carry a single non-optional selection (real cluster ids are always
+    /// positive). Mapped back to `nil` (no People constraint) when Any is
+    /// chosen, exactly like `ratingBinding`.
+    private var personBinding: Binding<Int64> {
+        Binding(
+            get: { model.personId ?? 0 },
+            set: { model.personId = $0 == 0 ? nil : $0 }
+        )
+    }
+
+    /// Selected Geolocation cluster id, same `0` = Any convention as
+    /// `personBinding`.
+    private var geocodingBinding: Binding<Int64> {
+        Binding(
+            get: { model.geocodingId ?? 0 },
+            set: { model.geocodingId = $0 == 0 ? nil : $0 }
+        )
     }
 }
 

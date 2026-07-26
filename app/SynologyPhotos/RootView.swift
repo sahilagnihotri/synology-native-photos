@@ -483,7 +483,7 @@ struct LibraryView: View {
                 // they are intentionally not folded in here. Hidden while a
                 // search is active, which has its own filter bar.
                 if activeSearch == nil, isLibraryGridRoute {
-                    QuickFilterBarView(model: env.quickFilter, onApply: {
+                    QuickFilterBarView(model: env.quickFilter, client: env.client, onApply: {
                         Task { await applyQuickFilter() }
                     }, onClear: {
                         Task { await clearQuickFilter() }
@@ -631,9 +631,13 @@ struct LibraryView: View {
         }
         if let activeFilter {
             // A Quick Filter overlays the plain library the same way an active
-            // search does. The filtered read is local and its count is exact, so
-            // `isReady` is true immediately: this resolves straight to `.grid`
-            // (nonzero) or `.empty` (no match), never a lingering spinner.
+            // search does. On the LOCAL route (file type / date / rating) the
+            // count is exact so `isReady` is true immediately, resolving
+            // straight to `.grid` (nonzero) or `.empty` (no match). On the
+            // SERVER route (People/Geolocation) readiness is estimated from
+            // short pages like search, so a full first page briefly shows the
+            // "Filtering..." spinner until the last page arrives, exactly as an
+            // active search does.
             switch LibraryContentRoute.route(
                 isComplete: env.dataSource.isReady, itemCount: env.dataSource.totalCount) {
             case .importing: return .importing(label: "Filtering...", accessibilityId: "quickfilter.progressview")
@@ -914,7 +918,21 @@ struct LibraryView: View {
             return
         }
         controller.clearSelection()
-        await env.dataSource.setFilter(space: env.spaceSelection.current, query: query)
+        // People/Geolocation are server-side Browse.Item clusters with no local
+        // index, so a query that `usesServerFilter` routes to a live remote
+        // window (person/geo + date only); everything else (file type, rating,
+        // date) stays on the local `filterAssets` path. Both keep the grid at
+        // the one stable `.grid` slot, so neither reintroduces the hosting bug.
+        if query.usesServerFilter {
+            await env.dataSource.setRemoteFilter(
+                space: env.spaceSelection.current,
+                personId: query.personId,
+                geocodingId: query.geocodingId,
+                startTime: query.takenAfter,
+                endTime: query.takenBefore)
+        } else {
+            await env.dataSource.setFilter(space: env.spaceSelection.current, query: query)
+        }
         await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
         await controller.applySnapshot()
         activeFilter = query

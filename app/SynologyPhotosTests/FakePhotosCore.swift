@@ -161,6 +161,12 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     /// the keyword-routing part of the fake does not also need to script
     /// filters.
     var searchAssetsFilteredResult: Result<[Asset], CoreError>?
+
+    /// Canned rows returned by `filterItemsRemote` (the server-side
+    /// People/Geolocation + date filter), windowed the same way as the other
+    /// live-fetch sources. A test scripts the whole result set here; the last
+    /// person/geo/date args seen are recorded below.
+    var filterItemsRemoteResult: Result<[Asset], CoreError> = .success([])
     /// Result for `fetchSearchFacets`. Defaults to an empty catalog.
     var searchFacetsResult: Result<SearchFacets, CoreError> = .success(
         SearchFacets(cameras: [], apertures: [], geocodings: [], mediaTypes: []))
@@ -183,9 +189,15 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var searchAssetsCallCount = 0
     private(set) var searchAssetsFilteredCallCount = 0
     private(set) var fetchSearchFacetsCallCount = 0
+    private(set) var filterItemsRemoteCallCount = 0
     private(set) var lastFetchAssetsForCollection: DiscoveryCollection?
     private(set) var lastSearchKeyword: String?
     private(set) var lastSearchFilters: SearchFilters?
+    private(set) var lastRemoteFilterSpace: Space?
+    private(set) var lastRemoteFilterPersonId: Int64?
+    private(set) var lastRemoteFilterGeocodingId: Int64?
+    private(set) var lastRemoteFilterStartTime: Int64?
+    private(set) var lastRemoteFilterEndTime: Int64?
 
     // MARK: - Call tracking
 
@@ -611,6 +623,24 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     func fetchSearchFacets() async throws -> SearchFacets {
         fetchSearchFacetsCallCount += 1
         return try searchFacetsResult.get()
+    }
+
+    func filterItemsRemote(
+        space: Space,
+        startTime: Int64?,
+        endTime: Int64?,
+        personId: Int64?,
+        geocodingId: Int64?,
+        offset: UInt32,
+        limit: UInt32
+    ) async throws -> [Asset] {
+        filterItemsRemoteCallCount += 1
+        lastRemoteFilterSpace = space
+        lastRemoteFilterPersonId = personId
+        lastRemoteFilterGeocodingId = geocodingId
+        lastRemoteFilterStartTime = startTime
+        lastRemoteFilterEndTime = endTime
+        return try window(try filterItemsRemoteResult.get(), offset: offset, limit: limit)
     }
 
     /// Shared windowing helper matching `fetchAssets`' own offset/limit
