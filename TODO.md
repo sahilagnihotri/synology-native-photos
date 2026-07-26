@@ -97,13 +97,14 @@ Bigger bets:
 
 ## Distribution
 
-- [ ] `make dmg` produces a working installer but the app is Apple-Development
-  signed, not notarized, so other Macs need a right-click -> Open the first
-  time. For real distribution: get a "Developer ID Application" cert, build the
-  dmg with `CODE_SIGN_IDENTITY="Developer ID Application: ..."`, then notarize
-  with `xcrun notarytool submit ... --wait` and `xcrun stapler staple` the dmg.
-  The script already accepts the signing env overrides; only the notarytool
-  step needs adding.
+- Installer builds two ways (both call the shared `dmg-from-app.sh`, see
+  `Fixed.md`): CLI `make dmg`, or the Xcode `Installer` scheme (Build it).
+- [ ] The app is Apple-Development signed, not notarized, so other Macs need a
+  right-click -> Open the first time. For real distribution: get a "Developer ID
+  Application" cert, build the dmg with `CODE_SIGN_IDENTITY="Developer ID
+  Application: ..."`, then notarize with `xcrun notarytool submit ... --wait`
+  and `xcrun stapler staple` the dmg. The scripts already accept the signing env
+  overrides; only the notarytool step needs adding.
 
 ## Build infra
 

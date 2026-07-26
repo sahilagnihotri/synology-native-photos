@@ -4,12 +4,21 @@ Completed work with commit hashes. Newest at top.
 
 ## Session 2026-07-26 (cont.): DMG installer
 
-- `scripts/package/dmg.sh` + `make dmg` build a distributable
-  `dist/SynologyPhotos-<version>.dmg` (Release `.app` next to an `/Applications`
-  alias, the standard drag-to-install layout). Zero extra tooling (uses
-  `hdiutil`), self-healing (rebuilds the xcframework first, regenerates the
-  Xcode project if missing), version derived from the latest git tag. `dist/`
-  is gitignored.
+- Two ways to build a distributable `dist/SynologyPhotos-<version>.dmg` (Release
+  `.app` next to an `/Applications` alias, the standard drag-to-install layout),
+  both sharing ONE packaging source of truth so they never drift:
+  - CLI: `make dmg` / `scripts/package/dmg.sh` (builds the Release app with
+    xcodebuild, then packages).
+  - Xcode: an **`Installer` aggregate target + scheme** (`aggregateTargets` in
+    `project.yml`). Select the Installer scheme and Build; it depends on the app
+    target so Xcode builds the app with its OWN build (no nested xcodebuild
+    hang), then a build phase packages it. Defaults to Release.
+  - Shared helper `scripts/package/dmg-from-app.sh` does the staging,
+    `/Applications` alias, signing-team gate, and `hdiutil create`; both entry
+    points call it on an app they already built.
+- Zero extra tooling (uses `hdiutil`); `dmg.sh` is self-healing (rebuilds the
+  xcframework first, regenerates the Xcode project if missing); version derived
+  from the latest git tag. `dist/` is gitignored.
 - Signing pinned to the Agnihotri AS team (`5W67TF3579`) explicitly in the
   script, NOT the Hexagon work identity that is also installed on this machine
   (it belongs to a different team, so it is never eligible once this team is

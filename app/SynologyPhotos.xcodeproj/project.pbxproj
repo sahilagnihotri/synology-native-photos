@@ -6,6 +6,23 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXAggregateTarget section */
+		48B186E2CBD566B9C8D53F03 /* Installer */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = 5E9759D14C9F9624ED45D8D3 /* Build configuration list for PBXAggregateTarget "Installer" */;
+			buildPhases = (
+				719AAD9397536988E1020847 /* Package DMG */,
+			);
+			dependencies = (
+				3DCC6382509F5C051E48854B /* PBXTargetDependency */,
+			);
+			name = Installer;
+			packageProductDependencies = (
+			);
+			productName = Installer;
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXBuildFile section */
 		0020BEA65B5CB4AFECDCA917 /* PhotosCoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89AD5885314385A5C5FAA5A8 /* PhotosCoreClient.swift */; };
 		02F8DDE00661AEBACB2D9A37 /* PhotoSelectionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECC36AA88795AF34E3072A20 /* PhotoSelectionModel.swift */; };
@@ -127,6 +144,13 @@
 
 /* Begin PBXContainerItemProxy section */
 		04AE6FE6D8AB4DA6A4C1D2B1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 24B8101E6F1D4E0E8EECA08C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BC07A7F7541E137012CC5D87;
+			remoteInfo = SynologyPhotos;
+		};
+		33068A88E4559BFA9282BF14 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 24B8101E6F1D4E0E8EECA08C /* Project object */;
 			proxyType = 1;
@@ -720,6 +744,10 @@
 						DevelopmentTeam = 5W67TF3579;
 						ProvisioningStyle = Automatic;
 					};
+					48B186E2CBD566B9C8D53F03 = {
+						DevelopmentTeam = 5W67TF3579;
+						ProvisioningStyle = Automatic;
+					};
 					709E6DD897BE5E0C0C217D93 = {
 						DevelopmentTeam = 5W67TF3579;
 						ProvisioningStyle = Automatic;
@@ -753,6 +781,7 @@
 				BC07A7F7541E137012CC5D87 /* SynologyPhotos */,
 				146887E3C60031978D467DE4 /* SynologyPhotosTests */,
 				709E6DD897BE5E0C0C217D93 /* SynologyPhotosUITests */,
+				48B186E2CBD566B9C8D53F03 /* Installer */,
 			);
 		};
 /* End PBXProject section */
@@ -787,6 +816,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
 			shellScript = "\"${SRCROOT}/../scripts/xcodegen/ensure-xcframework.sh\"\n";
+		};
+		719AAD9397536988E1020847 /* Package DMG */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Package DMG";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/../scripts/package/dmg-from-app.sh\" \"${BUILT_PRODUCTS_DIR}/SynologyPhotos.app\"\n";
 		};
 		D55E102E0217C80B5B2063BA /* Generate GitVersion.swift */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -958,6 +1006,11 @@
 			target = 7F407C9B8D433D5104E6977A /* PhotosCore */;
 			targetProxy = CE34357C8D57C010D692EE63 /* PBXContainerItemProxy */;
 		};
+		3DCC6382509F5C051E48854B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BC07A7F7541E137012CC5D87 /* SynologyPhotos */;
+			targetProxy = 33068A88E4559BFA9282BF14 /* PBXContainerItemProxy */;
+		};
 		6164F94B2CE11107FFE40603 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 7F407C9B8D433D5104E6977A /* PhotosCore */;
@@ -981,6 +1034,12 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		03C9CBA2AC6AF61F1F2EE019 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Debug;
+		};
 		1372EB0856DBB6BCAA7A432C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1215,6 +1274,12 @@
 			};
 			name = Release;
 		};
+		DD1096A7DC15D6EB45C697C9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Release;
+		};
 		E9014DF16250D6950A03121F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1329,6 +1394,15 @@
 			buildConfigurations = (
 				1372EB0856DBB6BCAA7A432C /* Debug */,
 				67374489E2E24B24C0441D33 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5E9759D14C9F9624ED45D8D3 /* Build configuration list for PBXAggregateTarget "Installer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				03C9CBA2AC6AF61F1F2EE019 /* Debug */,
+				DD1096A7DC15D6EB45C697C9 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
