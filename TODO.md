@@ -28,12 +28,68 @@ timeline date-section headers + date scrubber, and Quick Filter (file type / dat
   with a fixed offset) as a follow-up.
 - [ ] Date scrubber drag-to-jump: read-only indicator shipped; add drag-to-jump
   (the prefix-sum geometry `GridDateSections`/`dayStart(forAbsolute:)` is in place).
-- [ ] Fold People / Geolocation / Favorites into the Quick Filter (currently via
-  sidebar collections only); needs per-item favorite plus a way to combine cluster
-  facets with the local compound filter.
+- [ ] Favorites in the Quick Filter: NOT feasible on this NAS (no server read
+  filter and no local `favorite` column). People + Geolocation landed (see
+  `Fixed.md`). Revisit only if a future DSM exposes a favorite filter.
 - [ ] Code hygiene: remove the now-dead trash-album methods from the core
   (`deleteToTrash`/`restoreFromTrash`/`fetchTrash`/`trashCount`/`reconcileTrash`/
   `ensureTrashAlbum` and the app-trash `permanentlyDelete`), superseded by real delete.
+
+## Map view (feedback 2026-07-26, confirmed feasible)
+
+- [ ] Apple Photos-style Map: cluster photos on a `MapKit` map by their GPS
+  coordinates; tap a cluster to see those photos in the grid/viewer. Confirmed
+  feasible against the real NAS: 88 of 165 items carry `additional=["gps"]` with
+  `{latitude, longitude}`; `additional=["address"]` gives country/city.
+  `Browse.Geocoding` regions carry NO coordinates, so per-photo lat/lon is the
+  route (not the geocoding cluster). Needs: expose per-asset gps on `Asset`
+  through the core/bindings, a Map sidebar destination, `MKAnnotation`
+  clustering, and tap-to-filter into the existing grid.
+
+## UI/UX parity with Apple Photos (adversarial review 2026-07-26)
+
+Full report: `documentation/reviews/2026-07-26-ux-adversarial-review.md`.
+Prioritized below. Quick wins are cheap and high-signal; do a batch of them
+alongside the Map view.
+
+Quick wins:
+- [ ] Real menu bar (File/Edit/Image/View) surfacing the existing grid/viewer
+  shortcuts so they are discoverable, not just typeable (review #1).
+- [ ] Right-click context menus on grid cells and in the viewer (Delete / Get
+  Info / Share / Rotate) (review #2).
+- [ ] Move the custom header `HStack` controls into a real window `.toolbar`;
+  move Sign Out into an account menu (review #3).
+- [ ] Circular People tiles (keep albums/places as rounded rects) (review #4).
+- [ ] Hide or clearly gate the dead "Subjects" sidebar section (its tiles drill
+  into nothing on this NAS) (review #5).
+- [ ] Consolidate the two Filter buttons (Quick vs Search) into one; drop the
+  non-functional Search facet browser (review #6).
+- [ ] Unify grid selection visuals on the checkmark-circle badge already used in
+  Recently Deleted (review #7).
+- [ ] Grid cell + zoom-slider `accessibilityLabel`s for VoiceOver (review #8).
+
+Medium:
+- [ ] Detail filmstrip + trackpad swipe/scroll paging (review #11).
+- [ ] Grid->detail zoom transition (matchedGeometry) instead of opacity fade
+  (review #12).
+- [ ] Grid pinch-to-zoom, scroll-to-now / jump-to-top, Home/End; scrubber
+  drag-to-jump (review #13, overlaps the scrubber follow-up below).
+- [ ] Section headers carry a location line + select-whole-section (pairs with
+  Map/geocoding) (review #14).
+- [ ] Appearance-adaptive info panel (or `.popover`) with a mini-map (review #16).
+- [ ] Crop aspect presets + straighten dial + flip (review #17).
+- [ ] Dynamic Type in the AppKit header/scrubber (review #18).
+- [ ] Press-and-hold Live Photo playback; grid hover-scrub (review #15).
+- [ ] Inline Favorite/rating and Share/export once the write API lands
+  (review #9, #10, gated on mutations).
+
+Bigger bets:
+- [ ] Years / Months / Days / All Photos browsing with the pinch transition
+  (review #19); aspect-ratio mosaic layout (review #20).
+- [ ] Albums create/organize + drag-to-album (review #21; also Phase 2 below).
+- [ ] Import/upload UI for migrating off iCloud (review #24).
+- [ ] Duplicates detection (review #23); Memories/For You (review #22); People
+  naming/merge, captions, batch adjust, slideshow (review #25).
 
 ## Performance (feedback 2026-07-26)
 

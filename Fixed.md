@@ -2,6 +2,26 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-07-26: People + Geolocation Quick Filter
+
+- The library Quick Filter now offers People and Geolocation facets alongside
+  file type / date / rating. These are server-side `Browse.Item` clusters with
+  no local-index column, so selecting one routes the grid through a live remote
+  fetch (`filterItemsRemote`) rather than the local `filterAssets` path; the
+  popover loads both cluster lists on open, disables the local-only file-type
+  and rating controls while a person/place is chosen (they do not combine with
+  the server query), and combines the date range on either route. Core query
+  builder + facade `2e7f96c` (6 `filter_items_mock` tests pin the wire shape:
+  person-only/geo-only omit unset params, all-set omits the unreliable `type`,
+  envelope errors map through); app wiring `206f7d1` (4 new
+  `WindowedDataSource` remote-filter tests). Favorites stays out: no server read
+  filter and no local column on this NAS.
+- Fixed `scripts/test.sh` to find the Cargo workspace at the repo root (it was
+  looking for `core/Cargo.toml` and silently skipping the whole Rust suite),
+  `42ad949`.
+- Full suite green after the change: core workspace all passing (incl. the 6 new
+  filter tests); app 446 tests in 46 suites, `** TEST SUCCEEDED **`.
+
 ## Session 2026-07-25 (cont.): media enrichment, viewer polish, real delete
 
 - **Media model enrichment** (schema v3): Live Photo `.MOV` clips now classify as
