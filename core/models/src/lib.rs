@@ -27,8 +27,13 @@ pub fn media_kind_from_filename(filename: &str) -> MediaKind {
     }
 }
 
+/// `Preview` is the largest of Synology's precomputed sizes and, crucially, is
+/// generated first: a freshly imported or restored photo often has `preview`
+/// `ready` while `sm`/`m`/`xl` are still `converting`. It is the fallback the
+/// grid uses when a requested size is not yet available, so a cell shows the
+/// real image instead of a placeholder while the smaller sizes catch up.
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ThumbnailSize { Sm, M, Xl }
+pub enum ThumbnailSize { Sm, M, Xl, Preview }
 
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionState { Valid, Expired, Invalid }

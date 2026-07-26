@@ -19,6 +19,11 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     var capabilitiesResult: Result<[ApiCapability], CoreError> = .success([])
     var thumbnailResult: Result<ThumbnailData, CoreError> =
         .success(ThumbnailData(cachedPath: "/tmp/fake.jpg", bytes: Data()))
+    /// Per-size override for `thumbnailResult`, keyed by `ThumbnailSize`.
+    /// Checked before the per-asset and default results, so a test can make one
+    /// size fail (e.g. `sm` still `converting`) while another succeeds (`preview`
+    /// ready), exercising the cache's preview fallback.
+    var thumbnailResultBySize: [ThumbnailSize: Result<ThumbnailData, CoreError>] = [:]
     var downloadResult: Result<String, CoreError> = .success("/tmp/original.jpg")
 
     /// Result for `videoPlaybackSource`. Defaults to a plausible LocalFile
@@ -453,7 +458,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         // pins the result to the asset this call was made for even if
         // another asset's call reassigns the shared `thumbnailResult` var
         // while this call is still asleep.
-        let result = thumbnailResultByAssetId[unitId] ?? thumbnailResult
+        let result = thumbnailResultBySize[size] ?? thumbnailResultByAssetId[unitId] ?? thumbnailResult
         if delay > .zero {
             // Deliberately a *detached* sleep, not a plain `try? await
             // Task.sleep(for: delay)` inline here. `PhotoCellView` cancels

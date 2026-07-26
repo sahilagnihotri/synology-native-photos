@@ -69,6 +69,11 @@ actor ThumbnailCache {
         case .sm: return 240
         case .m: return 320
         case .xl: return 1280
+        // `preview` is only ever used as a fallback for a requested size that
+        // is still `converting`; downsample it to the same 1280 ceiling as xl
+        // so a grid cell showing it does not decode a needlessly large image.
+        case .preview: return 1280
+        @unknown default: return 320
         }
     }
 
@@ -122,28 +127,44 @@ actor ThumbnailCache {
             return hit.image
         }
 
-        let data: ThumbnailData
-        do {
-            // Must pass asset.unitId, not asset.id: the NAS thumbnail
-            // endpoint keys on unit_id (additional.thumbnail.unit_id from
-            // the browse response), and sending the browse item id instead
-            // returns an html error page that ImageIO cannot decode.
-            data = try await client.thumbnail(
-                space: space, unitId: asset.unitId, cacheKey: asset.cacheKey, size: size)
-        } catch {
-            return nil
+        // Try the requested size first. If the NAS is still generating it
+        // (the fetch throws on the HTTP-404 / error-page it returns while
+        // `converting`) OR the bytes fail to decode (e.g. a stale error page
+        // cached on disk from before that was fixed), fall back to `preview`,
+        // which Synology generates first and is usually `ready` when the
+        // smaller sizes are not. Cache the result under the REQUESTED size's
+        // key so the fallback is transparent to the caller.
+        var decoded = await fetchAndDecode(space: space, asset: asset, size: size)
+        if decoded == nil, size != .preview {
+            decoded = await fetchAndDecode(space: space, asset: asset, size: .preview)
         }
-
-        let maxPixel = Self.maxPixel(for: size)
-        let path = data.cachedPath
-        let decoded: CGImage? = await Task.detached(priority: .utility) {
-            ImageDownsample.downsample(fileURL: URL(fileURLWithPath: path), maxPixel: maxPixel)
-        }.value
 
         if let image = decoded {
             memory.setObject(CacheBox(image), forKey: nsKey(key), cost: Self.byteCost(image))
         }
         return decoded
+    }
+
+    /// Fetches one size from the core and decodes it, returning `nil` if either
+    /// step fails (a not-yet-generated size throws; an error page fails to
+    /// decode). No caching here: the caller owns the memory tier and keys it on
+    /// the originally requested size.
+    private func fetchAndDecode(space: Space, asset: Asset, size: ThumbnailSize) async -> CGImage? {
+        let data: ThumbnailData
+        do {
+            // Must pass asset.unitId, not asset.id: the NAS thumbnail endpoint
+            // keys on unit_id (additional.thumbnail.unit_id from the browse
+            // response); sending the browse item id returns an html error page.
+            data = try await client.thumbnail(
+                space: space, unitId: asset.unitId, cacheKey: asset.cacheKey, size: size)
+        } catch {
+            return nil
+        }
+        let maxPixel = Self.maxPixel(for: size)
+        let path = data.cachedPath
+        return await Task.detached(priority: .utility) {
+            ImageDownsample.downsample(fileURL: URL(fileURLWithPath: path), maxPixel: maxPixel)
+        }.value
     }
 
     /// Drops cached entries for `assetId` so the next lookup re-fetches from

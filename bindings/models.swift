@@ -2926,12 +2926,20 @@ extension Space: Equatable, Hashable {}
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * `Preview` is the largest of Synology's precomputed sizes and, crucially, is
+ * generated first: a freshly imported or restored photo often has `preview`
+ * `ready` while `sm`/`m`/`xl` are still `converting`. It is the fallback the
+ * grid uses when a requested size is not yet available, so a cell shows the
+ * real image instead of a placeholder while the smaller sizes catch up.
+ */
 
 public enum ThumbnailSize {
     
     case sm
     case m
     case xl
+    case preview
 }
 
 
@@ -2955,6 +2963,8 @@ public struct FfiConverterTypeThumbnailSize: FfiConverterRustBuffer {
         
         case 3: return .xl
         
+        case 4: return .preview
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -2973,6 +2983,10 @@ public struct FfiConverterTypeThumbnailSize: FfiConverterRustBuffer {
         
         case .xl:
             writeInt(&buf, Int32(3))
+        
+        
+        case .preview:
+            writeInt(&buf, Int32(4))
         
         }
     }

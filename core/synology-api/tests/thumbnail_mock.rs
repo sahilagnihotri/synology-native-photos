@@ -13,6 +13,7 @@ fn size_param_maps_sizes() {
     assert_eq!(size_param(ThumbnailSize::Sm), "sm");
     assert_eq!(size_param(ThumbnailSize::M), "m");
     assert_eq!(size_param(ThumbnailSize::Xl), "xl");
+    assert_eq!(size_param(ThumbnailSize::Preview), "preview");
 }
 
 #[tokio::test]

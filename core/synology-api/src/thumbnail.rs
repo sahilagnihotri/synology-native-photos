@@ -41,6 +41,7 @@ pub fn size_param(size: ThumbnailSize) -> &'static str {
         ThumbnailSize::Sm => "sm",
         ThumbnailSize::M => "m",
         ThumbnailSize::Xl => "xl",
+        ThumbnailSize::Preview => "preview",
     }
 }
 

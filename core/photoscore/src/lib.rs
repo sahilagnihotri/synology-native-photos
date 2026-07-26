@@ -1193,6 +1193,7 @@ fn size_tag(size: ThumbnailSize) -> &'static str {
         ThumbnailSize::Sm => "sm",
         ThumbnailSize::M => "m",
         ThumbnailSize::Xl => "xl",
+        ThumbnailSize::Preview => "preview",
     }
 }
 

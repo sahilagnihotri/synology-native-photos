@@ -102,7 +102,26 @@ struct ThumbnailCacheTests {
         let cache = ThumbnailCache(client: PhotosCoreClient(core: fake))
         let img = await cache.image(space: .personal, asset: asset(id: 42), size: .sm)
         #expect(img == nil)
-        #expect(fake.thumbnailCallCount == 1)
+        // The requested size failed, so the cache also tries the `preview`
+        // fallback (which fails too here) before giving up: two attempts, no
+        // throw. When only the small sizes are still `converting` on a real
+        // NAS, that second attempt is what fills the cell with the ready
+        // preview instead of a blank placeholder.
+        #expect(fake.thumbnailCallCount == 2)
+    }
+
+    @Test func fallsBackToPreviewWhenTheRequestedSizeFails() async {
+        // The requested size is still generating (fails), but preview is ready.
+        let fake = FakePhotosCore()
+        let previewPath = writePNG(width: 1280, height: 960)
+        defer { try? FileManager.default.removeItem(atPath: previewPath) }
+        fake.thumbnailResultBySize = [
+            .sm: .failure(.Storage(message: "converting")),
+            .preview: .success(ThumbnailData(cachedPath: previewPath, bytes: Data())),
+        ]
+        let cache = ThumbnailCache(client: PhotosCoreClient(core: fake))
+        let img = await cache.image(space: .personal, asset: asset(id: 7), size: .sm)
+        #expect(img != nil, "a ready preview must fill the cell when sm is still converting")
     }
 
     @Test func invalidateClearsMemorySoNextLookupRefetches() async {
