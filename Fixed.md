@@ -2,6 +2,34 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-07-26 (cont.): Map view, UX quick wins, map-cluster-into-grid
+
+- **Map view.** New `Map` sidebar destination plotting located photos on an
+  `MKMapView` with clustering (`globe.americas` glyph). Core exposes per-asset
+  GPS: `Asset.latitude`/`longitude` parsed from Browse.Item `additional.gps`,
+  schema v4 (`requires_recrawl`, so first launch re-crawls to populate coords),
+  a `located_assets(space)` query + facade (`697dc01`); Swift test-double
+  fallout `68d4f0b`. App map + sidebar + routing `71a7a91`. Re-verified against
+  the real NAS: 165 items, 88 located, correct lat/lon at Browse.Item v2.
+- **Map clusters open in the REAL grid.** Tapping a cluster/pin now routes those
+  photos into the shared library grid via a new `WindowedDataSource.fixed`
+  source (`73353ec`), so they inherit selection, real delete (recycle + undo),
+  the full detail viewer (stills + inline video), and context menus, replacing
+  the earlier lightweight sheet/`MapPhotoDetailView`. Back control returns to the
+  pins; any sidebar row exits; deleting inside a cluster prunes the removed items
+  in place (`DeleteController.lastDeletedIds`). `6d0e07f`.
+- **Apple Photos UX quick wins** (`7acf512`/`d7c5d9b`/`494b017`/`fbbf0ce`/
+  `2322c48`): circular People tiles; Subjects section hidden (dead on this NAS,
+  case kept); native menu bar (Undo Delete / Select All / Delete / Zoom /
+  Show-Hide Sidebar & Info) via `FocusedValues` + responder chain; right-click
+  context menus on grid/viewer/recycle bin; header controls moved into a native
+  window `.toolbar` with Sign Out relocated to an Account menu.
+- **Date scrubber constraint spam** silenced: its 0x0-at-creation frame fought
+  the label's required insets; made the trailing/bottom insets non-required
+  (`99afb50`).
+- Also fixed `scripts/test.sh` to find the Cargo workspace at the repo root
+  (`42ad949`). Full app suite green throughout: 460 -> 463 tests, 48 suites.
+
 ## Session 2026-07-26: People + Geolocation Quick Filter
 
 - The library Quick Filter now offers People and Geolocation facets alongside

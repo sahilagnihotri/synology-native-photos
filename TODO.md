@@ -35,33 +35,41 @@ timeline date-section headers + date scrubber, and Quick Filter (file type / dat
   (`deleteToTrash`/`restoreFromTrash`/`fetchTrash`/`trashCount`/`reconcileTrash`/
   `ensureTrashAlbum` and the app-trash `permanentlyDelete`), superseded by real delete.
 
-## Map view (feedback 2026-07-26, confirmed feasible)
+## Bugs to fix (feedback 2026-07-26)
 
-- [ ] Apple Photos-style Map: cluster photos on a `MapKit` map by their GPS
-  coordinates; tap a cluster to see those photos in the grid/viewer. Confirmed
-  feasible against the real NAS: 88 of 165 items carry `additional=["gps"]` with
-  `{latitude, longitude}`; `additional=["address"]` gives country/city.
-  `Browse.Geocoding` regions carry NO coordinates, so per-photo lat/lon is the
-  route (not the geocoding cluster). Needs: expose per-asset gps on `Asset`
-  through the core/bindings, a Map sidebar destination, `MKAnnotation`
-  clustering, and tap-to-filter into the existing grid.
+- [ ] **Places drill-in shows empty.** Clicking a Place tile (e.g. "Rjukan,
+  Vestfold og Telemark, 1 item") opens an empty grid. Only 1 place lists now
+  (was ~22 earlier). NOT yet root-caused (needs a NAS probe; deferred under the
+  session limit). The drill-in uses `fetch_assets_for(Place(geocoding_id))` ->
+  `list_items_filtered` with `("geocoding_id", id)` at Browse.Item v2 (same
+  param+version the geo filter verified as working: `geocoding_id=768 -> 1
+  item`). Leading hypothesis: the `geocoding_id` on the Places TILE (from
+  `SYNO.Foto.Browse.Geocoding` / `list_places`) is a different hierarchy level
+  or id than the item filter matches, so the count (from Geocoding) and the
+  item list (from Browse.Item) disagree. NOTE only `fetch_assets_for(Person)`
+  was ever verified to return photos; Place drill-in may never have worked.
+  Probe plan (with the saved device-token session): `list_places` -> take an id
+  -> `list_items_filtered(Place(id))` vs `filter_items(geocoding_id=id)`; if the
+  filter returns rows but the tile id doesn't match, fix the id mapping in
+  `list_places`/the tile; also check whether Geocoding needs a level/parent
+  param to list leaf regions.
+
+## Map view (DONE 2026-07-26)
+
+Shipped (see `Fixed.md`): per-asset GPS in the core (schema v4, re-crawl),
+`MKMapView` clustering Map destination, and tapping a cluster/pin opens those
+photos in the REAL library grid (fixed data source) with full select/delete/
+viewer/context-menu reuse. Remaining polish:
+- [ ] Optional: thumbnails on map pins (currently marker pins); address/city
+  labels on section headers and the info panel (`additional=["address"]`).
 
 ## UI/UX parity with Apple Photos (adversarial review 2026-07-26)
 
 Full report: `documentation/reviews/2026-07-26-ux-adversarial-review.md`.
-Prioritized below. Quick wins are cheap and high-signal; do a batch of them
-alongside the Map view.
+Prioritized below. The first quick-wins batch (menu bar, context menus, native
+toolbar, circular People tiles, hidden Subjects; review #1-#5) shipped
+2026-07-26, see `Fixed.md`. Remaining quick wins:
 
-Quick wins:
-- [ ] Real menu bar (File/Edit/Image/View) surfacing the existing grid/viewer
-  shortcuts so they are discoverable, not just typeable (review #1).
-- [ ] Right-click context menus on grid cells and in the viewer (Delete / Get
-  Info / Share / Rotate) (review #2).
-- [ ] Move the custom header `HStack` controls into a real window `.toolbar`;
-  move Sign Out into an account menu (review #3).
-- [ ] Circular People tiles (keep albums/places as rounded rects) (review #4).
-- [ ] Hide or clearly gate the dead "Subjects" sidebar section (its tiles drill
-  into nothing on this NAS) (review #5).
 - [ ] Consolidate the two Filter buttons (Quick vs Search) into one; drop the
   non-functional Search facet browser (review #6).
 - [ ] Unify grid selection visuals on the checkmark-circle badge already used in
