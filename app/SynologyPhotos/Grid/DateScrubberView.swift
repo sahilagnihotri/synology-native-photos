@@ -31,15 +31,27 @@ final class DateScrubberView: NSView {
         label.alignment = .center
         addSubview(label)
 
+        // The label's trailing/bottom insets are the ones that define the
+        // view's size (leading/top only pin its origin). This view is a
+        // frame-positioned floating overlay, so it exists at a 0x0 frame for a
+        // beat before it is sized, during which those two required insets can't
+        // fit and AppKit logs a constraint conflict against the autoresizing
+        // width==0/height==0. Making just those two non-required lets AppKit
+        // yield them silently during that transient; once the real frame lands
+        // the label sits at its full 10/5 insets exactly as before.
+        let trailingInset = label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10)
+        let bottomInset = label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5)
+        trailingInset.priority = .defaultHigh
+        bottomInset.priority = .defaultHigh
         NSLayoutConstraint.activate([
             background.leadingAnchor.constraint(equalTo: leadingAnchor),
             background.trailingAnchor.constraint(equalTo: trailingAnchor),
             background.topAnchor.constraint(equalTo: topAnchor),
             background.bottomAnchor.constraint(equalTo: bottomAnchor),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            trailingInset,
             label.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+            bottomInset,
         ])
         setAccessibilityIdentifier("grid.scrubber")
     }
