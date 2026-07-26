@@ -26,6 +26,10 @@ enum SidebarSelectionRoute: Equatable {
     /// Delete Permanently actions. The recycle bin is not space-scoped, so
     /// this case carries no `Space`.
     case recentlyDeleted
+    /// The Map view: located photos plotted and clustered on a map. Its own
+    /// full view (not the photo grid), so like `.recentlyDeleted` it carries
+    /// no `Space` and is not grid-backed.
+    case map
 }
 
 /// Which discovery-browse tile grid is being shown. A separate type from
@@ -57,6 +61,7 @@ extension SidebarItem {
         case .subjects: return .discoveryTiles(.subjects)
         case .tags: return .discoveryTiles(.tags)
         case .favorites: return .discoveryGrid(.favorites)
+        case .map: return .map
         case .recentlyDeleted: return .recentlyDeleted
         }
     }

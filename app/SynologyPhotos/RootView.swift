@@ -299,6 +299,13 @@ struct LibraryView: View {
                 // it, but there is no windowed data source to switch here.
                 tilesModel = nil
                 controller.clearSelection()
+            case .map:
+                // The Map is its own full view (MapDestinationView), not the
+                // photo grid, and loads its located assets itself on appear.
+                // Same as the recycle bin: clear the grid selection, but there
+                // is no windowed data source to switch or crawl to start.
+                tilesModel = nil
+                controller.clearSelection()
             }
         }
         .onChange(of: drilledInCollection) { _, newValue in
@@ -583,6 +590,18 @@ struct LibraryView: View {
                 RecentlyDeletedView(model: recentlyDeletedModel, client: env.client) {
                     await reconcileAndReloadGrid()
                 }
+            case .map:
+                // The Map is its own full view: it plots located photos, loads
+                // itself on appear (and on space change), and opens the photos
+                // behind a tapped cluster/pin in the app's detail stack. Like
+                // the recycle bin it is not the photo grid and has no crawl.
+                MapDestinationView(
+                    client: env.client,
+                    space: env.spaceSelection.current,
+                    thumbnailCache: env.thumbnailCache,
+                    tempCache: env.tempCache,
+                    originalCache: env.originalCache,
+                    synoToken: currentSynoToken())
             }
         }
     }
@@ -602,6 +621,7 @@ struct LibraryView: View {
         case failed(message: String, retry: () async -> Void)
         case discoveryTiles
         case recentlyDeleted
+        case map
     }
 
     /// Which empty state the content area shows when a grid-backed route has no
@@ -680,6 +700,8 @@ struct LibraryView: View {
             }
         case .recentlyDeleted:
             return .recentlyDeleted
+        case .map:
+            return .map
         }
     }
 
@@ -740,7 +762,7 @@ struct LibraryView: View {
         if activeSearch != nil { return true }
         switch currentRoute {
         case .grid, .discoveryGrid: return true
-        case .discoveryTiles, .recentlyDeleted: return false
+        case .discoveryTiles, .recentlyDeleted, .map: return false
         }
     }
 
@@ -963,9 +985,9 @@ struct LibraryView: View {
             await switchSpace(to: space)
         case .discoveryGrid(let collection):
             await switchCollection(to: collection)
-        case .discoveryTiles, .recentlyDeleted:
-            // Neither a tile grid nor the recycle bin has a photo data source
-            // to restore: both fetch their own contents independently.
+        case .discoveryTiles, .recentlyDeleted, .map:
+            // None of a tile grid, the recycle bin, or the Map has a photo data
+            // source to restore: each fetches its own contents independently.
             break
         }
     }

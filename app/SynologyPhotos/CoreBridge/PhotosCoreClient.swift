@@ -44,6 +44,14 @@ actor PhotosCoreClient {
     /// network; counts sum to `assetCount` and line up with `fetchAssets`.
     func dateHistogram(space: Space) throws -> [DayCount] { try core.dateHistogram(space: space) }
     func fetchLocalAlbums(space: Space) throws -> [Album] { try core.fetchLocalAlbums(space: space) }
+    /// Local-only read of every asset in `space` that carries a GPS coordinate
+    /// (newest first), backing the Map view. A cheap local-index query like
+    /// `fetchAssets`; no network. The GPS columns are populated by the crawl,
+    /// so this can briefly return nothing right after an upgrade that
+    /// re-crawls, until lat/lon repopulate.
+    func locatedAssets(space: Space) throws -> [Asset] {
+        try core.locatedAssets(space: space)
+    }
     func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize) async throws -> ThumbnailData {
         try await core.thumbnail(space: space, unitId: unitId, cacheKey: cacheKey, size: size)
     }

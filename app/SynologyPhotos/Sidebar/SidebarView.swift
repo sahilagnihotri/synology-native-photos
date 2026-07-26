@@ -25,6 +25,12 @@ struct SidebarView: View {
                         .tag(item)
                 }
             }
+            Section {
+                ForEach(SidebarSections.map, id: \.self) { item in
+                    Label(item.title, systemImage: item.systemImage)
+                        .tag(item)
+                }
+            }
             Section("Albums") {
                 ForEach(SidebarSections.albums, id: \.self) { item in
                     Label(item.title, systemImage: item.systemImage)

@@ -24,6 +24,9 @@ enum SidebarItem: Hashable {
     case subjects
     case tags
     case favorites
+    /// The Map view: located photos plotted on a map, clustered by proximity,
+    /// where tapping a cluster (or a single pin) opens the photos taken there.
+    case map
     /// The app-owned Recently Deleted view: a grid of soft-deleted items that
     /// can be restored, or permanently deleted from there (and only there).
     /// Mirrors Photos' own "Recently Deleted" source-list row.
@@ -37,6 +40,8 @@ enum SidebarItem: Hashable {
 /// as a tile grid, the same way People/Places/Tags already work.
 enum SidebarSections {
     static let libraryAndSpaces: [SidebarItem] = [.library, .space(.personal), .space(.shared)]
+    /// The Map row, shown on its own between the spaces and Albums.
+    static let map: [SidebarItem] = [.map]
     static let albums: [SidebarItem] = [.albums]
     static let discovery: [SidebarItem] = [.people, .places, .subjects, .tags, .favorites]
     /// Utility rows shown at the bottom of the sidebar, matching Photos' own
@@ -57,6 +62,7 @@ extension SidebarItem {
         case .subjects: return "Subjects"
         case .tags: return "Tags"
         case .favorites: return "Favorites"
+        case .map: return "Map"
         case .recentlyDeleted: return "Recently Deleted"
         }
     }
@@ -74,6 +80,9 @@ extension SidebarItem {
         case .subjects: return "square.grid.2x2"
         case .tags: return "tag"
         case .favorites: return "heart"
+        // A globe rather than `.places`' own "map" glyph, so the two rows stay
+        // visually distinct in the sidebar.
+        case .map: return "globe.americas"
         case .recentlyDeleted: return "trash"
         }
     }
