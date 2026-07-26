@@ -34,15 +34,17 @@ run_core_tests() {
     "$SCRIPT_DIR/setup/macos.sh"
     load_cargo_env
   fi
-  if [ ! -f "$ROOT/core/Cargo.toml" ] && [ ! -f "$ROOT/core/Cargo.lock" ]; then
-    warn "no Rust workspace at core/ yet (scaffold task not run); skipping core tests."
+  # The Cargo workspace manifest lives at the repo ROOT (members are the
+  # crates under core/), not in a core/ subdirectory. Guard and run from root.
+  if [ ! -f "$ROOT/Cargo.toml" ]; then
+    warn "no Rust workspace at repo root yet (scaffold task not run); skipping core tests."
     return 0
   fi
-  ( cd "$ROOT/core" && cargo test --workspace )
+  ( cd "$ROOT" && cargo test --workspace )
   if [ "$INCLUDE_INTEGRATION" -eq 1 ]; then
     step "Rust integration tests (real NAS)"
     : "${SYNO_HOST:?set SYNO_HOST to run integration tests}"
-    ( cd "$ROOT/core" && cargo test --workspace -- --ignored )
+    ( cd "$ROOT" && cargo test --workspace -- --ignored )
   fi
   ok "core tests done"
 }
