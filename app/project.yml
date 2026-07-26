@@ -1,4 +1,4 @@
-name: SynologyPhotos
+name: MySynologyPhotos
 options:
   bundleIdPrefix: se.agnihotri
   deploymentTarget:
@@ -49,16 +49,16 @@ targets:
         HEADER_SEARCH_PATHS: "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers"
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64"
         OTHER_LDFLAGS: ["-lphotoscore", "-lc++"]
-  SynologyPhotos:
+  MySynologyPhotos:
     type: application
     platform: macOS
     sources:
-      - path: SynologyPhotos
+      - path: MySynologyPhotos
       # Generated at build time by the preBuildScript below. Referenced by
       # an explicit path (not a directory glob) and marked optional so
       # `xcodegen generate` still succeeds on a clean checkout where this
       # gitignored file is absent. It lives in app/Generated (outside the
-      # globbed SynologyPhotos dir) so it is never a duplicate file ref.
+      # globbed MySynologyPhotos dir) so it is never a duplicate file ref.
       - path: Generated/GitVersion.swift
         optional: true
     preBuildScripts:
@@ -82,7 +82,11 @@ targets:
         link: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: se.agnihotri.synologyphotos
+        PRODUCT_BUNDLE_IDENTIFIER: se.agnihotri.mysynologyphotos
+        # The product/module is MySynologyPhotos (no space, a valid identifier),
+        # but the name shown in the menu bar, Finder, and Dock is the spaced
+        # display name.
+        INFOPLIST_KEY_CFBundleDisplayName: "MySynology Photos"
         # Explicit so the About window shows deterministic values instead of
         # relying on GENERATE_INFOPLIST_FILE defaults.
         MARKETING_VERSION: "1.0"
@@ -105,7 +109,7 @@ targets:
         # Development identity installed, and no team id can be verified as
         # "the" one to hardcode. Automatic signing resolves it, but if more
         # than one team is available Xcode may ask you to pick once in the
-        # Signing & Capabilities tab for the SynologyPhotos target after
+        # Signing & Capabilities tab for the MySynologyPhotos target after
         # opening the generated project; after that one choice, rebuilds
         # keep reusing it. To pin a specific team non-interactively instead,
         # pass DEVELOPMENT_TEAM=<your team id> as an env var to `xcodegen
@@ -124,13 +128,13 @@ targets:
         # search path is required at the Clang-module level even though
         # nothing here uses it directly.
         HEADER_SEARCH_PATHS: "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers"
-  SynologyPhotosTests:
+  MySynologyPhotosTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: SynologyPhotosTests
+      - path: MySynologyPhotosTests
     dependencies:
-      - target: SynologyPhotos
+      - target: MySynologyPhotos
       - target: PhotosCore
         embed: false
         link: true
@@ -138,13 +142,13 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         HEADER_SEARCH_PATHS: "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers"
-  SynologyPhotosUITests:
+  MySynologyPhotosUITests:
     type: bundle.ui-testing
     platform: macOS
     sources:
-      - path: SynologyPhotosUITests
+      - path: MySynologyPhotosUITests
     dependencies:
-      - target: SynologyPhotos
+      - target: MySynologyPhotos
       - target: PhotosCore
         embed: false
         link: true
@@ -155,32 +159,32 @@ targets:
 aggregateTargets:
   # A no-product target that packages the app into a .dmg installer. It depends
   # on the app target, so building the "Installer" scheme first builds
-  # SynologyPhotos with Xcode's own build (NOT a nested xcodebuild), then this
+  # MySynologyPhotos with Xcode's own build (NOT a nested xcodebuild), then this
   # phase runs dmg-from-app.sh on the app Xcode just produced. That script is
   # the single source of truth for packaging, also used by the CLI `make dmg`,
   # so both paths create identical installers. Build it in Release (the scheme
   # below defaults to it) to ship a real installer.
   Installer:
     targets:
-      - SynologyPhotos
+      - MySynologyPhotos
     buildScripts:
       - name: "Package DMG"
         script: |
-          "${SRCROOT}/../scripts/package/dmg-from-app.sh" "${BUILT_PRODUCTS_DIR}/SynologyPhotos.app"
+          "${SRCROOT}/../scripts/package/dmg-from-app.sh" "${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app"
         shell: /bin/bash
         # Always repackage: the dmg should reflect whatever was just built, and
         # declaring no outputs would otherwise make Xcode warn on every build.
         basedOnDependencyAnalysis: false
 schemes:
-  SynologyPhotos:
+  MySynologyPhotos:
     build:
       targets:
-        SynologyPhotos: all
-        SynologyPhotosTests: [test]
-        SynologyPhotosUITests: [test]
+        MySynologyPhotos: all
+        MySynologyPhotosTests: [test]
+        MySynologyPhotosUITests: [test]
     test:
       targets:
-        - SynologyPhotosTests
+        - MySynologyPhotosTests
   # Select this scheme in Xcode and Build (Cmd-B) to produce the dmg in dist/.
   # Defaults to Release so the packaged app is a release build.
   Installer:

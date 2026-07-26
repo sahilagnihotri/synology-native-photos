@@ -2,6 +2,23 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-07-26 (cont.): renamed the app to MySynology Photos
+
+- Full rename of the APP (not the core) to avoid using Synology's exact product
+  name as our app name. Display name "MySynology Photos" (via
+  `INFOPLIST_KEY_CFBundleDisplayName`); product/module/target `MySynologyPhotos`;
+  bundle id `se.agnihotri.mysynologyphotos`; source dirs `app/MySynologyPhotos*`;
+  project + schemes `MySynologyPhotos`; Keychain/UserDefaults/queue keys under
+  `se.agnihotri.mysynologyphotos.*`; dmg/scripts updated. The changed bundle id
+  orphans the old Keychain session, so a one-time re-login to the NAS is
+  expected.
+- Deliberately NOT renamed: the Rust core (crate `synology-api` etc. and the
+  `PhotosCore` framework are internal, and `synology-api` is a nominative,
+  factual name for a Synology API client), and the many "Synology Photos"
+  references in the core/docs that describe Synology's ACTUAL product/API we
+  integrate with (nominative use, correct to keep). Historical planning/research
+  docs keep the old name as accurate dated records.
+
 ## Session 2026-07-26 (cont.): DMG installer
 
 - Two ways to build a distributable `dist/SynologyPhotos-<version>.dmg` (Release

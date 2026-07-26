@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Package an already-built SynologyPhotos.app into a distributable .dmg.
+# Package an already-built MySynologyPhotos.app into a distributable .dmg.
 #
 # THE single source of truth for how the macOS installer is laid out, versioned,
 # and signing-checked. Both entry points call this on an app they have already
 # built, so the packaging logic never drifts into two copies:
 #   - scripts/package/dmg.sh  (CLI: builds the Release app, then calls this)
 #   - the Xcode "Installer" aggregate target (Xcode builds the app, then a build
-#     phase calls this on ${BUILT_PRODUCTS_DIR}/SynologyPhotos.app)
+#     phase calls this on ${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app)
 # Neither path re-invokes xcodebuild from here, so there is no nested-build hang.
 #
 # Usage: dmg-from-app.sh <path-to-.app> [output-dir]
@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/../lib/common.sh"
 
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-5W67TF3579}"
-APP_NAME="SynologyPhotos"
+APP_NAME="MySynologyPhotos"
 
 APP="${1:-}"
 if [ -z "$APP" ] || [ ! -d "$APP" ]; then

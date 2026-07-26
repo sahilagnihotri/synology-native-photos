@@ -3,7 +3,7 @@
 # Swift source the About window reads (GitVersion.shortSHA).
 #
 # The generated file is gitignored build output, regenerated on every build.
-# It lives OUTSIDE the globbed SynologyPhotos source dir so it is a single
+# It lives OUTSIDE the globbed MySynologyPhotos source dir so it is a single
 # explicit file reference in the project, never a duplicate of a directory
 # glob entry.
 #

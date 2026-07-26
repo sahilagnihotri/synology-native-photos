@@ -37,7 +37,7 @@ xcframework: bindings
 
 # Build a distributable dmg installer (Release .app + /Applications alias).
 # Delegates to the packaging script, which rebuilds the xcframework first so
-# the app never links a stale core. Output: dist/SynologyPhotos-<version>.dmg.
+# the app never links a stale core. Output: dist/MySynologyPhotos-<version>.dmg.
 dmg:
 	scripts/package/dmg.sh
 
