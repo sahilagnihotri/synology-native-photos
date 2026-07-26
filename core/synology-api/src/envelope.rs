@@ -139,6 +139,19 @@ struct WriteData {
 /// signal failure, which is what matters for never returning garbage bytes
 /// to a caller that will try to decode them as an image.
 pub fn map_binary_or_error(content_type: Option<&str>, bytes: &[u8]) -> Result<Vec<u8>, CoreError> {
+    // An HTML body from a binary endpoint is always an error page, never
+    // image/file bytes. Synology serves one (e.g. a 404 page) when a thumbnail
+    // is still being generated (`converting`) or the item is missing; returning
+    // those bytes as-is is exactly what produced blank cells and a
+    // `CGImageSourceCreateThumbnailAtIndex failed` in the UI. Fail closed here
+    // so the caller shows a placeholder and can retry once the NAS finishes,
+    // instead of caching an HTML page as if it were an image.
+    let is_html = content_type.map(|ct| ct.contains("text/html")).unwrap_or(false);
+    if is_html {
+        return Err(CoreError::UnexpectedResponse {
+            message: "binary endpoint returned an HTML error page instead of image/file bytes (item missing, or its thumbnail is still being generated)".to_string(),
+        });
+    }
     let is_json = content_type.map(|ct| ct.contains("application/json")).unwrap_or(false);
     if !is_json {
         return Ok(bytes.to_vec());
@@ -232,6 +245,15 @@ mod tests {
         let bytes = vec![1, 2, 3, 4];
         let got = map_binary_or_error(None, &bytes).expect("no content-type must not be treated as an error");
         assert_eq!(got, bytes);
+    }
+
+    #[test]
+    fn html_error_page_maps_to_error_not_image_bytes() {
+        // A not-yet-generated ("converting") or missing thumbnail comes back as
+        // an HTML error page; it must never be returned as if it were an image.
+        let body = b"<html><head><title>404</title></head><body>Not Found</body></html>";
+        let err = map_binary_or_error(Some("text/html; charset=utf-8"), body).unwrap_err();
+        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
     }
 
     #[test]

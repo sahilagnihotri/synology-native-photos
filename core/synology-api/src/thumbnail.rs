@@ -88,6 +88,13 @@ pub async fn fetch_thumbnail(
         .send()
         .await
         .map_err(|e| CoreError::Network { message: format!("thumbnail request failed: {e}") })?;
+    // A not-yet-generated ("converting") or missing thumbnail comes back as an
+    // HTTP error (e.g. 404) with an HTML error page, not image bytes. Reject it
+    // on the status code before we ever try to treat the body as an image, so
+    // the UI shows a placeholder and retries later rather than decoding an
+    // error page (`map_binary_or_error` also guards the text/html body as a
+    // backstop for a 200-with-HTML variant).
+    let status = response.status();
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -97,5 +104,13 @@ pub async fn fetch_thumbnail(
         .bytes()
         .await
         .map_err(|e| CoreError::Network { message: format!("reading thumbnail body failed: {e}") })?;
+    if !status.is_success() {
+        return Err(CoreError::UnexpectedResponse {
+            message: format!(
+                "thumbnail unavailable (HTTP {}); the NAS may still be generating it",
+                status.as_u16()
+            ),
+        });
+    }
     map_binary_or_error(content_type.as_deref(), &bytes)
 }
