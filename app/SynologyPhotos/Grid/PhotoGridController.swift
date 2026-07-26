@@ -516,6 +516,26 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         layout.invalidateLayout()
     }
 
+    /// Recovers the grid's scroll geometry after the shared controller's view
+    /// has been re-parented (unmounted then re-mounted) by a route switch.
+    /// Coming back to the grid from the Map route (whose `MKMapView` teardown
+    /// runs a layout pass that can leave this collection view's enclosing
+    /// scroll view sized to the viewport rather than its content) otherwise
+    /// leaves the grid unscrollable: `applySnapshot` sets the items but never
+    /// re-derives the flow layout's content size. Invalidating the layout
+    /// forces that recompute so the document view grows to fit all rows, and
+    /// resetting the clip view to the top puts a freshly re-shown grid at its
+    /// start rather than a stale offset. Cheap and idempotent; a no-op before
+    /// the view is loaded.
+    func relayoutAfterRemount() {
+        guard isViewLoaded else { return }
+        collectionView.collectionViewLayout?.invalidateLayout()
+        if let clip = scrollView?.contentView {
+            clip.scroll(to: NSPoint(x: 0, y: 0))
+            scrollView?.reflectScrolledClipView(clip)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         diffable = NSCollectionViewDiffableDataSource<GridSectionID, AssetItemID>(

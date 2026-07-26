@@ -810,6 +810,10 @@ struct LibraryView: View {
             await env.dataSource.setFixedAssets(space: env.spaceSelection.current, assets: assets)
             await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
             await controller.applySnapshot()
+            // The grid was just re-mounted after the Map route (an MKMapView)
+            // was torn down; recover its scroll geometry so all cluster rows
+            // are reachable rather than clipped to the viewport height.
+            controller.relayoutAfterRemount()
         }
     }
 
