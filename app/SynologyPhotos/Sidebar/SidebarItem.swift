@@ -43,7 +43,13 @@ enum SidebarSections {
     /// The Map row, shown on its own between the spaces and Albums.
     static let map: [SidebarItem] = [.map]
     static let albums: [SidebarItem] = [.albums]
-    static let discovery: [SidebarItem] = [.people, .places, .subjects, .tags, .favorites]
+    /// `.subjects` is deliberately omitted here: on this NAS a subject tile
+    /// routes to nothing (no working photo filter for Concept/Subjects, see
+    /// `DiscoveryTile.init(subject:)`), so listing a section whose tiles do
+    /// nothing is worse than not shipping it. The `.subjects` case, its
+    /// title/glyph, and its routing are all left intact, so re-listing it is
+    /// a one-line change once a future DSM exposes the filter.
+    static let discovery: [SidebarItem] = [.people, .places, .tags, .favorites]
     /// Utility rows shown at the bottom of the sidebar, matching Photos' own
     /// placement of Recently Deleted below the main sources.
     static let utilities: [SidebarItem] = [.recentlyDeleted]

@@ -41,4 +41,15 @@ struct SidebarItemTests {
         #expect(Set(discoveryRows.map(\.title)).count == discoveryRows.count, "every discovery row needs a distinct title")
         #expect(Set(discoveryRows.map(\.systemImage)).count == discoveryRows.count, "every discovery row needs a distinct glyph")
     }
+
+    /// Subjects has no working photo filter on this NAS, so its sidebar row is
+    /// not listed. The case and its routing stay intact so a future DSM can
+    /// re-enable it by simply adding it back to `SidebarSections.discovery`.
+    @Test func subjectsIsNotListedInTheSidebarButStillRoutes() {
+        #expect(!SidebarSections.discovery.contains(.subjects),
+                "the dead Subjects section must not be listed in the sidebar")
+        #expect(SidebarSections.discovery == [.people, .places, .tags, .favorites])
+        #expect(SidebarItem.subjects.route(currentSpace: .personal) == .discoveryTiles(.subjects),
+                "the Subjects routing must stay intact for trivial re-enablement")
+    }
 }
