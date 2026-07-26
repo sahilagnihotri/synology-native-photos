@@ -63,12 +63,27 @@ private struct DiscoveryTileView: View {
 
     private var isSelectable: Bool { tile.collection != nil }
 
+    /// A person tile is clipped as a circle (Apple Photos' strong
+    /// recognizability cue for faces); every other collection keeps the
+    /// rounded-rect cover. `tile.collection` carries the person case even for
+    /// an unnamed person, so the avatar is round regardless of naming.
+    private var isPerson: Bool {
+        if case .person = tile.collection { return true }
+        return false
+    }
+
+    /// The shape both the cover clip and the glyph placeholder use, so a
+    /// person's photo and its no-cover placeholder are both round.
+    private var tileShape: AnyShape {
+        isPerson ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 10))
+    }
+
     var body: some View {
         Button(action: onSelect) {
             VStack(spacing: 8) {
                 coverView
                     .frame(width: 120, height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(tileShape)
                     .overlay(alignment: .topTrailing) { badgeView }
                 nameView
                 Text("\(tile.itemCount) item\(tile.itemCount == 1 ? "" : "s")")
@@ -91,7 +106,7 @@ private struct DiscoveryTileView: View {
         if let cover {
             cover.resizable().scaledToFill()
         } else {
-            RoundedRectangle(cornerRadius: 10)
+            tileShape
                 .fill(Color.secondary.opacity(0.15))
                 .overlay(Image(systemName: placeholderGlyph).font(.system(size: 32)).foregroundStyle(.secondary))
         }
