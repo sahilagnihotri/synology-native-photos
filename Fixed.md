@@ -40,6 +40,19 @@ Completed work with commit hashes. Newest at top.
   `text/html` body are rejected, so the cell shows a placeholder and re-fetches
   once the NAS finishes converting (`a95580e`, +1 envelope test). The app's
   thumbnail cache already avoided negative-caching, so no app change was needed.
+  Follow-up after the user saw the cell still blank (the sized thumbs stayed
+  `converting`): added a `Preview` thumbnail size and a cache fallback that
+  retries `preview` (which the NAS generates first, so it is `ready` when
+  sm/m/xl are not) when the requested size fails to fetch or decode, caching it
+  under the requested size's key so it is transparent (`20b2070`, +1 test).
+- **Map cluster grid could not scroll**: opening a cluster re-mounts the shared
+  grid controller right after the Map's `MKMapView` is torn down, whose layout
+  pass left the grid's scroll view sized to the viewport rather than its
+  content. `applySnapshot` sets items but never re-derives the flow layout's
+  content size, so the cluster was unscrollable. Added `relayoutAfterRemount`
+  (invalidate the flow layout + reset the clip view) called after the cluster
+  snapshot (`b39f6aa`). Needs visual confirmation (GUI-layout timing, not
+  unit-testable).
 
 ## Session 2026-07-26: People + Geolocation Quick Filter
 

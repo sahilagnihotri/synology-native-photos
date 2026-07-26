@@ -35,14 +35,16 @@ timeline date-section headers + date scrubber, and Quick Filter (file type / dat
   (`deleteToTrash`/`restoreFromTrash`/`fetchTrash`/`trashCount`/`reconcileTrash`/
   `ensureTrashAlbum` and the app-trash `permanentlyDelete`), superseded by real delete.
 
-## Bugs (feedback 2026-07-26)
+## Needs visual confirmation (feedback 2026-07-26)
 
-- [ ] Optional thumbnail enhancement: when a photo's requested size is still
-  `converting` (only `preview` ready), fall back to a `ready` size or poll so
-  the cell fills in without needing a re-scroll. The core no longer returns the
-  error page as image bytes (fixed, see `Fixed.md`), so the cell now shows a
-  clean placeholder and re-fetches when re-displayed; this would just make it
-  fill in automatically. Low priority.
+- [ ] Map cluster grid scroll: fixed with `relayoutAfterRemount` (`b39f6aa`) but
+  the root cause (grid scroll geometry stuck after the MKMapView teardown on the
+  map->cluster transition) is a GUI-layout timing issue not reproducible without
+  the running app. If it still cannot scroll, the alternative cause is the
+  MKMapView lingering in the responder chain and eating scroll-wheel events;
+  next step would be to confirm the map view is fully removed when the cluster
+  grid shows (or force it), and/or add an NSViewController appearance hook that
+  re-tiles the scroll view.
 
 ## Map view (DONE 2026-07-26)
 
