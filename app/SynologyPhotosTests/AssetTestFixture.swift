@@ -53,7 +53,9 @@ extension Asset {
             duration: "",
             framerate: "",
             videoCodec: "",
-            containerType: ""
+            containerType: "",
+            latitude: nil,
+            longitude: nil
         )
     }
 }

@@ -55,7 +55,8 @@ struct VideoPlaybackPreparationTests {
               space: .personal, serverVersion: nil,
               rating: 0, description: "", camera: "", aperture: "", exposureTime: "",
               focalLength: "", iso: "", lens: "", duration: "", framerate: "",
-              videoCodec: "", containerType: containerType)
+              videoCodec: "", containerType: containerType,
+              latitude: nil, longitude: nil)
     }
 
     // MARK: VideoTempFilename recognition

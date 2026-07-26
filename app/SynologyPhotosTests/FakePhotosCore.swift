@@ -167,6 +167,10 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     /// live-fetch sources. A test scripts the whole result set here; the last
     /// person/geo/date args seen are recorded below.
     var filterItemsRemoteResult: Result<[Asset], CoreError> = .success([])
+    /// Canned rows returned by `locatedAssets` (the Map view's located-photo
+    /// query). A test scripts the located set here; the last space seen and the
+    /// call count are recorded below.
+    var locatedAssetsResult: Result<[Asset], CoreError> = .success([])
     /// Result for `fetchSearchFacets`. Defaults to an empty catalog.
     var searchFacetsResult: Result<SearchFacets, CoreError> = .success(
         SearchFacets(cameras: [], apertures: [], geocodings: [], mediaTypes: []))
@@ -190,6 +194,8 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     private(set) var searchAssetsFilteredCallCount = 0
     private(set) var fetchSearchFacetsCallCount = 0
     private(set) var filterItemsRemoteCallCount = 0
+    private(set) var locatedAssetsCallCount = 0
+    private(set) var lastLocatedAssetsSpace: Space?
     private(set) var lastFetchAssetsForCollection: DiscoveryCollection?
     private(set) var lastSearchKeyword: String?
     private(set) var lastSearchFilters: SearchFilters?
@@ -641,6 +647,15 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         lastRemoteFilterStartTime = startTime
         lastRemoteFilterEndTime = endTime
         return try window(try filterItemsRemoteResult.get(), offset: offset, limit: limit)
+    }
+
+    /// The Map view's located-photo query. Not windowed (the real core returns
+    /// the whole located set at once); returns the scripted `locatedAssetsResult`
+    /// and records the space seen.
+    func locatedAssets(space: Space) throws -> [Asset] {
+        locatedAssetsCallCount += 1
+        lastLocatedAssetsSpace = space
+        return try locatedAssetsResult.get()
     }
 
     /// Shared windowing helper matching `fetchAssets`' own offset/limit

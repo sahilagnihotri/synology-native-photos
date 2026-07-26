@@ -37,7 +37,8 @@ struct AssetInfoFormatterTests {
               rating: rating, description: description, camera: camera,
               aperture: aperture, exposureTime: exposureTime, focalLength: focalLength,
               iso: iso, lens: lens, duration: duration, framerate: framerate,
-              videoCodec: videoCodec, containerType: containerType)
+              videoCodec: videoCodec, containerType: containerType,
+              latitude: nil, longitude: nil)
     }
 
     // MARK: dateTaken
