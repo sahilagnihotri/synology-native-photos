@@ -152,6 +152,118 @@ async fn list_recycle_photos_propagates_an_auth_error() {
     );
 }
 
+/// A root listing that contains one subfolder, `/home/#recycle/Photos/sub`.
+const ROOT_WITH_SUBFOLDER: &str = r#"{"success":true,"data":{"files":[{"path":"/home/#recycle/Photos/sub","name":"sub","isdir":true}]}}"#;
+
+#[tokio::test]
+async fn list_recycle_photos_root_5xx_is_an_error_not_an_empty_bin() {
+    let mut server = mockito::Server::new_async().await;
+    let _root = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(503)
+        .with_body("Service Unavailable")
+        .create();
+    let t = transport_for(&server);
+    let result = list_recycle_photos(&t, "SID", None, 0, 50).await;
+    assert!(result.is_err(), "a 5xx must not read as empty, got {result:?}");
+}
+
+#[tokio::test]
+async fn list_recycle_photos_root_network_error_is_an_error_not_an_empty_bin() {
+    // Bind then drop a listener so the port is closed: connection refused.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let t = Transport::new(&models::Connection {
+        host: format!("http://127.0.0.1:{port}"),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    })
+    .expect("transport builds");
+    let err = list_recycle_photos(&t, "SID", None, 0, 50)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, CoreError::Network { .. }),
+        "a dropped network must surface, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn list_recycle_photos_root_permission_error_propagates() {
+    let mut server = mockito::Server::new_async().await;
+    let _root = mock_list_folder(
+        &mut server,
+        "/home/#recycle/Photos",
+        r#"{"success":false,"error":{"code":407}}"#,
+    );
+    let t = transport_for(&server);
+    let result = list_recycle_photos(&t, "SID", None, 0, 50).await;
+    assert!(
+        result.is_err(),
+        "a permission error at the root must not read as empty, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn list_recycle_photos_skips_a_subfolder_that_answers_408() {
+    let mut server = mockito::Server::new_async().await;
+    let _root = mock_list_folder(&mut server, "/home/#recycle/Photos", ROOT_WITH_SUBFOLDER);
+    let _sub = mock_list_folder(
+        &mut server,
+        "/home/#recycle/Photos/sub",
+        r#"{"success":false,"error":{"code":408}}"#,
+    );
+    let t = transport_for(&server);
+    let items = list_recycle_photos(&t, "SID", None, 0, 50)
+        .await
+        .expect("a vanished subfolder is skipped");
+    assert!(items.is_empty());
+}
+
+#[tokio::test]
+async fn list_recycle_photos_subfolder_network_error_propagates() {
+    let mut server = mockito::Server::new_async().await;
+    let _root = mock_list_folder(&mut server, "/home/#recycle/Photos", ROOT_WITH_SUBFOLDER);
+    let _sub = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::UrlEncoded(
+            "folder_path".into(),
+            "/home/#recycle/Photos/sub".into(),
+        ))
+        .with_status(200)
+        .with_chunked_body(|_| Err(std::io::Error::other("connection reset")))
+        .create();
+    let t = transport_for(&server);
+    let err = list_recycle_photos(&t, "SID", None, 0, 50)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, CoreError::Network { .. }),
+        "a network error in a subfolder must surface, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn list_recycle_photos_subfolder_auth_error_propagates() {
+    let mut server = mockito::Server::new_async().await;
+    let _root = mock_list_folder(&mut server, "/home/#recycle/Photos", ROOT_WITH_SUBFOLDER);
+    let _sub = mock_list_folder(
+        &mut server,
+        "/home/#recycle/Photos/sub",
+        r#"{"success":false,"error":{"code":400}}"#,
+    );
+    let t = transport_for(&server);
+    let err = list_recycle_photos(&t, "SID", None, 0, 50)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+}
+
 // --- restore_recycle_item -----------------------------------------------
 
 /// Fast completion polling so the "never finishes" cases fail in milliseconds.

@@ -38,7 +38,7 @@
 //! reuses `map_binary_or_error` so a JSON error is never handed back as image
 //! data.
 
-use crate::envelope::{decode_envelope, decode_write_success, map_binary_or_error};
+use crate::envelope::{decode_envelope, decode_write_success, map_binary_or_error, map_error_code};
 use crate::transport::Transport;
 use models::{media_kind_from_filename, CoreError, RecycleBinStatus, RecycleItem};
 use serde::Deserialize;
@@ -149,6 +149,34 @@ async fn fs_get_body(
     })
 }
 
+/// File Station error: no permission on the target path.
+const FS_NO_PERMISSION: i64 = 407;
+
+/// Why a single folder listing failed. `Dsm` keeps the File Station error code
+/// that `decode_envelope` would collapse into `UnexpectedResponse`, so the
+/// walker can tell "folder absent" from "network dropped".
+enum ListError {
+    /// A DSM error envelope (`success:false`) with a non-auth code.
+    Dsm(i64),
+    /// Anything else: transport, decode, auth, OTP. Always propagates.
+    Core(CoreError),
+}
+
+/// The File Station error code of a `success:false` envelope, if the body is
+/// one. Auth codes are left to `decode_envelope` so they keep mapping to
+/// `Auth`/`OtpRequired`.
+fn dsm_error_code(body: &str) -> Option<i64> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    if value.get("success")?.as_bool()? {
+        return None;
+    }
+    let code = value.get("error")?.get("code")?.as_i64()?;
+    match map_error_code(code) {
+        CoreError::UnexpectedResponse { .. } => Some(code),
+        _ => None,
+    }
+}
+
 /// Lists a SINGLE folder (not recursive) via `SYNO.FileStation.List`, paging
 /// to exhaustion. Returns every decoded entry (files and subfolders); the
 /// caller decides how to recurse. A per-element decode failure is skipped, not
@@ -158,7 +186,7 @@ async fn list_folder(
     sid: &str,
     syno_token: Option<&str>,
     folder_path: &str,
-) -> Result<Vec<FsEntry>, CoreError> {
+) -> Result<Vec<FsEntry>, ListError> {
     let mut out: Vec<FsEntry> = Vec::new();
     let mut offset = 0u32;
     loop {
@@ -172,8 +200,13 @@ async fn list_folder(
             ("limit", LIST_PAGE_LIMIT.to_string()),
             ("_sid", sid.to_string()),
         ];
-        let body = fs_get_body(transport, &query, syno_token).await?;
-        let data: FsListData = decode_envelope(&body)?;
+        let body = fs_get_body(transport, &query, syno_token)
+            .await
+            .map_err(ListError::Core)?;
+        if let Some(code) = dsm_error_code(&body) {
+            return Err(ListError::Dsm(code));
+        }
+        let data: FsListData = decode_envelope(&body).map_err(ListError::Core)?;
         let n = data.files.len() as u32;
         for value in &data.files {
             if let Some(entry) = decode_fs_entry(value) {
@@ -192,11 +225,13 @@ async fn list_folder(
 /// `RecycleItem`, sort most-recently-deleted first, then apply `offset`/`limit`.
 ///
 /// If the recycle root does not exist (a fresh account that has never deleted
-/// anything), returns an empty vec rather than an error: File Station answers a
-/// missing folder with a non-auth error, which is folded into "nothing to
-/// list" here. An `Auth`/`OtpRequired` error (a genuinely bad session) still
-/// propagates. A bad SUBfolder is tolerated (its subtree is skipped) so one
-/// unreadable directory never fails the whole listing.
+/// anything), returns an empty vec: File Station answers that with error 408
+/// (`FS_NO_SUCH_FILE`), and ONLY that code means an empty bin. Every other
+/// failure at the root (network, 5xx, permission, auth) propagates, so a dropped
+/// connection never shows up as an empty Recently Deleted. A SUBfolder that
+/// vanished (408) or is not readable (407) is skipped so one bad directory never
+/// fails the whole listing, but transport, decode and auth errors there still
+/// propagate.
 pub async fn list_recycle_photos(
     transport: &Transport,
     sid: &str,
@@ -211,17 +246,16 @@ pub async fn list_recycle_photos(
     'walk: while let Some((folder, depth)) = stack.pop() {
         let entries = match list_folder(transport, sid, syno_token, &folder).await {
             Ok(entries) => entries,
-            Err(err) => {
-                if matches!(err, CoreError::Auth { .. } | CoreError::OtpRequired) {
-                    return Err(err);
-                }
-                if depth == 0 {
-                    // The recycle root is absent: an empty bin, not a failure.
-                    return Ok(Vec::new());
-                }
-                // Tolerate an unreadable subfolder: skip its subtree.
+            Err(ListError::Dsm(FS_NO_SUCH_FILE)) if depth == 0 => {
+                // The recycle root is absent: an empty bin, not a failure.
+                return Ok(Vec::new());
+            }
+            Err(ListError::Dsm(FS_NO_SUCH_FILE | FS_NO_PERMISSION)) if depth > 0 => {
+                // Tolerate a vanished or unreadable subfolder: skip its subtree.
                 continue;
             }
+            Err(ListError::Dsm(code)) => return Err(map_error_code(code)),
+            Err(ListError::Core(err)) => return Err(err),
         };
         for entry in entries {
             if entry.is_dir {
