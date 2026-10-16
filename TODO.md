@@ -2,7 +2,20 @@
 
 Only pending work. Completed items live in `Fixed.md`. Live scratch progress in `.superpowers/sdd/progress.md` (gitignored).
 
-Last Updated: 2026-10-16
+Last Updated: 2026-10-16 (platform layout restructure done, local CI green)
+
+## 2026-10-16: after the platform layout restructure
+
+Layout is now `core/`, `platforms/macos`, `platforms/windows`, `build/`, `scripts/{shared,macos,windows,ci}`.
+`scripts/ci/ci.sh all` is the local gate (measured PASS: Rust 385/0/1, Swift 498/0/0).
+Windows work continues on the Windows machine from `documentation/platforms/windows-handover.md`.
+
+- [ ] `scripts/macos/ffi-smoke.sh` is broken (predates the move): its embedded Swift calls `Connection(...)` without `allowUntrustedTls`, and a `|| true` hides the compile error, so it reports success while testing nothing. Fix the call and drop the `|| true`.
+- [ ] `scripts/ci/ci.ps1` and `scripts/windows/setup.ps1` have never run (no PowerShell on the Mac). First job on the Windows machine.
+- [ ] `scripts/windows/check-core.sh` has never run: cargo-xwin and the `x86_64-pc-windows-msvc` rust-std are not installed on the Mac (script exits 3 or 4 with the install command).
+- [ ] `.github/workflows/ci.yml` (manual, `stable` only) is untested; the Xcode on `macos-latest` may be older than the macOS 26 deployment target. Creating `stable` is Sahil's call.
+- [ ] The `ci.sh` swift stage FAIL path was not falsified (fmt, clippy, test and unknown stage were, via `scripts/tests/test-ci.sh`).
+- [ ] The Recently Deleted restore loop's "restored N of M" message has no test (loop reworked to `enumerate` in `375c156`).
 
 ## In progress
 
@@ -116,10 +129,9 @@ Bigger bets:
 ## Phase 2: manage (own plan)
 
 - [ ] Restore gives the photo a NEW Synology Photos id (measured 2026-10-16: 73610 came back as 74368). Anything keyed on the old id (album membership, favorite, rating, tags, people) is probably lost on restore, and the local index must treat the restored file as a new asset. Check what survives, and warn in the Recently Deleted UI if metadata is lost.
-- [ ] Recently Deleted shows an empty bin for ANY non auth error on the recycle root (`list_recycle_photos` depth 0), e.g. a network drop. Only 408 should mean empty; other errors should surface.
 - [ ] Albums (browse, create, add/remove); replace the sidebar Albums placeholder.
 - [ ] The old trash-album flow left a "Recently Deleted" album on the NAS. Nothing in the app reads or removes it any more. Delete it by hand in Synology Photos if unwanted (the app never touches it).
-- [ ] Albums write API: `create_album`, `add_items` and `remove_items` were removed from `synology-api` as unused in `86864c6`. The Albums item above needs them: recover from `86864c6^` (`core/synology-api/src/album_write.rs` and its mock tests). `delete_album` and `normal_album_api` remain.
+- [ ] Albums next steps: the `synology-api` calls exist (`create_album`, `add_items`, `remove_items`, `list_album_items`, see `Fixed.md`); still to do are the `PhotosCore` FFI methods, the Mac Albums UI replacing the sidebar placeholder, and drag to album. The NAS account has ZERO albums, so the item list of a non empty album was never observed; the mock reuses the plain Item list element. Verify against a real album once Sahil approves creating a test album.
 - [ ] Search filter facets (`SYNO.Foto.Search.Filter`): confirmed present and working (camera, geocoding, time buckets, folder_filter, etc.) but deferred this pass; plain keyword search shipped instead (see `Fixed.md`).
 - [ ] Favoriting/naming mutations: read-only People/Places/Tags/Favorites browsing shipped (see `Fixed.md`); toggling a favorite, naming a person, and creating/editing tags are still not implemented (mutations, gated separately).
 - [ ] Plan: `documentation/plans/2026-07-25-phase2-manage-implementation.md`.

@@ -1,6 +1,7 @@
 # Platform layout restructure
 
-> **Status:** PLANNED. Run after the recycle bin check (W9) is verified and pushed.
+> **Status:** DONE (2026-10-16). Steps 1 to 7 in `439c974` to `9f41142`; step 8 is
+> `documentation/platforms/windows-handover.md`.
 
 ## Why
 

@@ -2,6 +2,39 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-10-16: platform layout, local CI, recycle errors, albums API
+
+- Platform layout (plan `documentation/plans/done/2026-10-16-platform-layout-restructure.md`):
+  build outputs under `build/macos` (`439c974`), bindings to
+  `platforms/macos/Generated` (`93177b3`), the app to `platforms/macos` (`7b583a3`),
+  scripts split into shared, macos and windows with `scripts/test.sh` as the
+  dispatcher and the old target names as aliases (`92b7b19`), docs and paths
+  (`ff283b8`). `make clean` no longer deletes the tracked bindings.
+- The xcframework staleness phase never ran on a no op build (an output and no
+  inputs); it now always runs, checked by touching a core file (`e17430f`).
+- `cargo fmt` over the workspace (`423698c`, `b4f6d6a`) and the photoscore clippy
+  warnings (`375c156`).
+- Local CI: `scripts/ci/ci.sh core|macos|all` (fmt, clippy, test, script tests,
+  Swift counts from the xcresult), `scripts/ci/ci.ps1` for Windows, and
+  `scripts/windows/check-core.sh` (`5e2e903`). `scripts/tests/test-ci.sh` drives
+  ci.sh against throwaway workspaces in `$TMPDIR`: 7 cases pass, and two mutant
+  copies of ci.sh each made it fail.
+- Manual only GitHub workflow, `workflow_dispatch` with every job guarded to
+  `refs/heads/stable`, calling the local scripts (`9f41142`).
+- Windows handover prompt: `documentation/platforms/windows-handover.md` (`fe121f2`, paths updated after the move).
+- Recently Deleted surfaced an empty bin for any non auth error on the recycle
+  root. Now only 408 at the root means empty; subfolders skip only 407 and 408;
+  everything else propagates (`bd5cdc2`). Falsified: with the old behaviour, 4 of
+  6 new tests fail.
+- Albums API groundwork in `synology-api`: `create_album`, `add_items`,
+  `remove_items` restored (`cc2c962`), new `list_album_items` (`9c4f341`).
+  Measured on the NAS: Browse.Album max v5, Item v7, NormalAlbum v4; album list
+  without `additional` is error 101; a missing `album_id` is error 609. Falsified:
+  renaming the `album_id` key fails 2 of 4 album item tests.
+- Measured by the orchestrator, `scripts/ci/ci.sh all` on the final tree: fmt,
+  clippy, test, scripts and swift all PASS; Rust 385 passed, 0 failed, 1 ignored;
+  Swift 498 passed, 0 failed, 0 skipped.
+
 ## Session 2026-10-16: recycle bin check before every delete
 
 - Every everyday delete reads `SYNO.Core.User.Home` `enable_recycle_bin` first,
