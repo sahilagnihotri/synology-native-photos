@@ -491,3 +491,50 @@ struct LoginViewModelTests {
         #expect(UserDefaults.standard.string(forKey: usernameKey) != username)
     }
 }
+
+struct LoginPreferencesTests {
+    private static let tlsKey = "se.agnihotri.mysynologyphotos.login.allowUntrustedTls"
+
+    private func freshDefaults() -> (suiteName: String, defaults: UserDefaults) {
+        let suite = "com.synologynativephotos.tests.\(UUID().uuidString)"
+        return (suite, UserDefaults(suiteName: suite)!)
+    }
+
+    @Test func untrustedTlsIsNotPersistedAcrossSaveAndLoad() {
+        let (suite, defaults) = freshDefaults()
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        LoginPreferencesStore.save(
+            LoginPreferences(host: "h", username: "u", rememberMe: true, allowUntrustedTls: true),
+            defaults: defaults)
+
+        let loaded = LoginPreferencesStore.load(defaults: defaults)
+        #expect(loaded.allowUntrustedTls == false)
+        #expect(loaded.host == "h")
+        #expect(loaded.username == "u")
+        #expect(loaded.rememberMe == true)
+        #expect(defaults.object(forKey: Self.tlsKey) == nil)
+    }
+
+    @Test func previouslyStoredTrueIsClearedOnLoad() {
+        let (suite, defaults) = freshDefaults()
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        defaults.set("h", forKey: "se.agnihotri.mysynologyphotos.login.host")
+        defaults.set(true, forKey: Self.tlsKey)
+
+        let loaded = LoginPreferencesStore.load(defaults: defaults)
+        #expect(loaded.allowUntrustedTls == false)
+        #expect(defaults.object(forKey: Self.tlsKey) == nil)
+    }
+
+    @Test func storedTrueIsClearedEvenWithoutSavedHost() {
+        let (suite, defaults) = freshDefaults()
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        defaults.set(true, forKey: Self.tlsKey)
+
+        #expect(LoginPreferencesStore.load(defaults: defaults).allowUntrustedTls == false)
+        #expect(defaults.object(forKey: Self.tlsKey) == nil)
+    }
+}

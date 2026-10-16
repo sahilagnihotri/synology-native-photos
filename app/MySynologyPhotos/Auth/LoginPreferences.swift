@@ -2,8 +2,8 @@ import Foundation
 
 /// Non-secret login form prefill, persisted in `UserDefaults`.
 ///
-/// Nothing stored here is sensitive: host, username, and the two trust
-/// toggles are all things the user typed or chose in plain sight, none of
+/// Nothing stored here is sensitive: host, username, and the remember-me
+/// toggle are all things the user typed or chose in plain sight, none of
 /// them a credential. The password never goes anywhere near this type, on
 /// purpose, per the brief's "pre-fill host + username + trust settings,
 /// NEVER the password" rule; `UserDefaults` is deliberately the wrong place
@@ -29,9 +29,13 @@ enum LoginPreferencesStore {
     private static let allowUntrustedTlsKey = "se.agnihotri.mysynologyphotos.login.allowUntrustedTls"
 
     /// Loads the last saved prefill, or `.empty` (remember-me defaulting to
-    /// on, the insecure toggle defaulting to off) on a fresh install where
-    /// nothing has been saved yet.
+    /// on) on a fresh install where nothing has been saved yet.
+    ///
+    /// The insecure TLS toggle is never persisted: it always loads as off,
+    /// and any value an older build stored under its key is removed here so
+    /// existing installs return to certificate validation.
     static func load(defaults: UserDefaults = .standard) -> LoginPreferences {
+        defaults.removeObject(forKey: allowUntrustedTlsKey)
         guard defaults.object(forKey: hostKey) != nil else {
             return .empty
         }
@@ -39,16 +43,17 @@ enum LoginPreferencesStore {
             host: defaults.string(forKey: hostKey) ?? "",
             username: defaults.string(forKey: usernameKey) ?? "",
             rememberMe: defaults.bool(forKey: rememberMeKey),
-            allowUntrustedTls: defaults.bool(forKey: allowUntrustedTlsKey)
+            allowUntrustedTls: false
         )
     }
 
-    /// Saves `prefs` for the next launch's prefill.
+    /// Saves `prefs` for the next launch's prefill. `allowUntrustedTls` is
+    /// deliberately not written, so the insecure choice cannot outlive the
+    /// current login attempt.
     static func save(_ prefs: LoginPreferences, defaults: UserDefaults = .standard) {
         defaults.set(prefs.host, forKey: hostKey)
         defaults.set(prefs.username, forKey: usernameKey)
         defaults.set(prefs.rememberMe, forKey: rememberMeKey)
-        defaults.set(prefs.allowUntrustedTls, forKey: allowUntrustedTlsKey)
     }
 
     /// Clears every saved prefill value. Used when the user explicitly
