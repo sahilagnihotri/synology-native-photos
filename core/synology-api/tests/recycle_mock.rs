@@ -166,7 +166,10 @@ async fn list_recycle_photos_root_5xx_is_an_error_not_an_empty_bin() {
         .create();
     let t = transport_for(&server);
     let result = list_recycle_photos(&t, "SID", None, 0, 50).await;
-    assert!(result.is_err(), "a 5xx must not read as empty, got {result:?}");
+    assert!(
+        result.is_err(),
+        "a 5xx must not read as empty, got {result:?}"
+    );
 }
 
 #[tokio::test]
