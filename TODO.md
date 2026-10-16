@@ -7,7 +7,6 @@ Last Updated: 2026-10-16
 ## In progress
 
 - [ ] Polished viewer: video drag-export and streaming are untested against a real video asset on the live NAS. Per-asset location in the info panel is still open (`Place`/Geocoding is a collection concept, not a field on `Asset`).
-- [ ] Real delete cleanup: remove the superseded trash-album core methods (`deleteToTrash`/`restoreFromTrash`/`fetchTrash`/`trashCount`/`reconcileTrash`/`ensureTrashAlbum` and the app-trash `permanentlyDelete` in `core/photoscore/src/lib.rs`). Still exported over FFI, unused by the app.
 
 ## Viewer + browsing enhancements (feedback 2026-07-25)
 
@@ -63,7 +62,6 @@ toolbar, circular People tiles, hidden Subjects; review #1-#5) shipped
   non-functional Search facet browser (review #6).
 - [ ] Unify grid selection visuals on the checkmark-circle badge already used in
   Recently Deleted (review #7).
-- [ ] Grid cell + zoom-slider `accessibilityLabel`s for VoiceOver (review #8).
 
 Medium:
 - [ ] Detail filmstrip + trackpad swipe/scroll paging (review #11).
@@ -88,10 +86,6 @@ Bigger bets:
 - [ ] Duplicates detection (review #23); Memories/For You (review #22); People
   naming/merge, captions, batch adjust, slideshow (review #25).
 
-## Performance
-
-- [ ] `PhotoEditorView.swift` downloads the original directly each time, bypassing the two tier `OriginalImageCache`. Route it through the cache.
-
 ## Distribution
 
 - Installer builds two ways (both call the shared `dmg-from-app.sh`, see
@@ -105,16 +99,14 @@ Bigger bets:
 
 ## Build infra
 
-- [ ] The xcframework self-heal only watches `core/**/*.rs`. Changes to `Cargo.toml` or the UDL alone do not trigger a rebuild.
-- [ ] 63 clippy warnings in `synology-api` and `sync-engine` (mostly fn item to integer casts).
-- [ ] Swift 6 concurrency warnings: `GridZoomModel.swift:27` and `ThumbnailCache.swift:103`.
+- [ ] Three `var store` never mutated warnings in `CacheSettingsStoreTests.swift` (test only).
+- [ ] xcodegen and `xcresulttool` must run outside the agent sandbox (temp file writes); regenerating the project from a sandboxed worker fails.
 
 ## Security (before real use)
 
 - [ ] HIGH: change the DSM password. It was exposed in chat and committed in plain text to this PUBLIC repo in `db2a439` (removed from the file 2026-10-16, still in git history). Rotating it is the only fix.
 - [ ] Switch the app from the main DSM account to a dedicated least-privilege `photosclient` user (Photos-only). Main account used during dev only. Steps in `documentation/phase0-probe-results.md`.
 - [ ] Tailscale host and IP appear in tracked files (`CLAUDE.md`, docs, tests). The repo is PUBLIC; low risk, consider placeholders.
-- [ ] Add defensive `.gitignore` patterns (`syno_session*`, `*.pem`, `*.p12`, `.env*`, `*.mobileprovision`).
 
 ## Empirical NAS probes
 
@@ -125,8 +117,9 @@ Bigger bets:
 
 - [ ] HIGH: recycle bin enabled check before delete. Nothing verifies the DSM recycle bin is on for the homes share. If it is off, delete is permanent while the UI says it can be restored. Needs a real NAS probe (one fresh OTP) of `SYNO.Core.Share` / `SYNO.Core.RecycleBin` for the homes share recycle setting.
 - [ ] Verify on the real NAS: File Station error 408 for a missing folder (assumed from the official guide in `recycle.rs` `FS_NO_SUCH_FILE`), and that restore and permanent delete completion polling behave as mocked.
-- [ ] UI tests for the delete and permanent delete confirm dialogs (none exist). Note, not a bug: Return confirms the everyday delete dialog by the user's explicit choice.
 - [ ] Albums (browse, create, add/remove); replace the sidebar Albums placeholder.
+- [ ] The old trash-album flow left a "Recently Deleted" album on the NAS. Nothing in the app reads or removes it any more. Delete it by hand in Synology Photos if unwanted (the app never touches it).
+- [ ] Albums write API: `create_album`, `add_items` and `remove_items` were removed from `synology-api` as unused in `86864c6`. The Albums item above needs them: recover from `86864c6^` (`core/synology-api/src/album_write.rs` and its mock tests). `delete_album` and `normal_album_api` remain.
 - [ ] Search filter facets (`SYNO.Foto.Search.Filter`): confirmed present and working (camera, geocoding, time buckets, folder_filter, etc.) but deferred this pass; plain keyword search shipped instead (see `Fixed.md`).
 - [ ] Favoriting/naming mutations: read-only People/Places/Tags/Favorites browsing shipped (see `Fixed.md`); toggling a favorite, naming a person, and creating/editing tags are still not implemented (mutations, gated separately).
 - [ ] Plan: `documentation/plans/2026-07-25-phase2-manage-implementation.md`.

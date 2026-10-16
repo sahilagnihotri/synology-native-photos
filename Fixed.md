@@ -2,6 +2,41 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-10-16 (parallel batch): cleanup, tests, build infra
+
+- Removed the superseded trash-album flow from the core: seven FFI methods
+  (`delete_to_trash`, `restore_from_trash`, `fetch_trash`, `trash_count`,
+  `reconcile_trash`, `ensure_trash_album`, app-trash `permanently_delete`), their
+  helpers, tests and fake stubs. `trash_lock` stays: `delete_assets`,
+  `restore_recently_deleted` and `empty_recently_deleted` share it, and its test
+  now targets `delete_assets` (falsified) (`c469e53`).
+- Persistence migration v5 clears legacy `in_trash` flags, so assets the old flow
+  hid reappear in the grid. Local index only, columns kept. Dead persistence trash
+  methods removed (`59a82a8`). Unused album create/add/remove writes removed from
+  `synology-api` (`86864c6`); see TODO Albums for how to recover them.
+- Delete confirm gate tests: no confirm without a request, none after cancel,
+  double confirm deletes once, restore never permanently deletes, and both dialog
+  wordings are pinned. Each falsified (`8445919`, project file `1740487`).
+- Photo editor loads its source through the shared `OriginalImageCache` instead
+  of downloading every open; read only, cached bytes unchanged (`f09ce61`,
+  `8ba6bdc`). Swift 6 isolation warnings in `GridZoomModel` and `ThumbnailCache`
+  fixed (`07790d4`).
+- VoiceOver labels on grid cells ("Photo, date, filename, selected") and the zoom
+  slider (UX review #8) (`18c03b5`).
+- Clippy is clean on every crate (`d8ac5b0`, `2d38470`); the pinned toolchain now
+  ships clippy and rustfmt. The old "63 warnings" figure was wrong: 45 in
+  `synology-api` and `sync-engine`, 5 in `persistence`.
+- xcframework self heal also rebuilds on `Cargo.toml`, `Cargo.lock` or `.udl`
+  changes, with a shell test of the staleness check (`a1ca310`). Defensive
+  `.gitignore` patterns for session files, keys, env files and profiles
+  (`881e5c9`).
+- DSM password removed from TODO.md, where it sat in plain text in this public
+  repo since `db2a439` (`baf7b6f`). Still in history; rotation is the fix.
+- Measured by the orchestrator on the final tree: `cargo test --workspace` 356
+  passed, 0 failed, 1 ignored (down from 385 because tests of removed code went
+  with it). Swift unit tests 490 passed, 0 failed, 0 skipped. Migration test
+  falsified independently.
+
 ## Session 2026-10-16: recycle guards, test script, stale TODO cleanup
 
 - Recycle restore and permanent delete now refuse any path outside
