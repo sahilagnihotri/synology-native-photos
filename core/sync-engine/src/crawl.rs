@@ -58,7 +58,11 @@ pub struct Crawler<'a> {
 
 impl<'a> Crawler<'a> {
     pub fn new(store: &'a Store, source: &'a dyn PageSource, page_limit: u32) -> Self {
-        Crawler { store, source, page_limit }
+        Crawler {
+            store,
+            source,
+            page_limit,
+        }
     }
 
     /// Runs the crawl for `space` to completion (or until interrupted by an
@@ -71,7 +75,11 @@ impl<'a> Crawler<'a> {
     /// On error mid-crawl, the cursor for every page fetched so far has
     /// already been persisted, so calling this again later resumes from the
     /// last successful page instead of starting over.
-    pub async fn crawl_space(&self, space: Space, sink: &dyn ProgressSink) -> Result<CrawlProgress, CoreError> {
+    pub async fn crawl_space(
+        &self,
+        space: Space,
+        sink: &dyn ProgressSink,
+    ) -> Result<CrawlProgress, CoreError> {
         let state = self.store.load_sync_state(space)?;
         if state.initial_crawl_complete {
             let progress = self.store.crawl_progress(space)?;
@@ -96,7 +104,8 @@ impl<'a> Crawler<'a> {
             }
 
             offset += fetched;
-            self.store.save_cursor(space, offset, limit, expected_total)?;
+            self.store
+                .save_cursor(space, offset, limit, expected_total)?;
 
             // A page shorter than requested (including empty) is the only
             // reliable end-of-space signal: it is correct regardless of
@@ -129,7 +138,12 @@ impl<'a> Crawler<'a> {
     /// an undercount from being reported complete); it is surfaced via
     /// tracing so operators can see when the server's `total` disagreed with
     /// what was actually paged through.
-    fn reconcile(&self, space: Space, fetched_count: u32, expected_total: u64) -> Result<(), CoreError> {
+    fn reconcile(
+        &self,
+        space: Space,
+        fetched_count: u32,
+        expected_total: u64,
+    ) -> Result<(), CoreError> {
         if (fetched_count as u64) != expected_total {
             tracing::warn!(
                 ?space,
@@ -152,10 +166,18 @@ mod tests {
 
     fn asset(id: i64, ver: i64) -> Asset {
         Asset {
-            id, unit_id: id + 9000, cache_key: format!("ck{id}"), filename: format!("IMG_{id}.jpg"),
-            media_kind: MediaKind::Photo, taken_at: Some(id * 10), added_at: Some(1),
-            width: Some(100), height: Some(100), file_size: Some(1),
-            space: Space::Personal, server_version: Some(ver),
+            id,
+            unit_id: id + 9000,
+            cache_key: format!("ck{id}"),
+            filename: format!("IMG_{id}.jpg"),
+            media_kind: MediaKind::Photo,
+            taken_at: Some(id * 10),
+            added_at: Some(1),
+            width: Some(100),
+            height: Some(100),
+            file_size: Some(1),
+            space: Space::Personal,
+            server_version: Some(ver),
             ..Default::default()
         }
     }
@@ -166,14 +188,24 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl PageSource for ScriptedSource {
-        async fn list_items(&self, _space: Space, offset: u32, limit: u32) -> Result<AssetPage, CoreError> {
+        async fn list_items(
+            &self,
+            _space: Space,
+            offset: u32,
+            limit: u32,
+        ) -> Result<AssetPage, CoreError> {
             self.calls.lock().unwrap().push((offset, limit));
             let idx = (offset / limit) as usize;
-            Ok(self.pages.get(idx).cloned().unwrap_or(AssetPage { assets: vec![], total: self.pages_total() }))
+            Ok(self.pages.get(idx).cloned().unwrap_or(AssetPage {
+                assets: vec![],
+                total: self.pages_total(),
+            }))
         }
     }
     impl ScriptedSource {
-        fn pages_total(&self) -> u64 { self.pages.first().map(|p| p.total).unwrap_or(0) }
+        fn pages_total(&self) -> u64 {
+            self.pages.first().map(|p| p.total).unwrap_or(0)
+        }
     }
 
     /// A source that errors on a specific call index, used to simulate an
@@ -185,21 +217,35 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl PageSource for FlakySource {
-        async fn list_items(&self, _space: Space, offset: u32, limit: u32) -> Result<AssetPage, CoreError> {
+        async fn list_items(
+            &self,
+            _space: Space,
+            offset: u32,
+            limit: u32,
+        ) -> Result<AssetPage, CoreError> {
             let mut calls = self.calls.lock().unwrap();
             let this_call = *calls;
             *calls += 1;
             if this_call == self.fail_at_call {
-                return Err(CoreError::Network { message: "simulated drop".into() });
+                return Err(CoreError::Network {
+                    message: "simulated drop".into(),
+                });
             }
             let idx = (offset / limit) as usize;
-            Ok(self.pages.get(idx).cloned().unwrap_or(AssetPage { assets: vec![], total: 0 }))
+            Ok(self.pages.get(idx).cloned().unwrap_or(AssetPage {
+                assets: vec![],
+                total: 0,
+            }))
         }
     }
 
-    struct CountingSink { events: Mutex<Vec<CrawlProgress>> }
+    struct CountingSink {
+        events: Mutex<Vec<CrawlProgress>>,
+    }
     impl ProgressSink for CountingSink {
-        fn emit(&self, p: CrawlProgress) { self.events.lock().unwrap().push(p); }
+        fn emit(&self, p: CrawlProgress) {
+            self.events.lock().unwrap().push(p);
+        }
     }
 
     #[tokio::test]
@@ -207,12 +253,20 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let src = ScriptedSource {
             pages: vec![
-                AssetPage { assets: vec![asset(1, 1), asset(2, 1)], total: 3 },
-                AssetPage { assets: vec![asset(3, 1)], total: 3 },
+                AssetPage {
+                    assets: vec![asset(1, 1), asset(2, 1)],
+                    total: 3,
+                },
+                AssetPage {
+                    assets: vec![asset(3, 1)],
+                    total: 3,
+                },
             ],
             calls: Mutex::new(vec![]),
         };
-        let sink = CountingSink { events: Mutex::new(vec![]) };
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
         let crawler = Crawler::new(&store, &src, 2);
         let final_p = crawler.crawl_space(Space::Personal, &sink).await.unwrap();
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 3);
@@ -234,12 +288,20 @@ mod tests {
         store.save_cursor(Space::Personal, 2, 2, 3).unwrap();
         let src = ScriptedSource {
             pages: vec![
-                AssetPage { assets: vec![asset(1, 1), asset(2, 1)], total: 3 },
-                AssetPage { assets: vec![asset(3, 1)], total: 3 },
+                AssetPage {
+                    assets: vec![asset(1, 1), asset(2, 1)],
+                    total: 3,
+                },
+                AssetPage {
+                    assets: vec![asset(3, 1)],
+                    total: 3,
+                },
             ],
             calls: Mutex::new(vec![]),
         };
-        let sink = CountingSink { events: Mutex::new(vec![]) };
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
         let crawler = Crawler::new(&store, &src, 2);
         crawler.crawl_space(Space::Personal, &sink).await.unwrap();
         let calls = src.calls.lock().unwrap();
@@ -254,8 +316,13 @@ mod tests {
         store.upsert_assets(&[asset(1, 1)]).unwrap();
         store.save_cursor(Space::Personal, 1, 2, 1).unwrap();
         store.set_crawl_complete(Space::Personal, true, 1).unwrap();
-        let src = ScriptedSource { pages: vec![], calls: Mutex::new(vec![]) };
-        let sink = CountingSink { events: Mutex::new(vec![]) };
+        let src = ScriptedSource {
+            pages: vec![],
+            calls: Mutex::new(vec![]),
+        };
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
         let crawler = Crawler::new(&store, &src, 2);
         let p = crawler.crawl_space(Space::Personal, &sink).await.unwrap();
         assert!(p.complete);
@@ -271,14 +338,25 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let src = FlakySource {
             pages: vec![
-                AssetPage { assets: vec![asset(1, 1), asset(2, 1)], total: 5 },
-                AssetPage { assets: vec![asset(3, 1), asset(4, 1)], total: 5 },
-                AssetPage { assets: vec![asset(5, 1)], total: 5 },
+                AssetPage {
+                    assets: vec![asset(1, 1), asset(2, 1)],
+                    total: 5,
+                },
+                AssetPage {
+                    assets: vec![asset(3, 1), asset(4, 1)],
+                    total: 5,
+                },
+                AssetPage {
+                    assets: vec![asset(5, 1)],
+                    total: 5,
+                },
             ],
             fail_at_call: 1, // fail on the second page request
             calls: Mutex::new(0),
         };
-        let sink = CountingSink { events: Mutex::new(vec![]) };
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
         let crawler = Crawler::new(&store, &src, 2);
 
         let err = crawler.crawl_space(Space::Personal, &sink).await;
@@ -287,15 +365,30 @@ mod tests {
         // First page landed before the failure.
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 2);
         let st = store.load_sync_state(Space::Personal).unwrap();
-        assert!(!st.initial_crawl_complete, "barrier must stay false on interrupted crawl");
-        assert_eq!(st.last_offset, 2, "cursor must persist past the successful page");
+        assert!(
+            !st.initial_crawl_complete,
+            "barrier must stay false on interrupted crawl"
+        );
+        assert_eq!(
+            st.last_offset, 2,
+            "cursor must persist past the successful page"
+        );
 
         // Resume with a source that succeeds all the way through.
         let resume_src = ScriptedSource {
             pages: vec![
-                AssetPage { assets: vec![asset(1, 1), asset(2, 1)], total: 5 },
-                AssetPage { assets: vec![asset(3, 1), asset(4, 1)], total: 5 },
-                AssetPage { assets: vec![asset(5, 1)], total: 5 },
+                AssetPage {
+                    assets: vec![asset(1, 1), asset(2, 1)],
+                    total: 5,
+                },
+                AssetPage {
+                    assets: vec![asset(3, 1), asset(4, 1)],
+                    total: 5,
+                },
+                AssetPage {
+                    assets: vec![asset(5, 1)],
+                    total: 5,
+                },
             ],
             calls: Mutex::new(vec![]),
         };
@@ -303,13 +396,23 @@ mod tests {
         let final_p = resumed.crawl_space(Space::Personal, &sink).await.unwrap();
 
         let calls = resume_src.calls.lock().unwrap();
-        assert_eq!(calls.first().copied(), Some((2, 2)), "resume must start from the saved cursor, not zero");
-        assert!(!calls.contains(&(0, 2)), "resume must not re-fetch the already-persisted first page");
+        assert_eq!(
+            calls.first().copied(),
+            Some((2, 2)),
+            "resume must start from the saved cursor, not zero"
+        );
+        assert!(
+            !calls.contains(&(0, 2)),
+            "resume must not re-fetch the already-persisted first page"
+        );
 
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 5);
         assert!(final_p.complete);
         let st = store.load_sync_state(Space::Personal).unwrap();
-        assert!(st.initial_crawl_complete, "barrier must flip true once the resumed crawl reaches the end");
+        assert!(
+            st.initial_crawl_complete,
+            "barrier must flip true once the resumed crawl reaches the end"
+        );
     }
 
     /// A partial crawl (source runs dry before `expected_total` is reached
@@ -321,16 +424,22 @@ mod tests {
         // Total claims 10 items but the source only ever has 2, so the crawl
         // stops on a short (empty) second page well short of expected_total.
         let src = ScriptedSource {
-            pages: vec![
-                AssetPage { assets: vec![asset(1, 1), asset(2, 1)], total: 10 },
-            ],
+            pages: vec![AssetPage {
+                assets: vec![asset(1, 1), asset(2, 1)],
+                total: 10,
+            }],
             calls: Mutex::new(vec![]),
         };
-        let sink = CountingSink { events: Mutex::new(vec![]) };
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
         let crawler = Crawler::new(&store, &src, 2);
         let p = crawler.crawl_space(Space::Personal, &sink).await.unwrap();
 
-        assert!(!p.complete, "must not claim complete when fetched count falls short of expected_total");
+        assert!(
+            !p.complete,
+            "must not claim complete when fetched count falls short of expected_total"
+        );
         let st = store.load_sync_state(Space::Personal).unwrap();
         assert!(!st.initial_crawl_complete);
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 2);
@@ -344,13 +453,21 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let src = ScriptedSource {
             pages: vec![
-                AssetPage { assets: vec![asset(1, 1), asset(2, 1)], total: 4 },
-                AssetPage { assets: vec![asset(3, 1), asset(4, 1)], total: 4 },
+                AssetPage {
+                    assets: vec![asset(1, 1), asset(2, 1)],
+                    total: 4,
+                },
+                AssetPage {
+                    assets: vec![asset(3, 1), asset(4, 1)],
+                    total: 4,
+                },
                 // idx 2 (offset 4) falls through to the default empty page.
             ],
             calls: Mutex::new(vec![]),
         };
-        let sink = CountingSink { events: Mutex::new(vec![]) };
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
         let crawler = Crawler::new(&store, &src, 2);
         let p = crawler.crawl_space(Space::Personal, &sink).await.unwrap();
 
@@ -358,7 +475,11 @@ mod tests {
         assert_eq!(p.done, 4);
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 4);
         let calls = src.calls.lock().unwrap();
-        assert_eq!(calls.as_slice(), &[(0, 2), (2, 2), (4, 2)], "must issue the trailing request past the exact boundary");
+        assert_eq!(
+            calls.as_slice(),
+            &[(0, 2), (2, 2), (4, 2)],
+            "must issue the trailing request past the exact boundary"
+        );
     }
 
     /// Short-but-nonempty final page: the last page has 1 item where the
@@ -370,19 +491,31 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let src = ScriptedSource {
             pages: vec![
-                AssetPage { assets: vec![asset(1, 1), asset(2, 1)], total: 3 },
-                AssetPage { assets: vec![asset(3, 1)], total: 3 },
+                AssetPage {
+                    assets: vec![asset(1, 1), asset(2, 1)],
+                    total: 3,
+                },
+                AssetPage {
+                    assets: vec![asset(3, 1)],
+                    total: 3,
+                },
             ],
             calls: Mutex::new(vec![]),
         };
-        let sink = CountingSink { events: Mutex::new(vec![]) };
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
         let crawler = Crawler::new(&store, &src, 2);
         let p = crawler.crawl_space(Space::Personal, &sink).await.unwrap();
 
         assert!(p.complete);
         assert_eq!(p.done, 3);
         let calls = src.calls.lock().unwrap();
-        assert_eq!(calls.as_slice(), &[(0, 2), (2, 2)], "must not fetch a third page once the short page is seen");
+        assert_eq!(
+            calls.as_slice(),
+            &[(0, 2), (2, 2)],
+            "must not fetch a third page once the short page is seen"
+        );
     }
 
     /// Undercounted total: the server reports a smaller `total` than the
@@ -396,33 +529,57 @@ mod tests {
             pages: vec![
                 // Reports total=2 but there are actually 5 items across three
                 // full-looking pages plus a short trailing page.
-                AssetPage { assets: vec![asset(1, 1), asset(2, 1)], total: 2 },
-                AssetPage { assets: vec![asset(3, 1), asset(4, 1)], total: 2 },
-                AssetPage { assets: vec![asset(5, 1)], total: 2 },
+                AssetPage {
+                    assets: vec![asset(1, 1), asset(2, 1)],
+                    total: 2,
+                },
+                AssetPage {
+                    assets: vec![asset(3, 1), asset(4, 1)],
+                    total: 2,
+                },
+                AssetPage {
+                    assets: vec![asset(5, 1)],
+                    total: 2,
+                },
             ],
             calls: Mutex::new(vec![]),
         };
-        let sink = CountingSink { events: Mutex::new(vec![]) };
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
         let crawler = Crawler::new(&store, &src, 2);
         let p = crawler.crawl_space(Space::Personal, &sink).await.unwrap();
 
-        assert_eq!(store.asset_count(Space::Personal).unwrap(), 5, "must not stop early just because offset passed the wrong total");
+        assert_eq!(
+            store.asset_count(Space::Personal).unwrap(),
+            5,
+            "must not stop early just because offset passed the wrong total"
+        );
         assert_eq!(p.done, 5);
         // expected_total was corrected by the final page's report; barrier
         // reflects the corrected total, not the stale early value.
         assert!(p.complete);
         let calls = src.calls.lock().unwrap();
-        assert_eq!(calls.len(), 3, "must keep paging past the undercounted total until a short page arrives");
+        assert_eq!(
+            calls.len(),
+            3,
+            "must keep paging past the undercounted total until a short page arrives"
+        );
     }
 
     #[tokio::test]
     async fn empty_space_completes_immediately() {
         let store = Store::open_in_memory().unwrap();
         let src = ScriptedSource {
-            pages: vec![AssetPage { assets: vec![], total: 0 }],
+            pages: vec![AssetPage {
+                assets: vec![],
+                total: 0,
+            }],
             calls: Mutex::new(vec![]),
         };
-        let sink = CountingSink { events: Mutex::new(vec![]) };
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
         let crawler = Crawler::new(&store, &src, 2);
         let p = crawler.crawl_space(Space::Personal, &sink).await.unwrap();
 

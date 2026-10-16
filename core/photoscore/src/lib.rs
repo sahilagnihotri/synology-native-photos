@@ -3,9 +3,10 @@
 use std::sync::{Arc, Mutex};
 
 use models::{
-    Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DayCount, DiscoveryCollection,
-    MediaKind, Person, Place, RecycleBinStatus, RecycleItem, SearchFacets, SearchFilters, Session, SessionState, Space,
-    Subject, Tag, ThumbnailData, ThumbnailSize, VideoPlaybackSource,
+    Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DayCount,
+    DiscoveryCollection, MediaKind, Person, Place, RecycleBinStatus, RecycleItem, SearchFacets,
+    SearchFilters, Session, SessionState, Space, Subject, Tag, ThumbnailData, ThumbnailSize,
+    VideoPlaybackSource,
 };
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
@@ -48,7 +49,12 @@ struct ApiPageSource {
 
 #[async_trait::async_trait]
 impl PageSource for ApiPageSource {
-    async fn list_items(&self, space: Space, offset: u32, limit: u32) -> Result<AssetPage, CoreError> {
+    async fn list_items(
+        &self,
+        space: Space,
+        offset: u32,
+        limit: u32,
+    ) -> Result<AssetPage, CoreError> {
         let assets = synology_api::list_items(
             &self.transport,
             &self.sid,
@@ -176,7 +182,14 @@ impl PhotosCore {
         device_token: Option<String>,
     ) -> Result<Session, CoreError> {
         let transport = Transport::new(&connection)?;
-        let session = synology_api::login(&transport, &username, &password, otp_code.as_deref(), device_token.as_deref()).await?;
+        let session = synology_api::login(
+            &transport,
+            &username,
+            &password,
+            otp_code.as_deref(),
+            device_token.as_deref(),
+        )
+        .await?;
         let mut guard = self.live.lock().expect("live mutex poisoned");
         *guard = Some(Live {
             transport,
@@ -221,7 +234,12 @@ impl PhotosCore {
         match synology_api::probe_capabilities(&transport).await {
             Ok(caps) => {
                 let mut guard = self.live.lock().expect("live mutex poisoned");
-                *guard = Some(Live { transport, session, connection, capabilities: caps });
+                *guard = Some(Live {
+                    transport,
+                    session,
+                    connection,
+                    capabilities: caps,
+                });
                 Ok(SessionState::Valid)
             }
             Err(CoreError::Auth { .. }) | Err(CoreError::OtpRequired) => Ok(SessionState::Expired),
@@ -268,7 +286,11 @@ impl PhotosCore {
             let guard = self.live.lock().expect("live mutex poisoned");
             match guard.as_ref() {
                 Some(live) => Transport::new(&live.connection)?,
-                None => return Err(CoreError::Auth { message: "not logged in".into() }),
+                None => {
+                    return Err(CoreError::Auth {
+                        message: "not logged in".into(),
+                    })
+                }
             }
         };
         let caps = synology_api::probe_capabilities(&transport).await?;
@@ -343,7 +365,12 @@ impl PhotosCore {
     /// only ever locks `store` for the duration of the read, so it can never
     /// block on (or be blocked by) a concurrent crawl for longer than that
     /// crawl needs to swap the `Store` back in.
-    pub fn fetch_assets(&self, space: Space, offset: u32, limit: u32) -> Result<Vec<Asset>, CoreError> {
+    pub fn fetch_assets(
+        &self,
+        space: Space,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Asset>, CoreError> {
         let guard = self.store.lock().expect("store mutex poisoned");
         let store = guard.as_ref().ok_or_else(store_busy_err)?;
         store.fetch_assets(space, offset, limit)
@@ -386,7 +413,15 @@ impl PhotosCore {
     ) -> Result<Vec<Asset>, CoreError> {
         let guard = self.store.lock().expect("store mutex poisoned");
         let store = guard.as_ref().ok_or_else(store_busy_err)?;
-        store.filter_assets(space, media_kind, taken_after, taken_before, min_rating, offset, limit)
+        store.filter_assets(
+            space,
+            media_kind,
+            taken_after,
+            taken_before,
+            min_rating,
+            offset,
+            limit,
+        )
     }
 
     /// Local-only count of assets in `space` matching the same Quick Filter
@@ -441,9 +476,18 @@ impl PhotosCore {
     /// Requires a live session; fails closed with `CoreError::Auth`
     /// otherwise.
     pub async fn fetch_albums(&self, offset: u32, limit: u32) -> Result<Vec<Album>, CoreError> {
-        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Album")?;
-        synology_api::list_albums(&transport, &sid, Space::Personal, offset, limit, version, syno_token.as_deref())
-            .await
+        let (transport, sid, version, syno_token) =
+            self.discovery_call_context("SYNO.Foto.Browse.Album")?;
+        synology_api::list_albums(
+            &transport,
+            &sid,
+            Space::Personal,
+            offset,
+            limit,
+            version,
+            syno_token.as_deref(),
+        )
+        .await
     }
 
     /// Lists People (`SYNO.Foto.Browse.Person`), a live network call every
@@ -452,15 +496,33 @@ impl PhotosCore {
     /// the NAS. Requires a live session; fails closed with `CoreError::Auth`
     /// otherwise.
     pub async fn fetch_people(&self, offset: u32, limit: u32) -> Result<Vec<Person>, CoreError> {
-        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Person")?;
-        synology_api::list_people(&transport, &sid, offset, limit, version, syno_token.as_deref()).await
+        let (transport, sid, version, syno_token) =
+            self.discovery_call_context("SYNO.Foto.Browse.Person")?;
+        synology_api::list_people(
+            &transport,
+            &sid,
+            offset,
+            limit,
+            version,
+            syno_token.as_deref(),
+        )
+        .await
     }
 
     /// Lists Places (`SYNO.Foto.Browse.Geocoding`). Same live-call and auth
     /// discipline as `fetch_people`.
     pub async fn fetch_places(&self, offset: u32, limit: u32) -> Result<Vec<Place>, CoreError> {
-        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Geocoding")?;
-        synology_api::list_places(&transport, &sid, offset, limit, version, syno_token.as_deref()).await
+        let (transport, sid, version, syno_token) =
+            self.discovery_call_context("SYNO.Foto.Browse.Geocoding")?;
+        synology_api::list_places(
+            &transport,
+            &sid,
+            offset,
+            limit,
+            version,
+            syno_token.as_deref(),
+        )
+        .await
     }
 
     /// Lists Subjects (`SYNO.Foto.Browse.Concept`). Same live-call and auth
@@ -469,15 +531,33 @@ impl PhotosCore {
     /// `DiscoveryCollection`'s doc comment), so a subject tile has nothing
     /// to route to on this NAS until a working item filter is found.
     pub async fn fetch_subjects(&self, offset: u32, limit: u32) -> Result<Vec<Subject>, CoreError> {
-        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Concept")?;
-        synology_api::list_subjects(&transport, &sid, offset, limit, version, syno_token.as_deref()).await
+        let (transport, sid, version, syno_token) =
+            self.discovery_call_context("SYNO.Foto.Browse.Concept")?;
+        synology_api::list_subjects(
+            &transport,
+            &sid,
+            offset,
+            limit,
+            version,
+            syno_token.as_deref(),
+        )
+        .await
     }
 
     /// Lists Tags (`SYNO.Foto.Browse.GeneralTag`). Same live-call and auth
     /// discipline as `fetch_people`.
     pub async fn fetch_tags(&self, offset: u32, limit: u32) -> Result<Vec<Tag>, CoreError> {
-        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.GeneralTag")?;
-        synology_api::list_tags(&transport, &sid, offset, limit, version, syno_token.as_deref()).await
+        let (transport, sid, version, syno_token) =
+            self.discovery_call_context("SYNO.Foto.Browse.GeneralTag")?;
+        synology_api::list_tags(
+            &transport,
+            &sid,
+            offset,
+            limit,
+            version,
+            syno_token.as_deref(),
+        )
+        .await
     }
 
     /// Fetches the photos belonging to one discovery-browse `collection`
@@ -496,7 +576,8 @@ impl PhotosCore {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<Asset>, CoreError> {
-        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Browse.Item")?;
+        let (transport, sid, version, syno_token) =
+            self.discovery_call_context("SYNO.Foto.Browse.Item")?;
         let filter = match collection {
             DiscoveryCollection::Person { id } => CollectionFilter::Person(id),
             DiscoveryCollection::Place { id } => CollectionFilter::Place(id),
@@ -504,8 +585,16 @@ impl PhotosCore {
             DiscoveryCollection::Favorites => CollectionFilter::Favorites,
             DiscoveryCollection::Album { id } => CollectionFilter::Album(id),
         };
-        synology_api::list_items_filtered(&transport, &sid, filter, offset, limit, version, syno_token.as_deref())
-            .await
+        synology_api::list_items_filtered(
+            &transport,
+            &sid,
+            filter,
+            offset,
+            limit,
+            version,
+            syno_token.as_deref(),
+        )
+        .await
     }
 
     /// SERVER-side People/Geolocation + date filter over the library, windowed
@@ -535,7 +624,8 @@ impl PhotosCore {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<Asset>, CoreError> {
-        let (transport, sid, version, syno_token) = self.discovery_call_context(browse_item_api(space))?;
+        let (transport, sid, version, syno_token) =
+            self.discovery_call_context(browse_item_api(space))?;
         synology_api::filter_items(
             &transport,
             &sid,
@@ -562,9 +652,24 @@ impl PhotosCore {
     ///
     /// Requires a live session; fails closed with `CoreError::Auth`
     /// otherwise.
-    pub async fn search_assets(&self, keyword: String, offset: u32, limit: u32) -> Result<Vec<Asset>, CoreError> {
-        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Search.Search")?;
-        synology_api::search(&transport, &sid, &keyword, offset, limit, version, syno_token.as_deref()).await
+    pub async fn search_assets(
+        &self,
+        keyword: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Asset>, CoreError> {
+        let (transport, sid, version, syno_token) =
+            self.discovery_call_context("SYNO.Foto.Search.Search")?;
+        synology_api::search(
+            &transport,
+            &sid,
+            &keyword,
+            offset,
+            limit,
+            version,
+            syno_token.as_deref(),
+        )
+        .await
     }
 
     /// Same as `search_assets`, but additionally narrows results to
@@ -584,8 +689,19 @@ impl PhotosCore {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<Asset>, CoreError> {
-        let (transport, sid, version, syno_token) = self.discovery_call_context("SYNO.Foto.Search.Search")?;
-        synology_api::search_filtered(&transport, &sid, &keyword, &filters, offset, limit, version, syno_token.as_deref()).await
+        let (transport, sid, version, syno_token) =
+            self.discovery_call_context("SYNO.Foto.Search.Search")?;
+        synology_api::search_filtered(
+            &transport,
+            &sid,
+            &keyword,
+            &filters,
+            offset,
+            limit,
+            version,
+            syno_token.as_deref(),
+        )
+        .await
     }
 
     /// Fetches the search facet catalog (`SYNO.Foto.Search.Filter`,
@@ -600,7 +716,8 @@ impl PhotosCore {
     /// catalog. Requires a live session; fails closed with `CoreError::Auth`
     /// otherwise.
     pub async fn fetch_search_facets(&self) -> Result<SearchFacets, CoreError> {
-        let (transport, sid, _version, syno_token) = self.discovery_call_context("SYNO.Foto.Search.Filter")?;
+        let (transport, sid, _version, syno_token) =
+            self.discovery_call_context("SYNO.Foto.Search.Filter")?;
         synology_api::search_facets(&transport, &sid, syno_token.as_deref()).await
     }
 
@@ -645,21 +762,41 @@ impl PhotosCore {
         size: ThumbnailSize,
     ) -> Result<ThumbnailData, CoreError> {
         let dir = std::path::Path::new(&self.cache_dir).join("thumbs");
-        let path = dir.join(format!("{}.jpg", cache_digest(&[space_tag(space), &unit_id.to_string(), size_tag(size), &cache_key])));
+        let path = dir.join(format!(
+            "{}.jpg",
+            cache_digest(&[
+                space_tag(space),
+                &unit_id.to_string(),
+                size_tag(size),
+                &cache_key
+            ])
+        ));
         if path.exists() {
-            let bytes = std::fs::read(&path).map_err(|e| CoreError::Storage { message: e.to_string() })?;
-            return Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes });
+            let bytes = std::fs::read(&path).map_err(|e| CoreError::Storage {
+                message: e.to_string(),
+            })?;
+            return Ok(ThumbnailData {
+                cached_path: path.to_string_lossy().into(),
+                bytes,
+            });
         }
 
         let (transport, sid, version, syno_token) = {
             let guard = self.live.lock().expect("live mutex poisoned");
-            let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
+            let live = guard.as_ref().ok_or(CoreError::Auth {
+                message: "not logged in".into(),
+            })?;
             let api = match space {
                 Space::Personal => "SYNO.Foto.Thumbnail",
                 Space::Shared => "SYNO.FotoTeam.Thumbnail",
             };
             let version = synology_api::pin_version(&live.capabilities, api, 2).unwrap_or(2);
-            (Transport::new(&live.connection)?, live.session.sid.clone(), version, live.session.syno_token.clone())
+            (
+                Transport::new(&live.connection)?,
+                live.session.sid.clone(),
+                version,
+                live.session.syno_token.clone(),
+            )
         };
 
         let bytes = synology_api::fetch_thumbnail(
@@ -674,7 +811,10 @@ impl PhotosCore {
         )
         .await?;
         write_cache_file_atomically(&dir, &path, &bytes)?;
-        Ok(ThumbnailData { cached_path: path.to_string_lossy().into(), bytes })
+        Ok(ThumbnailData {
+            cached_path: path.to_string_lossy().into(),
+            bytes,
+        })
     }
 
     /// Downloads the original full-resolution bytes for `unit_id` to a
@@ -700,13 +840,20 @@ impl PhotosCore {
     ) -> Result<String, CoreError> {
         let (transport, sid, version, syno_token) = {
             let guard = self.live.lock().expect("live mutex poisoned");
-            let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
+            let live = guard.as_ref().ok_or(CoreError::Auth {
+                message: "not logged in".into(),
+            })?;
             let api = match space {
                 Space::Personal => "SYNO.Foto.Download",
                 Space::Shared => "SYNO.FotoTeam.Download",
             };
             let version = synology_api::pin_version(&live.capabilities, api, 2).unwrap_or(2);
-            (Transport::new(&live.connection)?, live.session.sid.clone(), version, live.session.syno_token.clone())
+            (
+                Transport::new(&live.connection)?,
+                live.session.sid.clone(),
+                version,
+                live.session.syno_token.clone(),
+            )
         };
 
         let bytes = synology_api::download_original(
@@ -720,7 +867,10 @@ impl PhotosCore {
         )
         .await?;
         let dir = std::env::temp_dir();
-        let tmp = dir.join(format!("syno-orig-{}", cache_digest(&[&unit_id.to_string(), &cache_key])));
+        let tmp = dir.join(format!(
+            "syno-orig-{}",
+            cache_digest(&[&unit_id.to_string(), &cache_key])
+        ));
         write_cache_file_atomically(&dir, &tmp, &bytes)?;
         Ok(tmp.to_string_lossy().into())
     }
@@ -747,8 +897,14 @@ impl PhotosCore {
     ///
     /// Same lock discipline and auth-fail-closed behavior as
     /// `download_original`, which this delegates to internally.
-    pub async fn video_playback_source(&self, space: Space, asset: Asset) -> Result<VideoPlaybackSource, CoreError> {
-        let path = self.download_original(space, asset.unit_id, asset.cache_key).await?;
+    pub async fn video_playback_source(
+        &self,
+        space: Space,
+        asset: Asset,
+    ) -> Result<VideoPlaybackSource, CoreError> {
+        let path = self
+            .download_original(space, asset.unit_id, asset.cache_key)
+            .await?;
         Ok(VideoPlaybackSource::LocalFile { path })
     }
 
@@ -778,10 +934,21 @@ impl PhotosCore {
     /// the re-index carry their own fixed API versions, so no capability-pinned
     /// version needs resolving. Requires a live session; fails closed with
     /// `CoreError::Auth` if none is held.
-    pub async fn save_edited_photo(&self, filename: String, jpeg: Vec<u8>) -> Result<(), CoreError> {
+    pub async fn save_edited_photo(
+        &self,
+        filename: String,
+        jpeg: Vec<u8>,
+    ) -> Result<(), CoreError> {
         let (transport, sid, syno_token) = self.recycle_call_context()?;
-        synology_api::upload_file(&transport, &sid, syno_token.as_deref(), EDITED_PHOTOS_FOLDER, &filename, &jpeg)
-            .await?;
+        synology_api::upload_file(
+            &transport,
+            &sid,
+            syno_token.as_deref(),
+            EDITED_PHOTOS_FOLDER,
+            &filename,
+            &jpeg,
+        )
+        .await?;
         synology_api::trigger_reindex(&transport, &sid, syno_token.as_deref()).await
     }
 
@@ -821,8 +988,17 @@ impl PhotosCore {
         let mut ids = asset_ids;
         ids.sort_unstable();
         ids.dedup();
-        let (transport, sid, version, syno_token) = self.write_call_context(browse_item_api(space), 7)?;
-        synology_api::permanent_delete(&transport, &sid, space, &ids, version, syno_token.as_deref()).await?;
+        let (transport, sid, version, syno_token) =
+            self.write_call_context(browse_item_api(space), 7)?;
+        synology_api::permanent_delete(
+            &transport,
+            &sid,
+            space,
+            &ids,
+            version,
+            syno_token.as_deref(),
+        )
+        .await?;
         // Confirmed gone from the NAS; drop the local rows entirely.
         let guard = self.store.lock().expect("store mutex poisoned");
         let store = guard.as_ref().ok_or_else(store_busy_err)?;
@@ -836,9 +1012,14 @@ impl PhotosCore {
     /// of the recycle bin), so it needs a live session and makes network
     /// calls; an absent recycle folder returns an empty list, not an error.
     /// Fails closed with `CoreError::Auth` if no session is held.
-    pub async fn fetch_recently_deleted(&self, offset: u32, limit: u32) -> Result<Vec<RecycleItem>, CoreError> {
+    pub async fn fetch_recently_deleted(
+        &self,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<RecycleItem>, CoreError> {
         let (transport, sid, syno_token) = self.recycle_call_context()?;
-        synology_api::list_recycle_photos(&transport, &sid, syno_token.as_deref(), offset, limit).await
+        synology_api::list_recycle_photos(&transport, &sid, syno_token.as_deref(), offset, limit)
+            .await
     }
 
     /// Whether the DSM recycle bin for user home folders is on, read live
@@ -863,7 +1044,10 @@ impl PhotosCore {
     /// up by the next successful re-index or crawl. An empty `recycle_paths`
     /// is a no-op. Serialized via `trash_lock`; requires a live session. Every
     /// path is checked to lie inside the recycle bin before the first move.
-    pub async fn restore_recently_deleted(&self, recycle_paths: Vec<String>) -> Result<(), CoreError> {
+    pub async fn restore_recently_deleted(
+        &self,
+        recycle_paths: Vec<String>,
+    ) -> Result<(), CoreError> {
         if recycle_paths.is_empty() {
             return Ok(());
         }
@@ -875,7 +1059,10 @@ impl PhotosCore {
         let total = recycle_paths.len();
         let mut restored = 0usize;
         for path in &recycle_paths {
-            if let Err(e) = synology_api::restore_recycle_item(&transport, &sid, syno_token.as_deref(), path).await {
+            if let Err(e) =
+                synology_api::restore_recycle_item(&transport, &sid, syno_token.as_deref(), path)
+                    .await
+            {
                 if restored == 0 {
                     return Err(e);
                 }
@@ -896,7 +1083,10 @@ impl PhotosCore {
     /// `trash_lock`; requires a live session. Every path is checked to lie
     /// inside the recycle bin BEFORE the first delete, so one bad path in a
     /// batch deletes nothing at all.
-    pub async fn empty_recently_deleted(&self, recycle_paths: Vec<String>) -> Result<(), CoreError> {
+    pub async fn empty_recently_deleted(
+        &self,
+        recycle_paths: Vec<String>,
+    ) -> Result<(), CoreError> {
         if recycle_paths.is_empty() {
             return Ok(());
         }
@@ -906,7 +1096,8 @@ impl PhotosCore {
         let _lock = self.trash_lock.lock().await;
         let (transport, sid, syno_token) = self.recycle_call_context()?;
         for path in &recycle_paths {
-            synology_api::delete_recycle_item(&transport, &sid, syno_token.as_deref(), path).await?;
+            synology_api::delete_recycle_item(&transport, &sid, syno_token.as_deref(), path)
+                .await?;
         }
         Ok(())
     }
@@ -916,9 +1107,20 @@ impl PhotosCore {
     /// through to File Station's own scale keyword. A JSON error from the NAS
     /// maps to a `CoreError` (never returned as bogus image bytes), which the
     /// UI can treat as "show a placeholder". Requires a live session.
-    pub async fn recycle_thumbnail(&self, recycle_path: String, size: String) -> Result<Vec<u8>, CoreError> {
+    pub async fn recycle_thumbnail(
+        &self,
+        recycle_path: String,
+        size: String,
+    ) -> Result<Vec<u8>, CoreError> {
         let (transport, sid, syno_token) = self.recycle_call_context()?;
-        synology_api::recycle_thumbnail(&transport, &sid, syno_token.as_deref(), &recycle_path, &size).await
+        synology_api::recycle_thumbnail(
+            &transport,
+            &sid,
+            syno_token.as_deref(),
+            &recycle_path,
+            &size,
+        )
+        .await
     }
 }
 
@@ -983,25 +1185,45 @@ fn cache_digest(parts: &[&str]) -> String {
 /// replaces whatever is at `final_path` wholesale rather than opening and
 /// writing through it, so a symlink planted at `final_path` is atomically
 /// swapped out rather than dereferenced and written into.
-fn write_cache_file_atomically(dir: &std::path::Path, final_path: &std::path::Path, bytes: &[u8]) -> Result<(), CoreError> {
-    std::fs::create_dir_all(dir).map_err(|e| CoreError::Storage { message: e.to_string() })?;
-    let unique = format!(".tmp-{}-{}", std::process::id(), cache_digest(&[&std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos().to_string()]));
+fn write_cache_file_atomically(
+    dir: &std::path::Path,
+    final_path: &std::path::Path,
+    bytes: &[u8],
+) -> Result<(), CoreError> {
+    std::fs::create_dir_all(dir).map_err(|e| CoreError::Storage {
+        message: e.to_string(),
+    })?;
+    let unique = format!(
+        ".tmp-{}-{}",
+        std::process::id(),
+        cache_digest(&[&std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .to_string()])
+    );
     let tmp_path = dir.join(unique);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&tmp_path)
-        .map_err(|e| CoreError::Storage { message: e.to_string() })?;
+        .map_err(|e| CoreError::Storage {
+            message: e.to_string(),
+        })?;
     use std::io::Write;
     let write_result = file.write_all(bytes).and_then(|_| file.sync_all());
     if let Err(e) = write_result {
         let _ = std::fs::remove_file(&tmp_path);
-        return Err(CoreError::Storage { message: e.to_string() });
+        return Err(CoreError::Storage {
+            message: e.to_string(),
+        });
     }
     drop(file);
     std::fs::rename(&tmp_path, final_path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp_path);
-        CoreError::Storage { message: e.to_string() }
+        CoreError::Storage {
+            message: e.to_string(),
+        }
     })
 }
 
@@ -1010,7 +1232,9 @@ fn write_cache_file_atomically(dir: &std::path::Path, final_path: &std::path::Pa
 /// landing in that window gets a clear, fail-closed error rather than a
 /// panic on `Option::unwrap`.
 fn store_busy_err() -> CoreError {
-    CoreError::Storage { message: "store busy: a crawl or reconcile is in progress".into() }
+    CoreError::Storage {
+        message: "store busy: a crawl or reconcile is in progress".into(),
+    }
 }
 
 impl PhotosCore {
@@ -1022,12 +1246,16 @@ impl PhotosCore {
     /// the resulting source's `list_items`.
     fn page_source_for(&self, _space: Space) -> Result<ApiPageSource, CoreError> {
         let guard = self.live.lock().expect("live mutex poisoned");
-        let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
+        let live = guard.as_ref().ok_or(CoreError::Auth {
+            message: "not logged in".into(),
+        })?;
         // Browse.Item list must be version 2 or higher: the enriched
         // ITEM_ADDITIONAL (exif/description/rating/video_meta) is rejected with
         // error 120 at version 1 (verified against the real NAS).
         let version = synology_api::pin_version(&live.capabilities, "SYNO.Foto.Browse.Item", 2)
-            .or_else(|_| synology_api::pin_version(&live.capabilities, "SYNO.FotoTeam.Browse.Item", 2))
+            .or_else(|_| {
+                synology_api::pin_version(&live.capabilities, "SYNO.FotoTeam.Browse.Item", 2)
+            })
             .unwrap_or(2);
         Ok(ApiPageSource {
             transport: Transport::new(&live.connection)?,
@@ -1051,15 +1279,21 @@ impl PhotosCore {
     /// dropped before returning, well before any caller `.await`s the
     /// resulting transport's network call, same discipline as
     /// `page_source_for`/`thumbnail`/`download_original`.
-    fn discovery_call_context(&self, api: &str) -> Result<(Transport, String, u32, Option<String>), CoreError> {
+    fn discovery_call_context(
+        &self,
+        api: &str,
+    ) -> Result<(Transport, String, u32, Option<String>), CoreError> {
         let guard = self.live.lock().expect("live mutex poisoned");
-        let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
+        let live = guard.as_ref().ok_or(CoreError::Auth {
+            message: "not logged in".into(),
+        })?;
         // Browse.Item list carries the enriched ITEM_ADDITIONAL, which needs
         // version 2 or higher (version 1 answers error 120). The discovery
         // collection APIs (Person/Geocoding/Concept/GeneralTag/Album) and
         // Search.Search keep version 1, matching their shipped, verified path.
         let desired = if api.ends_with(".Browse.Item") { 2 } else { 1 };
-        let version = synology_api::pin_version(&live.capabilities, api, desired).unwrap_or(desired);
+        let version =
+            synology_api::pin_version(&live.capabilities, api, desired).unwrap_or(desired);
         Ok((
             Transport::new(&live.connection)?,
             live.session.sid.clone(),
@@ -1082,8 +1316,11 @@ impl PhotosCore {
         desired: u32,
     ) -> Result<(Transport, String, u32, Option<String>), CoreError> {
         let guard = self.live.lock().expect("live mutex poisoned");
-        let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
-        let version = synology_api::pin_version(&live.capabilities, api, desired).unwrap_or(desired);
+        let live = guard.as_ref().ok_or(CoreError::Auth {
+            message: "not logged in".into(),
+        })?;
+        let version =
+            synology_api::pin_version(&live.capabilities, api, desired).unwrap_or(desired);
         Ok((
             Transport::new(&live.connection)?,
             live.session.sid.clone(),
@@ -1101,7 +1338,9 @@ impl PhotosCore {
     /// needed and dropped before the caller `.await`s the network call.
     fn recycle_call_context(&self) -> Result<(Transport, String, Option<String>), CoreError> {
         let guard = self.live.lock().expect("live mutex poisoned");
-        let live = guard.as_ref().ok_or(CoreError::Auth { message: "not logged in".into() })?;
+        let live = guard.as_ref().ok_or(CoreError::Auth {
+            message: "not logged in".into(),
+        })?;
         Ok((
             Transport::new(&live.connection)?,
             live.session.sid.clone(),
@@ -1147,8 +1386,9 @@ impl PhotosCore {
     where
         F: for<'a> FnOnce(
                 &'a Store,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<CrawlProgress, CoreError>> + 'a>>
-            + Send
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<CrawlProgress, CoreError>> + 'a>,
+            > + Send
             + 'static,
     {
         let store = {
@@ -1169,15 +1409,19 @@ impl PhotosCore {
             // unwind-safety on the borrow is sound even though `Store`
             // doesn't implement `UnwindSafe` itself (its `RefCell`-backed
             // statement cache is what disqualifies it).
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle.block_on(work(&store))))
-                .unwrap_or_else(|panic| {
-                    let message = panic
-                        .downcast_ref::<&str>()
-                        .map(|s| s.to_string())
-                        .or_else(|| panic.downcast_ref::<String>().cloned())
-                        .unwrap_or_else(|| "non-string panic payload".to_string());
-                    Err(CoreError::Storage { message: format!("crawl/reconcile task panicked: {message}") })
-                });
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                handle.block_on(work(&store))
+            }))
+            .unwrap_or_else(|panic| {
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "non-string panic payload".to_string());
+                Err(CoreError::Storage {
+                    message: format!("crawl/reconcile task panicked: {message}"),
+                })
+            });
             (store, result)
         })
         .await;
@@ -1195,7 +1439,9 @@ impl PhotosCore {
             // `Store` was moved into that still-unresolved task and cannot be
             // recovered here; `store` stays `None` in this one remaining
             // case, which fails closed via `store_busy_err` on later calls.
-            Err(e) => Err(CoreError::Storage { message: format!("crawl/reconcile task failed to join: {e}") }),
+            Err(e) => Err(CoreError::Storage {
+                message: format!("crawl/reconcile task failed to join: {e}"),
+            }),
         }
     }
 }
@@ -1228,8 +1474,11 @@ mod core_tests {
         let dir = std::env::temp_dir().join(format!("photoscore-{}-{}", label, std::process::id()));
         std::fs::create_dir_all(dir.join("db")).unwrap();
         std::fs::create_dir_all(dir.join("cache")).unwrap();
-        PhotosCore::new(dir.join("db").to_string_lossy().into(), dir.join("cache").to_string_lossy().into())
-            .expect("core opens")
+        PhotosCore::new(
+            dir.join("db").to_string_lossy().into(),
+            dir.join("cache").to_string_lossy().into(),
+        )
+        .expect("core opens")
     }
 
     #[tokio::test]
@@ -1243,9 +1492,20 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("login");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
         let session = core
-            .login(conn, "photouser".into(), "pw".into(), Some("123456".into()), None)
+            .login(
+                conn,
+                "photouser".into(),
+                "pw".into(),
+                Some("123456".into()),
+                None,
+            )
             .await
             .expect("login ok");
         assert_eq!(session.sid, "SID-CORE");
@@ -1268,7 +1528,12 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("login-otp");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
         let err = core
             .login(conn, "photouser".into(), "pw".into(), None, None)
             .await
@@ -1291,14 +1556,22 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("restore-valid");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
         let session = Session {
             sid: "SID-RESTORE".into(),
             syno_token: None,
             username: "photouser".into(),
             device_did: None,
         };
-        let state = core.restore_session(conn, session).await.expect("restore ok");
+        let state = core
+            .restore_session(conn, session)
+            .await
+            .expect("restore ok");
         assert!(matches!(state, SessionState::Valid), "got {state:?}");
         assert!(core.live.lock().unwrap().is_some());
     }
@@ -1314,22 +1587,35 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("restore-expired");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
         let session = Session {
             sid: "SID-STALE".into(),
             syno_token: None,
             username: "photouser".into(),
             device_did: None,
         };
-        let state = core.restore_session(conn, session).await.expect("restore does not error on expiry");
+        let state = core
+            .restore_session(conn, session)
+            .await
+            .expect("restore does not error on expiry");
         assert!(matches!(state, SessionState::Expired), "got {state:?}");
-        assert!(core.live.lock().unwrap().is_none(), "expired restore must not populate Live");
+        assert!(
+            core.live.lock().unwrap().is_none(),
+            "expired restore must not populate Live"
+        );
     }
 
     #[tokio::test]
     async fn sign_out_is_idempotent_without_session() {
         let core = core_at("signout-empty");
-        core.sign_out().await.expect("sign_out without a session is a no-op");
+        core.sign_out()
+            .await
+            .expect("sign_out without a session is a no-op");
         assert!(core.live.lock().unwrap().is_none());
     }
 
@@ -1358,12 +1644,21 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("probe-caps");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "photouser".into(), "pw".into(), None, None).await.expect("login ok");
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "photouser".into(), "pw".into(), None, None)
+            .await
+            .expect("login ok");
 
         let caps = core.probe_capabilities().await.expect("probe ok");
         assert!(caps.iter().any(|c| c.name == "SYNO.Foto.Browse.Item"));
-        assert!(caps.iter().any(|c| c.name == "SYNO.Foto.Thumbnail" && c.max_version == 2));
+        assert!(caps
+            .iter()
+            .any(|c| c.name == "SYNO.Foto.Thumbnail" && c.max_version == 2));
         assert_eq!(caps.len(), 4);
 
         // The probe must cache the discovered set into Live.capabilities so
@@ -1386,9 +1681,13 @@ mod core_tests {
     #[tokio::test]
     async fn crawl_space_persists_and_reports_complete() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
@@ -1402,17 +1701,33 @@ mod core_tests {
         let dir = std::env::temp_dir().join(format!("photoscore-crawl-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("db")).unwrap();
         std::fs::create_dir_all(dir.join("cache")).unwrap();
-        let core = PhotosCore::new(dir.join("db").to_string_lossy().into(), dir.join("cache").to_string_lossy().into()).unwrap();
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let core = PhotosCore::new(
+            dir.join("db").to_string_lossy().into(),
+            dir.join("cache").to_string_lossy().into(),
+        )
+        .unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
         struct Collector(std::sync::Mutex<Vec<CrawlProgress>>);
         impl FfiCrawlObserver for Collector {
-            fn on_progress(&self, p: CrawlProgress) { self.0.lock().unwrap().push(p); }
+            fn on_progress(&self, p: CrawlProgress) {
+                self.0.lock().unwrap().push(p);
+            }
         }
         let obs = Collector(std::sync::Mutex::new(vec![]));
-        let final_p = core.crawl_space(Space::Personal, Box::new(obs)).await.expect("crawl ok");
+        let final_p = core
+            .crawl_space(Space::Personal, Box::new(obs))
+            .await
+            .expect("crawl ok");
         assert!(final_p.complete);
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
         assert!(core.crawl_progress(Space::Personal).unwrap().complete);
@@ -1427,7 +1742,10 @@ mod core_tests {
         impl FfiCrawlObserver for Collector {
             fn on_progress(&self, _p: CrawlProgress) {}
         }
-        let err = core.crawl_space(Space::Personal, Box::new(Collector)).await.unwrap_err();
+        let err = core
+            .crawl_space(Space::Personal, Box::new(Collector))
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
@@ -1441,9 +1759,13 @@ mod core_tests {
     #[tokio::test]
     async fn crawl_space_completes_without_deadlock() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
@@ -1455,8 +1777,15 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"list":[{"id":1,"filename":"a.jpg","type":"photo","additional":{"thumbnail":{"cache_key":"CK1"}}}]}}"#)
             .create_async().await;
         let core = core_at("crawl-liveness");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
         struct NoopObserver;
@@ -1487,9 +1816,13 @@ mod core_tests {
     #[tokio::test]
     async fn crawl_space_recovers_store_after_panic() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
@@ -1501,8 +1834,15 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"list":[{"id":1,"filename":"a.jpg","type":"photo","additional":{"thumbnail":{"cache_key":"CK1"}}}]}}"#)
             .create_async().await;
         let core = core_at("crawl-panic-recovery");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
         struct PanickingObserver;
@@ -1532,10 +1872,17 @@ mod core_tests {
         // forever instead of succeeding. (The single page was already
         // upserted before the observer callback panicked, so the asset is
         // present; what matters here is that the read succeeds at all.)
-        let count = core.asset_count(Space::Personal).expect("store must be usable again after the panic");
+        let count = core
+            .asset_count(Space::Personal)
+            .expect("store must be usable again after the panic");
         assert_eq!(count, 1);
-        let progress = core.crawl_progress(Space::Personal).expect("progress read must succeed after the panic");
-        assert!(progress.complete, "the crawl had already persisted the completing page before the panic");
+        let progress = core
+            .crawl_progress(Space::Personal)
+            .expect("progress read must succeed after the panic");
+        assert!(
+            progress.complete,
+            "the crawl had already persisted the completing page before the panic"
+        );
 
         // And a fresh crawl on the same core must work end to end, proving
         // the recovered Store is not just readable but fully functional.
@@ -1543,7 +1890,10 @@ mod core_tests {
         impl FfiCrawlObserver for NoopObserver {
             fn on_progress(&self, _p: CrawlProgress) {}
         }
-        let retried = core.crawl_space(Space::Personal, Box::new(NoopObserver)).await.expect("retry crawl ok");
+        let retried = core
+            .crawl_space(Space::Personal, Box::new(NoopObserver))
+            .await
+            .expect("retry crawl ok");
         assert!(retried.complete);
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
     }
@@ -1551,9 +1901,13 @@ mod core_tests {
     #[tokio::test]
     async fn reconcile_delta_runs_after_crawl() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
@@ -1565,17 +1919,29 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"list":[{"id":1,"filename":"a.jpg","type":"photo","additional":{"thumbnail":{"cache_key":"CK1"}}}]}}"#)
             .create_async().await;
         let core = core_at("reconcile");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
         struct NoopObserver;
         impl FfiCrawlObserver for NoopObserver {
             fn on_progress(&self, _p: CrawlProgress) {}
         }
-        core.crawl_space(Space::Personal, Box::new(NoopObserver)).await.expect("crawl ok");
+        core.crawl_space(Space::Personal, Box::new(NoopObserver))
+            .await
+            .expect("crawl ok");
 
-        let progress = core.reconcile_delta(Space::Personal).await.expect("reconcile ok");
+        let progress = core
+            .reconcile_delta(Space::Personal)
+            .await
+            .expect("reconcile ok");
         assert_eq!(progress.done, 1);
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
     }
@@ -1583,7 +1949,9 @@ mod core_tests {
     #[tokio::test]
     async fn crawl_progress_without_any_crawl_reports_zero_incomplete() {
         let core = core_at("progress-empty");
-        let progress = core.crawl_progress(Space::Personal).expect("progress read ok");
+        let progress = core
+            .crawl_progress(Space::Personal)
+            .expect("progress read ok");
         assert!(!progress.complete);
         assert_eq!(progress.done, 0);
     }
@@ -1596,9 +1964,16 @@ mod core_tests {
         let dir = std::env::temp_dir().join(format!("photoscore-fetch-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("db")).unwrap();
         std::fs::create_dir_all(dir.join("cache")).unwrap();
-        let core = PhotosCore::new(dir.join("db").to_string_lossy().into(), dir.join("cache").to_string_lossy().into()).unwrap();
+        let core = PhotosCore::new(
+            dir.join("db").to_string_lossy().into(),
+            dir.join("cache").to_string_lossy().into(),
+        )
+        .unwrap();
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
-        assert!(core.fetch_assets(Space::Personal, 0, 10).unwrap().is_empty());
+        assert!(core
+            .fetch_assets(Space::Personal, 0, 10)
+            .unwrap()
+            .is_empty());
         assert!(core.fetch_local_albums(Space::Personal).unwrap().is_empty());
     }
 
@@ -1609,10 +1984,15 @@ mod core_tests {
     /// leak across spaces.
     #[test]
     fn fetch_assets_and_albums_return_upserted_rows_windowed_and_space_scoped() {
-        let dir = std::env::temp_dir().join(format!("photoscore-fetch-data-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("photoscore-fetch-data-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("db")).unwrap();
         std::fs::create_dir_all(dir.join("cache")).unwrap();
-        let core = PhotosCore::new(dir.join("db").to_string_lossy().into(), dir.join("cache").to_string_lossy().into()).unwrap();
+        let core = PhotosCore::new(
+            dir.join("db").to_string_lossy().into(),
+            dir.join("cache").to_string_lossy().into(),
+        )
+        .unwrap();
 
         {
             let guard = core.store.lock().unwrap();
@@ -1684,12 +2064,22 @@ mod core_tests {
 
         // Newest-first (by taken_at), windowed by offset/limit.
         let first_page = core.fetch_assets(Space::Personal, 0, 2).unwrap();
-        assert_eq!(first_page.iter().map(|a| a.id).collect::<Vec<_>>(), vec![5, 4]);
+        assert_eq!(
+            first_page.iter().map(|a| a.id).collect::<Vec<_>>(),
+            vec![5, 4]
+        );
         let second_page = core.fetch_assets(Space::Personal, 2, 2).unwrap();
-        assert_eq!(second_page.iter().map(|a| a.id).collect::<Vec<_>>(), vec![3, 2]);
+        assert_eq!(
+            second_page.iter().map(|a| a.id).collect::<Vec<_>>(),
+            vec![3, 2]
+        );
 
         // Space isolation: Personal reads never see the Shared asset.
-        assert!(core.fetch_assets(Space::Personal, 0, 100).unwrap().iter().all(|a| a.id != 99));
+        assert!(core
+            .fetch_assets(Space::Personal, 0, 100)
+            .unwrap()
+            .iter()
+            .all(|a| a.id != 99));
         let shared_assets = core.fetch_assets(Space::Shared, 0, 100).unwrap();
         assert_eq!(shared_assets.len(), 1);
         assert_eq!(shared_assets[0].id, 99);
@@ -1710,16 +2100,28 @@ mod core_tests {
     fn local_reads_fail_closed_when_store_is_busy() {
         let core = core_at("fetch-busy");
         let taken = core.store.lock().unwrap().take();
-        assert!(taken.is_some(), "test setup: store must have been Some before taking it");
+        assert!(
+            taken.is_some(),
+            "test setup: store must have been Some before taking it"
+        );
 
         let count_err = core.asset_count(Space::Personal).unwrap_err();
-        assert!(matches!(count_err, CoreError::Storage { .. }), "got {count_err:?}");
+        assert!(
+            matches!(count_err, CoreError::Storage { .. }),
+            "got {count_err:?}"
+        );
 
         let fetch_err = core.fetch_assets(Space::Personal, 0, 10).unwrap_err();
-        assert!(matches!(fetch_err, CoreError::Storage { .. }), "got {fetch_err:?}");
+        assert!(
+            matches!(fetch_err, CoreError::Storage { .. }),
+            "got {fetch_err:?}"
+        );
 
         let albums_err = core.fetch_local_albums(Space::Personal).unwrap_err();
-        assert!(matches!(albums_err, CoreError::Storage { .. }), "got {albums_err:?}");
+        assert!(
+            matches!(albums_err, CoreError::Storage { .. }),
+            "got {albums_err:?}"
+        );
 
         // Put the store back so nothing else in the process is left bricked.
         *core.store.lock().unwrap() = taken;
@@ -1737,18 +2139,31 @@ mod core_tests {
             .await;
         let _logout = server
             .mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("method".into(), "logout".into()))
+            .match_query(mockito::Matcher::UrlEncoded(
+                "method".into(),
+                "logout".into(),
+            ))
             .with_status(200)
             .with_body(r#"{"success":true,"data":{}}"#)
             .create_async()
             .await;
         let core = core_at("signout-live");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "photouser".into(), "pw".into(), None, None).await.expect("login ok");
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "photouser".into(), "pw".into(), None, None)
+            .await
+            .expect("login ok");
         assert!(core.live.lock().unwrap().is_some());
 
         core.sign_out().await.expect("sign_out ok");
-        assert!(core.live.lock().unwrap().is_none(), "sign_out must clear Live");
+        assert!(
+            core.live.lock().unwrap().is_none(),
+            "sign_out must clear Live"
+        );
     }
 
     /// Task 37 TDD: a thumbnail cache miss fetches the bytes over the network,
@@ -1757,30 +2172,52 @@ mod core_tests {
     #[tokio::test]
     async fn thumbnail_cache_miss_fetches_and_writes_cache_file() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"SYNO.Foto.Thumbnail":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
             .create_async().await;
-        let _thumb = server.mock("GET", "/webapi/entry.cgi")
+        let _thumb = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
                 mockito::Matcher::UrlEncoded("id".into(), "101".into()),
                 mockito::Matcher::UrlEncoded("cache_key".into(), "CK1".into()),
             ]))
-            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_status(200)
+            .with_header("content-type", "image/jpeg")
             .with_body(vec![0xFF, 0xD8, 0xFF])
             .expect(1)
-            .create_async().await;
+            .create_async()
+            .await;
         let core = core_at("thumb-miss");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
-        let data = core.thumbnail(Space::Personal, 101, "CK1".into(), models::ThumbnailSize::Sm).await.expect("thumb ok");
+        let data = core
+            .thumbnail(
+                Space::Personal,
+                101,
+                "CK1".into(),
+                models::ThumbnailSize::Sm,
+            )
+            .await
+            .expect("thumb ok");
         assert!(data.cached_path.contains("thumbs"));
         assert!(data.cached_path.ends_with(".jpg"));
         assert!(std::path::Path::new(&data.cached_path).exists());
@@ -1795,31 +2232,51 @@ mod core_tests {
     #[tokio::test]
     async fn thumbnail_cache_hit_skips_network() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"SYNO.Foto.Thumbnail":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
             .create_async().await;
-        let _thumb = server.mock("GET", "/webapi/entry.cgi")
+        let _thumb = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
                 mockito::Matcher::UrlEncoded("id".into(), "202".into()),
                 mockito::Matcher::UrlEncoded("cache_key".into(), "CK2".into()),
             ]))
-            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_status(200)
+            .with_header("content-type", "image/jpeg")
             .with_body(vec![0xAA, 0xBB])
             .expect(1)
-            .create_async().await;
+            .create_async()
+            .await;
         let core = core_at("thumb-hit");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
-        let first = core.thumbnail(Space::Personal, 202, "CK2".into(), models::ThumbnailSize::M).await.expect("first ok");
-        let second = core.thumbnail(Space::Personal, 202, "CK2".into(), models::ThumbnailSize::M).await.expect("second ok");
+        let first = core
+            .thumbnail(Space::Personal, 202, "CK2".into(), models::ThumbnailSize::M)
+            .await
+            .expect("first ok");
+        let second = core
+            .thumbnail(Space::Personal, 202, "CK2".into(), models::ThumbnailSize::M)
+            .await
+            .expect("second ok");
         assert_eq!(first.cached_path, second.cached_path);
         assert_eq!(second.bytes, vec![0xAA, 0xBB]);
         // The mock is `.expect(1)`: if the cache hit had reached the network
@@ -1833,42 +2290,78 @@ mod core_tests {
     #[tokio::test]
     async fn thumbnail_different_cache_key_invalidates_and_refetches() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"SYNO.Foto.Thumbnail":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
             .create_async().await;
-        let _thumb_ck1 = server.mock("GET", "/webapi/entry.cgi")
+        let _thumb_ck1 = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
                 mockito::Matcher::UrlEncoded("id".into(), "303".into()),
                 mockito::Matcher::UrlEncoded("cache_key".into(), "CK-OLD".into()),
             ]))
-            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_status(200)
+            .with_header("content-type", "image/jpeg")
             .with_body(vec![0x01])
             .expect(1)
-            .create_async().await;
-        let _thumb_ck2 = server.mock("GET", "/webapi/entry.cgi")
+            .create_async()
+            .await;
+        let _thumb_ck2 = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
                 mockito::Matcher::UrlEncoded("id".into(), "303".into()),
                 mockito::Matcher::UrlEncoded("cache_key".into(), "CK-NEW".into()),
             ]))
-            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_status(200)
+            .with_header("content-type", "image/jpeg")
             .with_body(vec![0x02])
             .expect(1)
-            .create_async().await;
+            .create_async()
+            .await;
         let core = core_at("thumb-invalidate");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
-        let old = core.thumbnail(Space::Personal, 303, "CK-OLD".into(), models::ThumbnailSize::Xl).await.expect("old ok");
-        let new = core.thumbnail(Space::Personal, 303, "CK-NEW".into(), models::ThumbnailSize::Xl).await.expect("new ok");
-        assert_ne!(old.cached_path, new.cached_path, "a changed cache_key must produce a distinct cache path");
+        let old = core
+            .thumbnail(
+                Space::Personal,
+                303,
+                "CK-OLD".into(),
+                models::ThumbnailSize::Xl,
+            )
+            .await
+            .expect("old ok");
+        let new = core
+            .thumbnail(
+                Space::Personal,
+                303,
+                "CK-NEW".into(),
+                models::ThumbnailSize::Xl,
+            )
+            .await
+            .expect("new ok");
+        assert_ne!(
+            old.cached_path, new.cached_path,
+            "a changed cache_key must produce a distinct cache path"
+        );
         assert_eq!(old.bytes, vec![0x01]);
         assert_eq!(new.bytes, vec![0x02]);
         _thumb_ck1.assert_async().await;
@@ -1885,38 +2378,60 @@ mod core_tests {
     #[tokio::test]
     async fn thumbnail_cache_key_with_path_traversal_stays_inside_cache_dir() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"SYNO.Foto.Thumbnail":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
             .create_async().await;
         let malicious_key = "../../../../../../tmp/evil";
-        let _thumb = server.mock("GET", "/webapi/entry.cgi")
+        let _thumb = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Thumbnail".into()),
                 mockito::Matcher::UrlEncoded("id".into(), "404".into()),
                 mockito::Matcher::UrlEncoded("cache_key".into(), malicious_key.into()),
             ]))
-            .with_status(200).with_header("content-type", "image/jpeg")
+            .with_status(200)
+            .with_header("content-type", "image/jpeg")
             .with_body(vec![0x99])
             .expect(1)
-            .create_async().await;
+            .create_async()
+            .await;
         let core = core_at("thumb-traversal");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
         let data = core
-            .thumbnail(Space::Personal, 404, malicious_key.into(), models::ThumbnailSize::Sm)
+            .thumbnail(
+                Space::Personal,
+                404,
+                malicious_key.into(),
+                models::ThumbnailSize::Sm,
+            )
             .await
             .expect("thumb ok even with a hostile cache_key");
         assert_eq!(data.bytes, vec![0x99]);
 
         let written = std::path::Path::new(&data.cached_path);
-        assert!(written.exists(), "cache file must exist at the returned path");
+        assert!(
+            written.exists(),
+            "cache file must exist at the returned path"
+        );
         let expected_dir = std::path::Path::new(&core.cache_dir).join("thumbs");
         assert_eq!(
             written.parent().unwrap().canonicalize().unwrap(),
@@ -1925,7 +2440,10 @@ mod core_tests {
         );
         // The raw cache_key must never appear literally in the path: proof
         // that the filename is derived from a hash, not string interpolation.
-        assert!(!data.cached_path.contains(".."), "path must not contain traversal segments");
+        assert!(
+            !data.cached_path.contains(".."),
+            "path must not contain traversal segments"
+        );
         assert!(
             !data.cached_path.contains("evil"),
             "the raw cache_key content must not appear literally in the cache path"
@@ -1937,7 +2455,10 @@ mod core_tests {
     #[tokio::test]
     async fn thumbnail_without_login_returns_auth_error() {
         let core = core_at("thumb-no-login");
-        let err = core.thumbnail(Space::Personal, 1, "CK".into(), models::ThumbnailSize::Sm).await.unwrap_err();
+        let err = core
+            .thumbnail(Space::Personal, 1, "CK".into(), models::ThumbnailSize::Sm)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
@@ -1946,28 +2467,45 @@ mod core_tests {
     #[tokio::test]
     async fn download_original_returns_path_to_downloaded_bytes() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"SYNO.Foto.Download":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
             .create_async().await;
-        let _dl = server.mock("GET", "/webapi/entry.cgi")
+        let _dl = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Download".into()),
                 mockito::Matcher::UrlEncoded("method".into(), "download".into()),
             ]))
-            .with_status(200).with_header("content-type", "application/octet-stream")
+            .with_status(200)
+            .with_header("content-type", "application/octet-stream")
             .with_body(b"ORIGINAL-BYTES".to_vec())
-            .create_async().await;
+            .create_async()
+            .await;
         let core = core_at("download-ok");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
-        let path = core.download_original(Space::Personal, 101, "CK1".into()).await.expect("download ok");
+        let path = core
+            .download_original(Space::Personal, 101, "CK1".into())
+            .await
+            .expect("download ok");
         assert!(std::path::Path::new(&path).exists());
         let bytes = std::fs::read(&path).unwrap();
         assert_eq!(bytes, b"ORIGINAL-BYTES".to_vec());
@@ -1978,28 +2516,45 @@ mod core_tests {
     #[tokio::test]
     async fn download_original_json_error_maps_to_core_error() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"SYNO.Foto.Download":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
             .create_async().await;
-        let _dl = server.mock("GET", "/webapi/entry.cgi")
+        let _dl = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Download".into()),
                 mockito::Matcher::UrlEncoded("method".into(), "download".into()),
             ]))
-            .with_status(200).with_header("content-type", "application/json")
+            .with_status(200)
+            .with_header("content-type", "application/json")
             .with_body(r#"{"success":false,"error":{"code":400}}"#)
-            .create_async().await;
+            .create_async()
+            .await;
         let core = core_at("download-err");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
-        let err = core.download_original(Space::Personal, 101, "CK1".into()).await.unwrap_err();
+        let err = core
+            .download_original(Space::Personal, 101, "CK1".into())
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
@@ -2007,7 +2562,10 @@ mod core_tests {
     #[tokio::test]
     async fn download_original_without_login_returns_auth_error() {
         let core = core_at("download-no-login");
-        let err = core.download_original(Space::Personal, 1, "CK".into()).await.unwrap_err();
+        let err = core
+            .download_original(Space::Personal, 1, "CK".into())
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
@@ -2036,29 +2594,46 @@ mod core_tests {
     #[tokio::test]
     async fn video_playback_source_returns_local_file_for_downloaded_bytes() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"SYNO.Foto.Download":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
             .create_async().await;
-        let _dl = server.mock("GET", "/webapi/entry.cgi")
+        let _dl = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Download".into()),
                 mockito::Matcher::UrlEncoded("method".into(), "download".into()),
             ]))
-            .with_status(200).with_header("content-type", "video/quicktime")
+            .with_status(200)
+            .with_header("content-type", "video/quicktime")
             .with_body(b"FAKE-MOV-BYTES".to_vec())
-            .create_async().await;
+            .create_async()
+            .await;
         let core = core_at("video-playback-ok");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
         let asset = video_asset(202, "CK-VIDEO");
-        let source = core.video_playback_source(Space::Personal, asset).await.expect("video playback source ok");
+        let source = core
+            .video_playback_source(Space::Personal, asset)
+            .await
+            .expect("video playback source ok");
         match source {
             VideoPlaybackSource::LocalFile { path } => {
                 assert!(std::path::Path::new(&path).exists());
@@ -2075,29 +2650,46 @@ mod core_tests {
     #[tokio::test]
     async fn video_playback_source_propagates_download_error() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _info = server.mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"SYNO.Foto.Download":{"path":"entry.cgi","minVersion":1,"maxVersion":2}}}"#)
             .create_async().await;
-        let _dl = server.mock("GET", "/webapi/entry.cgi")
+        let _dl = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Download".into()),
                 mockito::Matcher::UrlEncoded("method".into(), "download".into()),
             ]))
-            .with_status(200).with_header("content-type", "application/json")
+            .with_status(200)
+            .with_header("content-type", "application/json")
             .with_body(r#"{"success":false,"error":{"code":400}}"#)
-            .create_async().await;
+            .create_async()
+            .await;
         let core = core_at("video-playback-err");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.unwrap();
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .unwrap();
         core.probe_capabilities().await.unwrap();
 
         let asset = video_asset(202, "CK-VIDEO");
-        let err = core.video_playback_source(Space::Personal, asset).await.unwrap_err();
+        let err = core
+            .video_playback_source(Space::Personal, asset)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
@@ -2107,7 +2699,10 @@ mod core_tests {
     async fn video_playback_source_without_login_returns_auth_error() {
         let core = core_at("video-playback-no-login");
         let asset = video_asset(1, "CK");
-        let err = core.video_playback_source(Space::Personal, asset).await.unwrap_err();
+        let err = core
+            .video_playback_source(Space::Personal, asset)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
@@ -2118,7 +2713,8 @@ mod core_tests {
     #[tokio::test]
     async fn fetch_certificate_returns_cert_info_for_a_real_tls_server() {
         let rcgen::CertifiedKey { cert, signing_key } =
-            rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).expect("self-signed cert generates");
+            rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])
+                .expect("self-signed cert generates");
         let cert_der = cert.der().to_vec();
         let key_der = signing_key.serialize_der();
         let server_config = rustls::ServerConfig::builder()
@@ -2129,11 +2725,15 @@ mod core_tests {
             )
             .expect("server config builds");
         let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(server_config));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener binds");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener binds");
         let addr = listener.local_addr().expect("listener has an addr");
         tokio::spawn(async move {
             loop {
-                let Ok((stream, _)) = listener.accept().await else { return };
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
                 let acceptor = acceptor.clone();
                 tokio::spawn(async move {
                     let _ = acceptor.accept(stream).await;
@@ -2166,9 +2766,20 @@ mod core_tests {
             .create_async()
             .await;
         let core = core_at("device-token-roundtrip");
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
         let session = core
-            .login(conn.clone(), "photouser".into(), "pw".into(), Some("999999".into()), None)
+            .login(
+                conn.clone(),
+                "photouser".into(),
+                "pw".into(),
+                Some("999999".into()),
+                None,
+            )
             .await
             .expect("first login with otp ok");
         assert_eq!(session.device_did.as_deref(), Some("CORE-DEVICE-TOKEN"));
@@ -2188,7 +2799,13 @@ mod core_tests {
             .create_async()
             .await;
         let session2 = core
-            .login(conn, "photouser".into(), "pw".into(), None, session.device_did.clone())
+            .login(
+                conn,
+                "photouser".into(),
+                "pw".into(),
+                None,
+                session.device_did.clone(),
+            )
             .await
             .expect("second login with stored device token should succeed without otp");
         assert_eq!(session2.sid, "SID-2");
@@ -2201,7 +2818,10 @@ mod core_tests {
     /// Mock an EMPTY File Station listing of `folder`: no name clash before a
     /// restore, and "the file has left the recycle bin" after a restore or
     /// permanent delete.
-    async fn mock_empty_fs_folder(server: &mut mockito::ServerGuard, folder: &str) -> mockito::Mock {
+    async fn mock_empty_fs_folder(
+        server: &mut mockito::ServerGuard,
+        folder: &str,
+    ) -> mockito::Mock {
         server
             .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
@@ -2217,17 +2837,28 @@ mod core_tests {
 
     async fn logged_in_core(label: &str, server: &mockito::ServerGuard) -> Arc<PhotosCore> {
         let core = core_at(label);
-        let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
-        core.login(conn, "u".into(), "p".into(), None, None).await.expect("login ok");
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "u".into(), "p".into(), None, None)
+            .await
+            .expect("login ok");
         core
     }
 
     #[tokio::test]
     async fn fetch_people_hits_the_nas_and_returns_real_shape() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _people = server.mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Person".into()))
             .with_status(200)
@@ -2243,9 +2874,13 @@ mod core_tests {
     #[tokio::test]
     async fn fetch_places_hits_the_nas_and_returns_real_shape() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _places = server.mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Geocoding".into()))
             .with_status(200)
@@ -2260,9 +2895,13 @@ mod core_tests {
     #[tokio::test]
     async fn fetch_subjects_hits_the_nas_and_returns_real_shape() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _concept = server.mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Concept".into()))
             .with_status(200)
@@ -2277,25 +2916,41 @@ mod core_tests {
     #[tokio::test]
     async fn fetch_tags_returns_empty_list_cleanly() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
-        let _tags = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.GeneralTag".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _tags = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded(
+                "api".into(),
+                "SYNO.Foto.Browse.GeneralTag".into(),
+            ))
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"list":[]}}"#)
-            .create_async().await;
+            .create_async()
+            .await;
         let core = logged_in_core("fetch-tags", &server).await;
         let tags = core.fetch_tags(0, 50).await.expect("fetch_tags ok");
-        assert!(tags.is_empty(), "no tags exist yet on this NAS; must decode to an empty list, not error");
+        assert!(
+            tags.is_empty(),
+            "no tags exist yet on this NAS; must decode to an empty list, not error"
+        );
     }
 
     #[tokio::test]
     async fn fetch_assets_for_person_sends_bare_int_person_id() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _filtered = server.mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Item".into()),
@@ -2316,9 +2971,13 @@ mod core_tests {
     #[tokio::test]
     async fn fetch_assets_for_favorites_sends_favorite_true() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _filtered = server.mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::UrlEncoded("favorite".into(), "true".into()))
             .with_status(200)
@@ -2335,9 +2994,13 @@ mod core_tests {
     #[tokio::test]
     async fn search_assets_sends_list_item_method_and_keyword_param() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _search = server.mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Search.Search".into()),
@@ -2348,7 +3011,10 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"list":[{"id":73507,"filename":"IMG_1619.JPG","type":"live","additional":{"thumbnail":{"cache_key":"55853_1480101974","unit_id":55853}}}]}}"#)
             .create_async().await;
         let core = logged_in_core("search-assets", &server).await;
-        let assets = core.search_assets("food".to_string(), 0, 50).await.expect("search_assets ok");
+        let assets = core
+            .search_assets("food".to_string(), 0, 50)
+            .await
+            .expect("search_assets ok");
         assert_eq!(assets.len(), 1);
         assert_eq!(assets[0].unit_id, 55853);
     }
@@ -2356,25 +3022,44 @@ mod core_tests {
     #[tokio::test]
     async fn search_assets_returns_empty_list_cleanly_on_no_match() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
-        let _search = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("keyword".into(), "zzzznosuchthing123".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _search = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded(
+                "keyword".into(),
+                "zzzznosuchthing123".into(),
+            ))
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"list":[]}}"#)
-            .create_async().await;
+            .create_async()
+            .await;
         let core = logged_in_core("search-assets-empty", &server).await;
-        let assets = core.search_assets("zzzznosuchthing123".to_string(), 0, 50).await.expect("search_assets ok");
-        assert!(assets.is_empty(), "a keyword with no matches must decode to an empty list, not error");
+        let assets = core
+            .search_assets("zzzznosuchthing123".to_string(), 0, 50)
+            .await
+            .expect("search_assets ok");
+        assert!(
+            assets.is_empty(),
+            "a keyword with no matches must decode to an empty list, not error"
+        );
     }
 
     #[tokio::test]
     async fn search_assets_filtered_sends_start_and_end_time() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
         let _search = server.mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Search.Search".into()),
@@ -2386,7 +3071,10 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"list":[{"id":73459,"filename":"IMG_1910.JPG","type":"photo","additional":{"thumbnail":{"cache_key":"CK1","unit_id":1001}}}]}}"#)
             .create_async().await;
         let core = logged_in_core("search-assets-filtered", &server).await;
-        let filters = SearchFilters { start_time: Some(1_400_000_000), end_time: Some(1_500_000_000) };
+        let filters = SearchFilters {
+            start_time: Some(1_400_000_000),
+            end_time: Some(1_500_000_000),
+        };
         let assets = core
             .search_assets_filtered("IMG".to_string(), filters, 0, 50)
             .await
@@ -2398,17 +3086,27 @@ mod core_tests {
     #[tokio::test]
     async fn search_assets_filtered_with_default_filters_matches_plain_search() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
-        let _search = server.mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded("keyword".into(), "IMG".into()),
-            ]))
-            .match_request(|req| !req.path_and_query().contains("start_time") && !req.path_and_query().contains("end_time"))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _search = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![mockito::Matcher::UrlEncoded(
+                "keyword".into(),
+                "IMG".into(),
+            )]))
+            .match_request(|req| {
+                !req.path_and_query().contains("start_time")
+                    && !req.path_and_query().contains("end_time")
+            })
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"list":[]}}"#)
-            .create_async().await;
+            .create_async()
+            .await;
         let core = logged_in_core("search-assets-filtered-default", &server).await;
         let assets = core
             .search_assets_filtered("IMG".to_string(), SearchFilters::default(), 0, 50)
@@ -2430,24 +3128,35 @@ mod core_tests {
     #[tokio::test]
     async fn fetch_search_facets_hits_the_nas_and_returns_real_shape() {
         let mut server = mockito::Server::new_async().await;
-        let _login = server.mock("POST", "/webapi/entry.cgi")
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("method=login".into()))
-            .with_status(200).with_body(r#"{"success":true,"data":{"sid":"S"}}"#).create_async().await;
-        let _filter = server.mock("GET", "/webapi/entry.cgi")
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _filter = server
+            .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Search.Filter".into()),
                 mockito::Matcher::UrlEncoded("method".into(), "list".into()),
             ]))
             .with_status(200)
-            .with_body(r#"{"success":true,"data":{
+            .with_body(
+                r#"{"success":true,"data":{
                 "aperture":[{"id":1,"name":"F1.8"}],
                 "camera":[{"id":23,"name":"iPhone 6s"}],
                 "geocoding":[{"children":[],"id":1,"level":1,"name":"Norway"}],
                 "item_type":[{"id":0,"name":"photo"}]
-            }}"#)
-            .create_async().await;
+            }}"#,
+            )
+            .create_async()
+            .await;
         let core = logged_in_core("fetch-search-facets", &server).await;
-        let facets = core.fetch_search_facets().await.expect("fetch_search_facets ok");
+        let facets = core
+            .fetch_search_facets()
+            .await
+            .expect("fetch_search_facets ok");
         assert_eq!(facets.cameras.len(), 1);
         assert_eq!(facets.cameras[0].name, "iPhone 6s");
         assert_eq!(facets.apertures[0].name, "F1.8");
@@ -2472,14 +3181,20 @@ mod core_tests {
     #[tokio::test]
     async fn fetch_assets_for_without_login_returns_auth_error() {
         let core = core_at("fetch-assets-for-no-login");
-        let err = core.fetch_assets_for(DiscoveryCollection::Favorites, 0, 50).await.unwrap_err();
+        let err = core
+            .fetch_assets_for(DiscoveryCollection::Favorites, 0, 50)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
     #[tokio::test]
     async fn search_assets_without_login_returns_auth_error() {
         let core = core_at("search-assets-no-login");
-        let err = core.search_assets("food".to_string(), 0, 50).await.unwrap_err();
+        let err = core
+            .search_assets("food".to_string(), 0, 50)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
@@ -2539,14 +3254,25 @@ mod core_tests {
 
         let held = core.trash_lock.lock().await;
         let core2 = core.clone();
-        let handle = tokio::spawn(async move { core2.delete_assets(Space::Personal, vec![1]).await });
+        let handle =
+            tokio::spawn(async move { core2.delete_assets(Space::Personal, vec![1]).await });
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert!(!handle.is_finished(), "delete_assets must block while the trash lock is held");
-        assert_eq!(core.asset_count(Space::Personal).unwrap(), 1, "no mutation while the lock is held");
+        assert!(
+            !handle.is_finished(),
+            "delete_assets must block while the trash lock is held"
+        );
+        assert_eq!(
+            core.asset_count(Space::Personal).unwrap(),
+            1,
+            "no mutation while the lock is held"
+        );
 
         drop(held);
-        handle.await.unwrap().expect("delete_assets completes after the lock is released");
+        handle
+            .await
+            .unwrap()
+            .expect("delete_assets completes after the lock is released");
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
         delete.assert_async().await;
     }
@@ -2582,10 +3308,19 @@ mod core_tests {
         seed_asset(&core, Space::Personal, 1);
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
 
-        core.delete_assets(Space::Personal, vec![1]).await.expect("delete_assets ok");
+        core.delete_assets(Space::Personal, vec![1])
+            .await
+            .expect("delete_assets ok");
 
-        assert_eq!(core.asset_count(Space::Personal).unwrap(), 0, "deleted asset leaves the library");
-        assert!(core.fetch_assets(Space::Personal, 0, 10).unwrap().is_empty());
+        assert_eq!(
+            core.asset_count(Space::Personal).unwrap(),
+            0,
+            "deleted asset leaves the library"
+        );
+        assert!(core
+            .fetch_assets(Space::Personal, 0, 10)
+            .unwrap()
+            .is_empty());
         _delete.assert_async().await;
     }
 
@@ -2610,7 +3345,10 @@ mod core_tests {
         let core = logged_in_core("real-delete-fail", &server).await;
         seed_asset(&core, Space::Personal, 1);
 
-        let err = core.delete_assets(Space::Personal, vec![1]).await.unwrap_err();
+        let err = core
+            .delete_assets(Space::Personal, vec![1])
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
         // Fail closed: a failed server delete must not remove the local row.
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
@@ -2636,14 +3374,19 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("real-delete-empty", &server).await;
-        core.delete_assets(Space::Personal, vec![]).await.expect("empty delete is a no-op");
+        core.delete_assets(Space::Personal, vec![])
+            .await
+            .expect("empty delete is a no-op");
         _trap.assert_async().await;
     }
 
     #[tokio::test]
     async fn delete_assets_without_login_returns_auth_error() {
         let core = core_at("real-delete-noauth");
-        let err = core.delete_assets(Space::Personal, vec![1]).await.unwrap_err();
+        let err = core
+            .delete_assets(Space::Personal, vec![1])
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
@@ -2698,7 +3441,10 @@ mod core_tests {
             .match_body(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::UrlEncoded("api".into(), "SYNO.FileStation.CopyMove".into()),
                 mockito::Matcher::UrlEncoded("method".into(), "start".into()),
-                mockito::Matcher::UrlEncoded("dest_folder_path".into(), "/home/Photos/iPhone/2016/09".into()),
+                mockito::Matcher::UrlEncoded(
+                    "dest_folder_path".into(),
+                    "/home/Photos/iPhone/2016/09".into(),
+                ),
             ]))
             .with_status(200)
             .with_header("content-type", "application/json")
@@ -2720,9 +3466,11 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("restore-recycle", &server).await;
-        core.restore_recently_deleted(vec!["/home/#recycle/Photos/iPhone/2016/09/IMG_0924.JPG".into()])
-            .await
-            .expect("restore ok");
+        core.restore_recently_deleted(vec![
+            "/home/#recycle/Photos/iPhone/2016/09/IMG_0924.JPG".into()
+        ])
+        .await
+        .expect("restore ok");
         _move.assert_async().await;
         _reindex.assert_async().await;
     }
@@ -2789,7 +3537,9 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("empty-recycle", &server).await;
-        core.empty_recently_deleted(vec!["/home/#recycle/Photos/a.jpg".into()]).await.expect("empty ok");
+        core.empty_recently_deleted(vec!["/home/#recycle/Photos/a.jpg".into()])
+            .await
+            .expect("empty ok");
         _del.assert_async().await;
     }
 
@@ -2822,7 +3572,10 @@ mod core_tests {
             ])
             .await
             .unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
         _del_trap.assert_async().await;
     }
 
@@ -2853,7 +3606,10 @@ mod core_tests {
             ])
             .await
             .unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
         _move_trap.assert_async().await;
     }
 
@@ -2918,7 +3674,10 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("recycle-status", &server).await;
-        assert_eq!(core.recycle_bin_status().await.expect("status ok"), RecycleBinStatus::Disabled);
+        assert_eq!(
+            core.recycle_bin_status().await.expect("status ok"),
+            RecycleBinStatus::Disabled
+        );
     }
 
     #[tokio::test]
@@ -2971,9 +3730,12 @@ mod core_tests {
             .await;
 
         let core = logged_in_core("save-edited", &server).await;
-        core.save_edited_photo("sunset-edited-101010.jpg".into(), b"EDITEDJPEGBYTES".to_vec())
-            .await
-            .expect("save_edited_photo ok");
+        core.save_edited_photo(
+            "sunset-edited-101010.jpg".into(),
+            b"EDITEDJPEGBYTES".to_vec(),
+        )
+        .await
+        .expect("save_edited_photo ok");
         _upload.assert_async().await;
         _reindex.assert_async().await;
     }
@@ -3020,7 +3782,10 @@ mod core_tests {
     #[tokio::test]
     async fn save_edited_photo_without_login_returns_auth_error() {
         let core = core_at("save-edited-noauth");
-        let err = core.save_edited_photo("x-edited-1.jpg".into(), b"J".to_vec()).await.unwrap_err();
+        let err = core
+            .save_edited_photo("x-edited-1.jpg".into(), b"J".to_vec())
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 }

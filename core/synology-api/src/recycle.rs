@@ -109,8 +109,19 @@ fn decode_fs_entry(value: &serde_json::Value) -> Option<FsEntry> {
     let name = raw.name.filter(|s| !s.is_empty())?;
     let path = raw.path.filter(|s| !s.is_empty())?;
     let size = raw.additional.size.unwrap_or(0);
-    let mtime = raw.additional.time.as_ref().and_then(|t| t.mtime).unwrap_or(0);
-    Some(FsEntry { is_dir: raw.isdir, name, path, size, mtime })
+    let mtime = raw
+        .additional
+        .time
+        .as_ref()
+        .and_then(|t| t.mtime)
+        .unwrap_or(0);
+    Some(FsEntry {
+        is_dir: raw.isdir,
+        name,
+        path,
+        size,
+        mtime,
+    })
 }
 
 /// GET the shared entry.cgi dispatcher and return the raw response body, with
@@ -123,18 +134,19 @@ async fn fs_get_body(
 ) -> Result<String, CoreError> {
     transport.throttle().await;
     let query_refs: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let mut request = transport.client().get(transport.entry_url()).query(&query_refs);
+    let mut request = transport
+        .client()
+        .get(transport.entry_url())
+        .query(&query_refs);
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("file station request failed: {e}") })?;
-    response
-        .text()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("reading file station response body failed: {e}") })
+    let response = request.send().await.map_err(|e| CoreError::Network {
+        message: format!("file station request failed: {e}"),
+    })?;
+    response.text().await.map_err(|e| CoreError::Network {
+        message: format!("reading file station response body failed: {e}"),
+    })
 }
 
 /// Lists a SINGLE folder (not recursive) via `SYNO.FileStation.List`, paging
@@ -250,9 +262,11 @@ pub async fn list_recycle_photos(
 /// so a restore never guesses a destination.
 pub(crate) fn original_parent_folder(recycle_path: &str) -> Result<String, CoreError> {
     const MARKER: &str = "/#recycle/";
-    let idx = recycle_path.find(MARKER).ok_or_else(|| CoreError::UnexpectedResponse {
-        message: format!("recycle path has no '#recycle' segment: {recycle_path}"),
-    })?;
+    let idx = recycle_path
+        .find(MARKER)
+        .ok_or_else(|| CoreError::UnexpectedResponse {
+            message: format!("recycle path has no '#recycle' segment: {recycle_path}"),
+        })?;
     // Replace the first "/#recycle/" with a single "/", collapsing
     // ".../#recycle/Photos/..." back to ".../Photos/...".
     let mut original = String::with_capacity(recycle_path.len());
@@ -285,7 +299,10 @@ pub fn ensure_recycle_photos_path(path: &str) -> Result<(), CoreError> {
         .strip_prefix(RECYCLE_PHOTOS_ROOT)
         .and_then(|r| r.strip_prefix('/'))
         .ok_or_else(refuse)?;
-    if rest.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..") {
+    if rest
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
         return Err(refuse());
     }
     Ok(())
@@ -331,10 +348,18 @@ pub async fn recycle_bin_status(
     ];
     let body = fs_get_body(transport, &query, syno_token).await?;
     match decode_envelope::<UserHomeData>(&body) {
-        Ok(UserHomeData { enable_recycle_bin: Some(true) }) => Ok(RecycleBinStatus::Enabled),
-        Ok(UserHomeData { enable_recycle_bin: Some(false) }) => Ok(RecycleBinStatus::Disabled),
-        Ok(UserHomeData { enable_recycle_bin: None }) => Ok(RecycleBinStatus::Unknown),
-        Err(e @ (CoreError::Auth { .. } | CoreError::OtpRequired | CoreError::Network { .. })) => Err(e),
+        Ok(UserHomeData {
+            enable_recycle_bin: Some(true),
+        }) => Ok(RecycleBinStatus::Enabled),
+        Ok(UserHomeData {
+            enable_recycle_bin: Some(false),
+        }) => Ok(RecycleBinStatus::Disabled),
+        Ok(UserHomeData {
+            enable_recycle_bin: None,
+        }) => Ok(RecycleBinStatus::Unknown),
+        Err(e @ (CoreError::Auth { .. } | CoreError::OtpRequired | CoreError::Network { .. })) => {
+            Err(e)
+        }
         Err(_) => Ok(RecycleBinStatus::Unknown),
     }
 }
@@ -359,7 +384,10 @@ impl Default for TaskPolling {
     /// About 20 seconds. Recycle and library share a volume, so a move is a
     /// rename and normally finishes within the first poll.
     fn default() -> Self {
-        Self { attempts: 80, interval: std::time::Duration::from_millis(250) }
+        Self {
+            attempts: 80,
+            interval: std::time::Duration::from_millis(250),
+        }
     }
 }
 
@@ -367,7 +395,9 @@ impl Default for TaskPolling {
 fn split_parent(path: &str) -> Result<(&str, &str), CoreError> {
     match path.rsplit_once('/') {
         Some((parent, name)) if !parent.is_empty() && !name.is_empty() => Ok((parent, name)),
-        _ => Err(CoreError::UnexpectedResponse { message: format!("path has no parent folder: {path}") }),
+        _ => Err(CoreError::UnexpectedResponse {
+            message: format!("path has no parent folder: {path}"),
+        }),
     }
 }
 
@@ -393,14 +423,21 @@ async fn folder_contains(
             ("_sid", sid.to_string()),
         ];
         let body = fs_get_body(transport, &query, syno_token).await?;
-        if let Ok(raw) = serde_json::from_str::<crate::envelope::SynoResponse<serde_json::Value>>(&body) {
+        if let Ok(raw) =
+            serde_json::from_str::<crate::envelope::SynoResponse<serde_json::Value>>(&body)
+        {
             if !raw.success && raw.error.as_ref().map(|e| e.code) == Some(FS_NO_SUCH_FILE) {
                 return Ok(None);
             }
         }
         let data: FsListData = decode_envelope(&body)?;
         let n = data.files.len() as u32;
-        if data.files.iter().filter_map(decode_fs_entry).any(|e| e.name == name) {
+        if data
+            .files
+            .iter()
+            .filter_map(decode_fs_entry)
+            .any(|e| e.name == name)
+        {
             return Ok(Some(true));
         }
         if n < LIST_PAGE_LIMIT {
@@ -461,7 +498,14 @@ pub async fn restore_recycle_item(
     syno_token: Option<&str>,
     recycle_path: &str,
 ) -> Result<(), CoreError> {
-    restore_recycle_item_with_polling(transport, sid, syno_token, recycle_path, TaskPolling::default()).await
+    restore_recycle_item_with_polling(
+        transport,
+        sid,
+        syno_token,
+        recycle_path,
+        TaskPolling::default(),
+    )
+    .await
 }
 
 /// `restore_recycle_item` with explicit completion polling (tests use a short
@@ -480,7 +524,9 @@ pub async fn restore_recycle_item_with_polling(
     // report whatever File Station makes of it.
     if folder_contains(transport, sid, syno_token, &dest, name).await? == Some(true) {
         return Err(CoreError::UnexpectedResponse {
-            message: format!("cannot restore {name}: a file with that name already exists in {dest}"),
+            message: format!(
+                "cannot restore {name}: a file with that name already exists in {dest}"
+            ),
         });
     }
     let path_array = json_path_array(recycle_path)?;
@@ -509,7 +555,14 @@ pub async fn delete_recycle_item(
     syno_token: Option<&str>,
     recycle_path: &str,
 ) -> Result<(), CoreError> {
-    delete_recycle_item_with_polling(transport, sid, syno_token, recycle_path, TaskPolling::default()).await
+    delete_recycle_item_with_polling(
+        transport,
+        sid,
+        syno_token,
+        recycle_path,
+        TaskPolling::default(),
+    )
+    .await
 }
 
 /// `delete_recycle_item` with explicit completion polling. Like restore,
@@ -533,7 +586,15 @@ pub async fn delete_recycle_item_with_polling(
     ];
     let body = transport.post_form_text(&form, syno_token).await?;
     decode_write_success(&body)?;
-    wait_until_gone_from_recycle(transport, sid, syno_token, recycle_path, "permanent delete", polling).await
+    wait_until_gone_from_recycle(
+        transport,
+        sid,
+        syno_token,
+        recycle_path,
+        "permanent delete",
+        polling,
+    )
+    .await
 }
 
 /// Render a thumbnail for a recycled file via `SYNO.FileStation.Thumb`
@@ -563,19 +624,17 @@ pub async fn recycle_thumbnail(
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("recycle thumbnail request failed: {e}") })?;
+    let response = request.send().await.map_err(|e| CoreError::Network {
+        message: format!("recycle thumbnail request failed: {e}"),
+    })?;
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("reading recycle thumbnail body failed: {e}") })?;
+    let bytes = response.bytes().await.map_err(|e| CoreError::Network {
+        message: format!("reading recycle thumbnail body failed: {e}"),
+    })?;
     map_binary_or_error(content_type.as_deref(), &bytes)
 }
 
@@ -622,7 +681,10 @@ mod tests {
         // A path that never passed through the recycle bin has no derivable
         // origin, so restore must refuse rather than guess.
         let err = original_parent_folder("/home/Photos/iPhone/IMG.JPG").unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -658,9 +720,15 @@ mod tests {
 
     #[test]
     fn json_path_array_wraps_and_escapes() {
-        assert_eq!(json_path_array("/home/#recycle/Photos/a.jpg").unwrap(), r#"["/home/#recycle/Photos/a.jpg"]"#);
+        assert_eq!(
+            json_path_array("/home/#recycle/Photos/a.jpg").unwrap(),
+            r#"["/home/#recycle/Photos/a.jpg"]"#
+        );
         // A quote in the path is escaped, not left to break the JSON.
-        assert_eq!(json_path_array(r#"/home/#recycle/a"b.jpg"#).unwrap(), r#"["/home/#recycle/a\"b.jpg"]"#);
+        assert_eq!(
+            json_path_array(r#"/home/#recycle/a"b.jpg"#).unwrap(),
+            r#"["/home/#recycle/a\"b.jpg"]"#
+        );
     }
 
     #[test]

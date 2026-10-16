@@ -4,8 +4,13 @@ use synology_api::browse::filter_items;
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
-    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false })
-        .expect("transport builds")
+    Transport::new(&Connection {
+        host: server.url(),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    })
+    .expect("transport builds")
 }
 
 /// Pins the confirmed real request shape for a combined People + Geolocation +
@@ -91,9 +96,21 @@ async fn filter_items_geocoding_only_omits_the_unset_params() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = filter_items(&t, "SID", Space::Personal, None, None, None, Some(768), 0, 100, 2, None)
-        .await
-        .expect("filter ok");
+    let assets = filter_items(
+        &t,
+        "SID",
+        Space::Personal,
+        None,
+        None,
+        None,
+        Some(768),
+        0,
+        100,
+        2,
+        None,
+    )
+    .await
+    .expect("filter ok");
     assert!(assets.is_empty());
     m.assert_async().await;
 }
@@ -118,9 +135,21 @@ async fn filter_items_person_only_omits_the_unset_params() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = filter_items(&t, "SID", Space::Personal, None, None, Some(42), None, 0, 100, 2, None)
-        .await
-        .expect("filter ok");
+    let assets = filter_items(
+        &t,
+        "SID",
+        Space::Personal,
+        None,
+        None,
+        Some(42),
+        None,
+        0,
+        100,
+        2,
+        None,
+    )
+    .await
+    .expect("filter ok");
     assert!(assets.is_empty());
     m.assert_async().await;
 }
@@ -149,9 +178,21 @@ async fn filter_items_with_no_params_is_a_plain_list() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = filter_items(&t, "SID", Space::Personal, None, None, None, None, 0, 100, 2, None)
-        .await
-        .expect("filter ok");
+    let assets = filter_items(
+        &t,
+        "SID",
+        Space::Personal,
+        None,
+        None,
+        None,
+        None,
+        0,
+        100,
+        2,
+        None,
+    )
+    .await
+    .expect("filter ok");
     assert!(assets.is_empty());
     m.assert_async().await;
 }
@@ -167,10 +208,25 @@ async fn filter_items_maps_envelope_error() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let err = filter_items(&t, "SID", Space::Personal, None, None, Some(42), None, 0, 100, 2, None)
-        .await
-        .unwrap_err();
-    assert!(matches!(err, models::CoreError::UnexpectedResponse { .. }), "got {err:?}");
+    let err = filter_items(
+        &t,
+        "SID",
+        Space::Personal,
+        None,
+        None,
+        Some(42),
+        None,
+        0,
+        100,
+        2,
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, models::CoreError::UnexpectedResponse { .. }),
+        "got {err:?}"
+    );
 }
 
 /// Reachable through the crate's public facade, same smoke pattern as the
@@ -180,14 +236,29 @@ async fn filter_items_reachable_through_facade() {
     let mut server = mockito::Server::new_async().await;
     server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Item".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.Foto.Browse.Item".into(),
+        ))
         .with_status(200)
         .with_body(r#"{"success":true,"data":{"list":[]}}"#)
         .create_async()
         .await;
     let t = transport_for(&server);
-    assert!(synology_api::filter_items(&t, "SID", Space::Personal, None, None, None, Some(1), 0, 10, 2, None)
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(synology_api::filter_items(
+        &t,
+        "SID",
+        Space::Personal,
+        None,
+        None,
+        None,
+        Some(1),
+        0,
+        10,
+        2,
+        None
+    )
+    .await
+    .unwrap()
+    .is_empty());
 }

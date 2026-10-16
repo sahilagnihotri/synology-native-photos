@@ -5,8 +5,13 @@ use synology_api::discovery::{list_people, list_places, list_subjects, list_tags
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
-    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false })
-        .expect("transport builds")
+    Transport::new(&Connection {
+        host: server.url(),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    })
+    .expect("transport builds")
 }
 
 #[tokio::test]
@@ -19,10 +24,12 @@ async fn list_items_filtered_by_person_sends_bare_int_person_id() {
             Matcher::UrlEncoded("person_id".into(), "12279".into()),
         ]))
         .with_status(200)
-        .with_body(r#"{"success":true,"data":{"list":[
+        .with_body(
+            r#"{"success":true,"data":{"list":[
             {"id":73501,"filename":"IMG_1664.JPG","type":"photo",
              "additional":{"thumbnail":{"cache_key":"CK1","unit_id":55847}}}
-        ]}}"#)
+        ]}}"#,
+        )
         .create_async()
         .await;
     let t = transport_for(&server);
@@ -47,10 +54,12 @@ async fn list_items_filtered_by_place_sends_bare_int_geocoding_id_not_array() {
             Matcher::UrlEncoded("geocoding_id".into(), "756".into()),
         ]))
         .with_status(200)
-        .with_body(r#"{"success":true,"data":{"list":[
+        .with_body(
+            r#"{"success":true,"data":{"list":[
             {"id":73493,"filename":"IMG_1737.JPG","type":"photo",
              "additional":{"thumbnail":{"cache_key":"CK2","unit_id":55839}}}
-        ]}}"#)
+        ]}}"#,
+        )
         .create_async()
         .await;
     let t = transport_for(&server);
@@ -86,10 +95,12 @@ async fn list_items_filtered_by_favorites_sends_favorite_true() {
         .mock("GET", "/webapi/entry.cgi")
         .match_query(Matcher::UrlEncoded("favorite".into(), "true".into()))
         .with_status(200)
-        .with_body(r#"{"success":true,"data":{"list":[
+        .with_body(
+            r#"{"success":true,"data":{"list":[
             {"id":73459,"filename":"IMG_1910.JPG","type":"photo",
              "additional":{"thumbnail":{"cache_key":"CK3","unit_id":55805}}}
-        ]}}"#)
+        ]}}"#,
+        )
         .create_async()
         .await;
     let t = transport_for(&server);
@@ -115,10 +126,12 @@ async fn list_items_filtered_by_album_sends_bare_int_album_id() {
             Matcher::UrlEncoded("album_id".into(), "42".into()),
         ]))
         .with_status(200)
-        .with_body(r#"{"success":true,"data":{"list":[
+        .with_body(
+            r#"{"success":true,"data":{"list":[
             {"id":73501,"filename":"IMG_1664.JPG","type":"photo",
              "additional":{"thumbnail":{"cache_key":"CK1","unit_id":55847}}}
-        ]}}"#)
+        ]}}"#,
+        )
         .create_async()
         .await;
     let t = transport_for(&server);
@@ -138,13 +151,18 @@ async fn list_items_filtered_always_targets_personal_space() {
     let mut server = mockito::Server::new_async().await;
     let m = server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Item".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.Foto.Browse.Item".into(),
+        ))
         .with_status(200)
         .with_body(r#"{"success":true,"data":{"list":[]}}"#)
         .create_async()
         .await;
     let t = transport_for(&server);
-    list_items_filtered(&t, "SID", CollectionFilter::Favorites, 0, 100, 1, None).await.expect("ok");
+    list_items_filtered(&t, "SID", CollectionFilter::Favorites, 0, 100, 1, None)
+        .await
+        .expect("ok");
     m.assert_async().await;
 }
 
@@ -160,9 +178,17 @@ async fn list_items_filtered_sends_token_header_when_present() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    list_items_filtered(&t, "SID", CollectionFilter::Person(1), 0, 100, 1, Some("TOK"))
-        .await
-        .expect("filtered list with token header should decode ok");
+    list_items_filtered(
+        &t,
+        "SID",
+        CollectionFilter::Person(1),
+        0,
+        100,
+        1,
+        Some("TOK"),
+    )
+    .await
+    .expect("filtered list with token header should decode ok");
     m.assert_async().await;
 }
 
@@ -173,36 +199,60 @@ async fn discovery_listers_are_reachable_together() {
     let mut server = mockito::Server::new_async().await;
     server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Person".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.Foto.Browse.Person".into(),
+        ))
         .with_status(200)
         .with_body(r#"{"success":true,"data":{"list":[]}}"#)
         .create_async()
         .await;
     server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Geocoding".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.Foto.Browse.Geocoding".into(),
+        ))
         .with_status(200)
         .with_body(r#"{"success":true,"data":{"list":[]}}"#)
         .create_async()
         .await;
     server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.GeneralTag".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.Foto.Browse.GeneralTag".into(),
+        ))
         .with_status(200)
         .with_body(r#"{"success":true,"data":{"list":[]}}"#)
         .create_async()
         .await;
     server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Concept".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.Foto.Browse.Concept".into(),
+        ))
         .with_status(200)
         .with_body(r#"{"success":true,"data":{"list":[]}}"#)
         .create_async()
         .await;
     let t = transport_for(&server);
-    assert!(list_people(&t, "SID", 0, 10, 1, None).await.unwrap().is_empty());
-    assert!(list_places(&t, "SID", 0, 10, 1, None).await.unwrap().is_empty());
-    assert!(list_tags(&t, "SID", 0, 10, 1, None).await.unwrap().is_empty());
-    assert!(list_subjects(&t, "SID", 0, 10, 1, None).await.unwrap().is_empty());
+    assert!(list_people(&t, "SID", 0, 10, 1, None)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(list_places(&t, "SID", 0, 10, 1, None)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(list_tags(&t, "SID", 0, 10, 1, None)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(list_subjects(&t, "SID", 0, 10, 1, None)
+        .await
+        .unwrap()
+        .is_empty());
     let _ = Space::Personal;
 }

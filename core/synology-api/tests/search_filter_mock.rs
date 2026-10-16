@@ -4,8 +4,13 @@ use synology_api::search_filter::search_facets;
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
-    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false })
-        .expect("transport builds")
+    Transport::new(&Connection {
+        host: server.url(),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    })
+    .expect("transport builds")
 }
 
 /// Pins the real request shape confirmed against the NAS: api
@@ -44,14 +49,19 @@ async fn search_facets_decodes_full_real_response_shape() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let facets = search_facets(&t, "SID", Some("TOK")).await.expect("search_facets ok");
+    let facets = search_facets(&t, "SID", Some("TOK"))
+        .await
+        .expect("search_facets ok");
 
     assert_eq!(facets.apertures.len(), 3);
     assert_eq!(facets.apertures[0].id, 1);
     assert_eq!(facets.apertures[0].name, "F1.8");
 
     assert_eq!(facets.cameras.len(), 3);
-    assert!(facets.cameras.iter().any(|c| c.name == "iPhone 6s" && c.id == 23));
+    assert!(facets
+        .cameras
+        .iter()
+        .any(|c| c.name == "iPhone 6s" && c.id == 23));
 
     // Geocoding is a nested tree; it must be flattened into one flat list
     // depth-first, parent before children, all three levels present.
@@ -77,7 +87,9 @@ async fn search_facets_omits_token_header_when_none() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let facets = search_facets(&t, "SID", None).await.expect("search_facets ok");
+    let facets = search_facets(&t, "SID", None)
+        .await
+        .expect("search_facets ok");
     assert!(facets.cameras.is_empty());
     assert!(facets.apertures.is_empty());
     assert!(facets.geocodings.is_empty());
@@ -95,11 +107,15 @@ async fn search_facets_decodes_empty_catalog_cleanly() {
         .mock("GET", "/webapi/entry.cgi")
         .match_query(Matcher::Any)
         .with_status(200)
-        .with_body(r#"{"success":true,"data":{"camera":[],"aperture":[],"geocoding":[],"item_type":[]}}"#)
+        .with_body(
+            r#"{"success":true,"data":{"camera":[],"aperture":[],"geocoding":[],"item_type":[]}}"#,
+        )
         .create_async()
         .await;
     let t = transport_for(&server);
-    let facets = search_facets(&t, "SID", None).await.expect("search_facets ok");
+    let facets = search_facets(&t, "SID", None)
+        .await
+        .expect("search_facets ok");
     assert!(facets.cameras.is_empty());
     assert!(facets.geocodings.is_empty());
 }
@@ -116,7 +132,10 @@ async fn search_facets_maps_envelope_error() {
         .await;
     let t = transport_for(&server);
     let err = search_facets(&t, "SID", None).await.unwrap_err();
-    assert!(matches!(err, models::CoreError::UnexpectedResponse { .. }), "got {err:?}");
+    assert!(
+        matches!(err, models::CoreError::UnexpectedResponse { .. }),
+        "got {err:?}"
+    );
 }
 
 /// search_facets() is reachable through the crate's public facade.
@@ -125,13 +144,18 @@ async fn search_facets_reachable_through_facade() {
     let mut server = mockito::Server::new_async().await;
     server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.Foto.Search.Filter".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.Foto.Search.Filter".into(),
+        ))
         .with_status(200)
         .with_body(r#"{"success":true,"data":{}}"#)
         .create_async()
         .await;
     let t = transport_for(&server);
-    let facets = synology_api::search_facets(&t, "SID", None).await.expect("search_facets ok");
+    let facets = synology_api::search_facets(&t, "SID", None)
+        .await
+        .expect("search_facets ok");
     assert!(facets.cameras.is_empty());
 }
 
@@ -156,8 +180,13 @@ async fn search_filtered_sends_start_and_end_time_params() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let filters = SearchFilters { start_time: Some(1_400_000_000), end_time: Some(1_500_000_000) };
-    let assets = synology_api::search_filtered(&t, "SID", "IMG", &filters, 0, 10, 1, None).await.expect("search ok");
+    let filters = SearchFilters {
+        start_time: Some(1_400_000_000),
+        end_time: Some(1_500_000_000),
+    };
+    let assets = synology_api::search_filtered(&t, "SID", "IMG", &filters, 0, 10, 1, None)
+        .await
+        .expect("search ok");
     assert!(assets.is_empty());
     m.assert_async().await;
 }
@@ -181,8 +210,13 @@ async fn search_filtered_omits_end_time_when_only_start_given() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let filters = SearchFilters { start_time: Some(1_400_000_000), end_time: None };
-    let assets = synology_api::search_filtered(&t, "SID", "IMG", &filters, 0, 10, 1, None).await.expect("search ok");
+    let filters = SearchFilters {
+        start_time: Some(1_400_000_000),
+        end_time: None,
+    };
+    let assets = synology_api::search_filtered(&t, "SID", "IMG", &filters, 0, 10, 1, None)
+        .await
+        .expect("search ok");
     assert!(assets.is_empty());
     m.assert_async().await;
 }
@@ -208,9 +242,10 @@ async fn search_filtered_with_default_filters_matches_plain_search() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = synology_api::search_filtered(&t, "SID", "IMG", &SearchFilters::default(), 0, 10, 1, None)
-        .await
-        .expect("search ok");
+    let assets =
+        synology_api::search_filtered(&t, "SID", "IMG", &SearchFilters::default(), 0, 10, 1, None)
+            .await
+            .expect("search ok");
     assert!(assets.is_empty());
     m.assert_async().await;
 }
@@ -233,8 +268,13 @@ async fn search_filtered_decodes_real_row_shape() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let filters = SearchFilters { start_time: Some(1_480_000_000), end_time: None };
-    let assets = synology_api::search_filtered(&t, "SID", "IMG", &filters, 0, 10, 1, None).await.expect("search ok");
+    let filters = SearchFilters {
+        start_time: Some(1_480_000_000),
+        end_time: None,
+    };
+    let assets = synology_api::search_filtered(&t, "SID", "IMG", &filters, 0, 10, 1, None)
+        .await
+        .expect("search ok");
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0].filename, "IMG_1910.JPG");
     assert_eq!(assets[0].unit_id, 1001);

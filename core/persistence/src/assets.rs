@@ -97,7 +97,8 @@ fn build_filter_where(
 /// windowed reads select this list verbatim so the positional row mapping
 /// stays valid and the queries can never drift out of column order as the
 /// model grows.
-const ASSET_SELECT_COLUMNS: &str = "server_id, unit_id, cache_key, filename, media_kind, taken_at, \
+const ASSET_SELECT_COLUMNS: &str =
+    "server_id, unit_id, cache_key, filename, media_kind, taken_at, \
      added_at, width, height, file_size, server_version, space, \
      rating, description, camera, aperture, exposure_time, focal_length, \
      iso, lens, duration, framerate, video_codec, container_type, latitude, longitude";
@@ -258,7 +259,8 @@ impl Store {
     /// server-side.
     pub fn delete_assets_not_in(&self, space: Space, keep_ids: &[i64]) -> Result<u64, CoreError> {
         self.conn.execute_batch("BEGIN").map_err(map_sql)?;
-        let placeholders: Vec<String> = (0..keep_ids.len()).map(|i| format!("?{}", i + 2)).collect();
+        let placeholders: Vec<String> =
+            (0..keep_ids.len()).map(|i| format!("?{}", i + 2)).collect();
         let sql = format!(
             "DELETE FROM assets WHERE space = ?1 AND server_id NOT IN ({})",
             placeholders.join(",")
@@ -271,8 +273,10 @@ impl Store {
         }
         let deleted = if keep_ids.is_empty() {
             // No placeholders to bind: everything in the space is stale.
-            self.conn
-                .execute("DELETE FROM assets WHERE space = ?1", params![space_to_int(space)])
+            self.conn.execute(
+                "DELETE FROM assets WHERE space = ?1",
+                params![space_to_int(space)],
+            )
         } else {
             self.conn.execute(&sql, params_vec.as_slice())
         };
@@ -292,7 +296,12 @@ impl Store {
     /// `idx_assets_space_taken` exactly, so this stays an index-only scan as the
     /// library grows, and the tiebreak guarantees paging by offset/limit never
     /// skips or duplicates a row when two assets share the same `taken_at`.
-    pub fn fetch_assets(&self, space: Space, offset: u32, limit: u32) -> Result<Vec<Asset>, CoreError> {
+    pub fn fetch_assets(
+        &self,
+        space: Space,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Asset>, CoreError> {
         let sql = format!(
             "SELECT {ASSET_SELECT_COLUMNS}
                  FROM assets
@@ -328,7 +337,9 @@ impl Store {
                  ORDER BY taken_at DESC, server_id DESC"
         );
         let mut stmt = self.conn.prepare(&sql).map_err(map_sql)?;
-        let rows = stmt.query_map(params![space_to_int(space)], row_to_asset).map_err(map_sql)?;
+        let rows = stmt
+            .query_map(params![space_to_int(space)], row_to_asset)
+            .map_err(map_sql)?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row.map_err(map_sql)?);
@@ -458,7 +469,10 @@ impl Store {
             )
             .map_err(map_sql)?;
         if null_count > 0 {
-            out.push(DayCount { day_start: 0, count: null_count as u32 });
+            out.push(DayCount {
+                day_start: 0,
+                count: null_count as u32,
+            });
         }
         Ok(out)
     }
@@ -516,7 +530,12 @@ mod tests {
     }
 
     fn trashed_count(store: &Store) -> i64 {
-        store.conn.query_row("SELECT COUNT(*) FROM assets WHERE in_trash = 1", [], |r| r.get(0)).unwrap()
+        store
+            .conn
+            .query_row("SELECT COUNT(*) FROM assets WHERE in_trash = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
     }
 
     fn asset(space: Space, id: i64, taken: Option<i64>, ver: Option<i64>) -> Asset {
@@ -540,10 +559,18 @@ mod tests {
     #[test]
     fn upsert_then_count_and_fetch_newest_first() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 2, Some(300), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 3, Some(200), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Shared, 9, Some(999), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 2, Some(300), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 3, Some(200), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Shared, 9, Some(999), Some(1)))
+            .unwrap();
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 3);
         assert_eq!(store.asset_count(Space::Shared).unwrap(), 1);
         let page = store.fetch_assets(Space::Personal, 0, 10).unwrap();
@@ -579,7 +606,9 @@ mod tests {
     #[test]
     fn upsert_is_idempotent_on_space_server_id() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
         let mut updated = asset(Space::Personal, 1, Some(555), Some(2));
         updated.cache_key = "ck1-new".into();
         store.upsert_asset(&updated).unwrap();
@@ -593,8 +622,12 @@ mod tests {
     #[test]
     fn null_taken_at_sorts_last() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 2, None, Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 2, None, Some(1)))
+            .unwrap();
         let ids: Vec<i64> = store
             .fetch_assets(Space::Personal, 0, 10)
             .unwrap()
@@ -608,7 +641,9 @@ mod tests {
     fn windowing_offset_limit() {
         let store = Store::open_in_memory().unwrap();
         for id in 1..=5 {
-            store.upsert_asset(&asset(Space::Personal, id, Some(id * 10), Some(1))).unwrap();
+            store
+                .upsert_asset(&asset(Space::Personal, id, Some(id * 10), Some(1)))
+                .unwrap();
         }
         let ids: Vec<i64> = store
             .fetch_assets(Space::Personal, 1, 2)
@@ -623,7 +658,9 @@ mod tests {
     fn upserting_same_asset_again_does_not_increase_count() {
         let store = Store::open_in_memory().unwrap();
         for _ in 0..3 {
-            store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+            store
+                .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+                .unwrap();
         }
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 1);
     }
@@ -631,7 +668,9 @@ mod tests {
     #[test]
     fn upsert_assets_batch_is_idempotent() {
         let store = Store::open_in_memory().unwrap();
-        let batch: Vec<Asset> = (1..=10).map(|id| asset(Space::Personal, id, Some(id * 10), Some(1))).collect();
+        let batch: Vec<Asset> = (1..=10)
+            .map(|id| asset(Space::Personal, id, Some(id * 10), Some(1)))
+            .collect();
         store.upsert_assets(&batch).unwrap();
         store.upsert_assets(&batch).unwrap();
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 10);
@@ -645,10 +684,14 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         // 12 assets: ids 1..=6 all share taken_at=100, ids 7..=12 all share taken_at=200.
         for id in 1..=6 {
-            store.upsert_asset(&asset(Space::Personal, id, Some(100), Some(1))).unwrap();
+            store
+                .upsert_asset(&asset(Space::Personal, id, Some(100), Some(1)))
+                .unwrap();
         }
         for id in 7..=12 {
-            store.upsert_asset(&asset(Space::Personal, id, Some(200), Some(1))).unwrap();
+            store
+                .upsert_asset(&asset(Space::Personal, id, Some(200), Some(1)))
+                .unwrap();
         }
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 12);
 
@@ -656,7 +699,9 @@ mod tests {
         let page_size = 5u32;
         let mut offset = 0u32;
         loop {
-            let page = store.fetch_assets(Space::Personal, offset, page_size).unwrap();
+            let page = store
+                .fetch_assets(Space::Personal, offset, page_size)
+                .unwrap();
             if page.is_empty() {
                 break;
             }
@@ -677,9 +722,15 @@ mod tests {
     #[test]
     fn fetch_assets_does_not_leak_across_spaces() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Shared, 2, Some(200), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Shared, 3, Some(300), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Shared, 2, Some(200), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Shared, 3, Some(300), Some(1)))
+            .unwrap();
 
         let personal = store.fetch_assets(Space::Personal, 0, 100).unwrap();
         assert_eq!(personal.len(), 1);
@@ -694,15 +745,30 @@ mod tests {
     #[test]
     fn delete_assets_not_in_removes_only_stale_rows_in_space() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 2, Some(200), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 3, Some(300), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Shared, 9, Some(999), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 2, Some(200), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 3, Some(300), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Shared, 9, Some(999), Some(1)))
+            .unwrap();
 
-        let deleted = store.delete_assets_not_in(Space::Personal, &[1, 3]).unwrap();
+        let deleted = store
+            .delete_assets_not_in(Space::Personal, &[1, 3])
+            .unwrap();
         assert_eq!(deleted, 1);
 
-        let ids: Vec<i64> = store.fetch_assets(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
+        let ids: Vec<i64> = store
+            .fetch_assets(Space::Personal, 0, 10)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
         assert_eq!(ids, vec![3, 1]);
         // Shared space untouched by a Personal-space sweep.
         assert_eq!(store.asset_count(Space::Shared).unwrap(), 1);
@@ -711,8 +777,12 @@ mod tests {
     #[test]
     fn delete_assets_not_in_with_empty_keep_list_clears_the_space() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Shared, 2, Some(200), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Shared, 2, Some(200), Some(1)))
+            .unwrap();
 
         let deleted = store.delete_assets_not_in(Space::Personal, &[]).unwrap();
         assert_eq!(deleted, 1);
@@ -725,7 +795,13 @@ mod tests {
     /// Builds an asset with an explicit media kind and rating on top of the
     /// base `asset` helper, so the filter tests can seed a mix of photos and
     /// videos at various star ratings without restating every field.
-    fn filtered_asset(space: Space, id: i64, taken: Option<i64>, kind: MediaKind, rating: i32) -> Asset {
+    fn filtered_asset(
+        space: Space,
+        id: i64,
+        taken: Option<i64>,
+        kind: MediaKind,
+        rating: i32,
+    ) -> Asset {
         Asset {
             media_kind: kind,
             rating,
@@ -742,27 +818,95 @@ mod tests {
     fn filter_with_no_facets_equals_fetch_assets() {
         let store = Store::open_in_memory().unwrap();
         // A mix: two videos, several photos, tied taken_at, and an undated row.
-        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Photo, 0)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(300), MediaKind::Video, 5)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 3, Some(300), MediaKind::Photo, 3)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 4, Some(200), MediaKind::Video, 2)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 5, None, MediaKind::Photo, 4)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Shared, 9, Some(999), MediaKind::Photo, 5)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                1,
+                Some(100),
+                MediaKind::Photo,
+                0,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                2,
+                Some(300),
+                MediaKind::Video,
+                5,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                3,
+                Some(300),
+                MediaKind::Photo,
+                3,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                4,
+                Some(200),
+                MediaKind::Video,
+                2,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                5,
+                None,
+                MediaKind::Photo,
+                4,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Shared,
+                9,
+                Some(999),
+                MediaKind::Photo,
+                5,
+            ))
+            .unwrap();
 
         // Full window.
-        let filtered = store.filter_assets(Space::Personal, None, None, None, None, 0, 100).unwrap();
+        let filtered = store
+            .filter_assets(Space::Personal, None, None, None, None, 0, 100)
+            .unwrap();
         let plain = store.fetch_assets(Space::Personal, 0, 100).unwrap();
         let filtered_ids: Vec<i64> = filtered.iter().map(|a| a.id).collect();
         let plain_ids: Vec<i64> = plain.iter().map(|a| a.id).collect();
-        assert_eq!(filtered_ids, plain_ids, "all-None filter must match fetch_assets row-for-row and in order");
+        assert_eq!(
+            filtered_ids, plain_ids,
+            "all-None filter must match fetch_assets row-for-row and in order"
+        );
 
         // A mid-stream window must page identically too.
-        let fw: Vec<i64> = store.filter_assets(Space::Personal, None, None, None, None, 1, 2).unwrap().iter().map(|a| a.id).collect();
-        let pw: Vec<i64> = store.fetch_assets(Space::Personal, 1, 2).unwrap().iter().map(|a| a.id).collect();
-        assert_eq!(fw, pw, "all-None filter must window identically to fetch_assets");
+        let fw: Vec<i64> = store
+            .filter_assets(Space::Personal, None, None, None, None, 1, 2)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        let pw: Vec<i64> = store
+            .fetch_assets(Space::Personal, 1, 2)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(
+            fw, pw,
+            "all-None filter must window identically to fetch_assets"
+        );
 
         assert_eq!(
-            store.filter_count(Space::Personal, None, None, None, None).unwrap(),
+            store
+                .filter_count(Space::Personal, None, None, None, None)
+                .unwrap(),
             store.asset_count(Space::Personal).unwrap(),
             "all-None filter_count must equal asset_count"
         );
@@ -772,28 +916,86 @@ mod tests {
     #[test]
     fn filter_by_media_kind_alone() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Photo, 0)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(200), MediaKind::Video, 0)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 3, Some(300), MediaKind::Photo, 0)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 4, Some(400), MediaKind::Video, 0)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                1,
+                Some(100),
+                MediaKind::Photo,
+                0,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                2,
+                Some(200),
+                MediaKind::Video,
+                0,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                3,
+                Some(300),
+                MediaKind::Photo,
+                0,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                4,
+                Some(400),
+                MediaKind::Video,
+                0,
+            ))
+            .unwrap();
 
         let videos: Vec<i64> = store
-            .filter_assets(Space::Personal, Some(MediaKind::Video), None, None, None, 0, 100)
+            .filter_assets(
+                Space::Personal,
+                Some(MediaKind::Video),
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .unwrap()
             .iter()
             .map(|a| a.id)
             .collect();
         assert_eq!(videos, vec![4, 2], "only videos, newest first");
-        assert_eq!(store.filter_count(Space::Personal, Some(MediaKind::Video), None, None, None).unwrap(), 2);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, Some(MediaKind::Video), None, None, None)
+                .unwrap(),
+            2
+        );
 
         let photos: Vec<i64> = store
-            .filter_assets(Space::Personal, Some(MediaKind::Photo), None, None, None, 0, 100)
+            .filter_assets(
+                Space::Personal,
+                Some(MediaKind::Photo),
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .unwrap()
             .iter()
             .map(|a| a.id)
             .collect();
         assert_eq!(photos, vec![3, 1]);
-        assert_eq!(store.filter_count(Space::Personal, Some(MediaKind::Photo), None, None, None).unwrap(), 2);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, Some(MediaKind::Photo), None, None, None)
+                .unwrap(),
+            2
+        );
     }
 
     /// The minimum-rating facet is inclusive (`rating >= min`) and drops
@@ -804,7 +1006,15 @@ mod tests {
         for r in 0..=5 {
             // id encodes the rating; taken_at ascending with the rating so the
             // newest-first order is predictable.
-            store.upsert_asset(&filtered_asset(Space::Personal, r as i64 + 1, Some((r as i64 + 1) * 10), MediaKind::Photo, r)).unwrap();
+            store
+                .upsert_asset(&filtered_asset(
+                    Space::Personal,
+                    r as i64 + 1,
+                    Some((r as i64 + 1) * 10),
+                    MediaKind::Photo,
+                    r,
+                ))
+                .unwrap();
         }
         let at_least_three: Vec<i32> = store
             .filter_assets(Space::Personal, None, None, None, Some(3), 0, 100)
@@ -813,12 +1023,27 @@ mod tests {
             .map(|a| a.rating)
             .collect();
         assert_eq!(at_least_three, vec![5, 4, 3], "rating >= 3, newest first");
-        assert_eq!(store.filter_count(Space::Personal, None, None, None, Some(3)).unwrap(), 3);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, None, None, None, Some(3))
+                .unwrap(),
+            3
+        );
 
         // A floor of 1 excludes only the unrated row.
-        assert_eq!(store.filter_count(Space::Personal, None, None, None, Some(1)).unwrap(), 5);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, None, None, None, Some(1))
+                .unwrap(),
+            5
+        );
         // A floor of 0 keeps everything (matches all-None on the rating axis).
-        assert_eq!(store.filter_count(Space::Personal, None, None, None, Some(0)).unwrap(), 6);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, None, None, None, Some(0))
+                .unwrap(),
+            6
+        );
     }
 
     /// The date facet applies an inclusive floor/ceiling on `taken_at`, and a
@@ -826,10 +1051,42 @@ mod tests {
     #[test]
     fn filter_by_date_range_alone_and_excludes_undated() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Photo, 0)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(200), MediaKind::Photo, 0)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 3, Some(300), MediaKind::Photo, 0)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 4, None, MediaKind::Photo, 0)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                1,
+                Some(100),
+                MediaKind::Photo,
+                0,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                2,
+                Some(200),
+                MediaKind::Photo,
+                0,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                3,
+                Some(300),
+                MediaKind::Photo,
+                0,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                4,
+                None,
+                MediaKind::Photo,
+                0,
+            ))
+            .unwrap();
 
         // Inclusive both ends: [200, 300] keeps ids 2 and 3.
         let ranged: Vec<i64> = store
@@ -839,19 +1096,44 @@ mod tests {
             .map(|a| a.id)
             .collect();
         assert_eq!(ranged, vec![3, 2]);
-        assert_eq!(store.filter_count(Space::Personal, None, Some(200), Some(300), None).unwrap(), 2);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, None, Some(200), Some(300), None)
+                .unwrap(),
+            2
+        );
 
         // Floor only.
-        assert_eq!(store.filter_count(Space::Personal, None, Some(200), None, None).unwrap(), 2);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, None, Some(200), None, None)
+                .unwrap(),
+            2
+        );
         // Ceiling only.
-        assert_eq!(store.filter_count(Space::Personal, None, None, Some(200), None).unwrap(), 2);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, None, None, Some(200), None)
+                .unwrap(),
+            2
+        );
 
         // Any date bound drops the undated row (id 4): a floor of 0 would keep
         // every dated row but still exclude the NULL one.
-        let with_floor = store.filter_count(Space::Personal, None, Some(0), None, None).unwrap();
-        assert_eq!(with_floor, 3, "undated row is excluded once a date bound is set");
+        let with_floor = store
+            .filter_count(Space::Personal, None, Some(0), None, None)
+            .unwrap();
+        assert_eq!(
+            with_floor, 3,
+            "undated row is excluded once a date bound is set"
+        );
         // Whereas no date bound at all keeps the undated row.
-        assert_eq!(store.filter_count(Space::Personal, None, None, None, None).unwrap(), 4);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, None, None, None, None)
+                .unwrap(),
+            4
+        );
     }
 
     /// All three facets combine as an AND: only rows satisfying media kind,
@@ -860,25 +1142,85 @@ mod tests {
     fn filter_combined_facets_and_together() {
         let store = Store::open_in_memory().unwrap();
         // Target row: a highly-rated video inside the date window.
-        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(250), MediaKind::Video, 5)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                1,
+                Some(250),
+                MediaKind::Video,
+                5,
+            ))
+            .unwrap();
         // Right kind + rating, wrong (too-early) date.
-        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(100), MediaKind::Video, 5)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                2,
+                Some(100),
+                MediaKind::Video,
+                5,
+            ))
+            .unwrap();
         // Right date + rating, wrong kind (photo).
-        store.upsert_asset(&filtered_asset(Space::Personal, 3, Some(250), MediaKind::Photo, 5)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                3,
+                Some(250),
+                MediaKind::Photo,
+                5,
+            ))
+            .unwrap();
         // Right kind + date, rating below the floor.
-        store.upsert_asset(&filtered_asset(Space::Personal, 4, Some(250), MediaKind::Video, 2)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                4,
+                Some(250),
+                MediaKind::Video,
+                2,
+            ))
+            .unwrap();
         // Another qualifying video later in the window.
-        store.upsert_asset(&filtered_asset(Space::Personal, 5, Some(280), MediaKind::Video, 4)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                5,
+                Some(280),
+                MediaKind::Video,
+                4,
+            ))
+            .unwrap();
 
         let got: Vec<i64> = store
-            .filter_assets(Space::Personal, Some(MediaKind::Video), Some(200), Some(300), Some(4), 0, 100)
+            .filter_assets(
+                Space::Personal,
+                Some(MediaKind::Video),
+                Some(200),
+                Some(300),
+                Some(4),
+                0,
+                100,
+            )
             .unwrap()
             .iter()
             .map(|a| a.id)
             .collect();
-        assert_eq!(got, vec![5, 1], "only videos rated >=4 taken in [200,300], newest first");
         assert_eq!(
-            store.filter_count(Space::Personal, Some(MediaKind::Video), Some(200), Some(300), Some(4)).unwrap(),
+            got,
+            vec![5, 1],
+            "only videos rated >=4 taken in [200,300], newest first"
+        );
+        assert_eq!(
+            store
+                .filter_count(
+                    Space::Personal,
+                    Some(MediaKind::Video),
+                    Some(200),
+                    Some(300),
+                    Some(4)
+                )
+                .unwrap(),
             2
         );
     }
@@ -891,19 +1233,51 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         // Six qualifying videos, three sharing taken_at=100 and three sharing 200.
         for id in 1..=3 {
-            store.upsert_asset(&filtered_asset(Space::Personal, id, Some(100), MediaKind::Video, 5)).unwrap();
+            store
+                .upsert_asset(&filtered_asset(
+                    Space::Personal,
+                    id,
+                    Some(100),
+                    MediaKind::Video,
+                    5,
+                ))
+                .unwrap();
         }
         for id in 4..=6 {
-            store.upsert_asset(&filtered_asset(Space::Personal, id, Some(200), MediaKind::Video, 5)).unwrap();
+            store
+                .upsert_asset(&filtered_asset(
+                    Space::Personal,
+                    id,
+                    Some(200),
+                    MediaKind::Video,
+                    5,
+                ))
+                .unwrap();
         }
         // A non-qualifying photo interleaved, to prove the filter holds across pages.
-        store.upsert_asset(&filtered_asset(Space::Personal, 7, Some(150), MediaKind::Photo, 5)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                7,
+                Some(150),
+                MediaKind::Photo,
+                5,
+            ))
+            .unwrap();
 
         let mut seen: Vec<i64> = Vec::new();
         let mut offset = 0u32;
         loop {
             let page = store
-                .filter_assets(Space::Personal, Some(MediaKind::Video), None, None, None, offset, 2)
+                .filter_assets(
+                    Space::Personal,
+                    Some(MediaKind::Video),
+                    None,
+                    None,
+                    None,
+                    offset,
+                    2,
+                )
                 .unwrap();
             if page.is_empty() {
                 break;
@@ -911,9 +1285,17 @@ mod tests {
             seen.extend(page.iter().map(|a| a.id));
             offset += 2;
         }
-        assert_eq!(seen, vec![6, 5, 4, 3, 2, 1], "filtered paging is stable and video-only");
+        assert_eq!(
+            seen,
+            vec![6, 5, 4, 3, 2, 1],
+            "filtered paging is stable and video-only"
+        );
         let unique: std::collections::HashSet<i64> = seen.iter().copied().collect();
-        assert_eq!(unique.len(), seen.len(), "no duplicates across filtered pages");
+        assert_eq!(
+            unique.len(),
+            seen.len(),
+            "no duplicates across filtered pages"
+        );
     }
 
     /// The filter is space-scoped: a Personal filter never returns a Shared
@@ -921,18 +1303,52 @@ mod tests {
     #[test]
     fn filter_is_space_scoped() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Video, 5)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Shared, 1, Some(200), MediaKind::Video, 5)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                1,
+                Some(100),
+                MediaKind::Video,
+                5,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Shared,
+                1,
+                Some(200),
+                MediaKind::Video,
+                5,
+            ))
+            .unwrap();
 
         let personal: Vec<i64> = store
-            .filter_assets(Space::Personal, Some(MediaKind::Video), None, None, None, 0, 100)
+            .filter_assets(
+                Space::Personal,
+                Some(MediaKind::Video),
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .unwrap()
             .iter()
             .map(|a| a.id)
             .collect();
         assert_eq!(personal, vec![1]);
-        assert_eq!(store.filter_count(Space::Personal, Some(MediaKind::Video), None, None, None).unwrap(), 1);
-        assert_eq!(store.filter_count(Space::Shared, Some(MediaKind::Video), None, None, None).unwrap(), 1);
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, Some(MediaKind::Video), None, None, None)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .filter_count(Space::Shared, Some(MediaKind::Video), None, None, None)
+                .unwrap(),
+            1
+        );
     }
 
     /// Trashed rows are excluded from every filtered read, exactly like
@@ -941,18 +1357,51 @@ mod tests {
     #[test]
     fn filter_excludes_trashed_rows() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Video, 5)).unwrap();
-        store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(200), MediaKind::Video, 5)).unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                1,
+                Some(100),
+                MediaKind::Video,
+                5,
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&filtered_asset(
+                Space::Personal,
+                2,
+                Some(200),
+                MediaKind::Video,
+                5,
+            ))
+            .unwrap();
         flag_trashed(&store, 2, 5000);
 
         let got: Vec<i64> = store
-            .filter_assets(Space::Personal, Some(MediaKind::Video), None, None, None, 0, 100)
+            .filter_assets(
+                Space::Personal,
+                Some(MediaKind::Video),
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .unwrap()
             .iter()
             .map(|a| a.id)
             .collect();
-        assert_eq!(got, vec![1], "the trashed video must not appear in a filtered read");
-        assert_eq!(store.filter_count(Space::Personal, Some(MediaKind::Video), None, None, None).unwrap(), 1);
+        assert_eq!(
+            got,
+            vec![1],
+            "the trashed video must not appear in a filtered read"
+        );
+        assert_eq!(
+            store
+                .filter_count(Space::Personal, Some(MediaKind::Video), None, None, None)
+                .unwrap(),
+            1
+        );
     }
 
     // --- Phase 2a: trash flag and trash queries -------------------------
@@ -963,7 +1412,9 @@ mod tests {
     #[test]
     fn new_asset_defaults_to_not_trashed() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 1);
         assert_eq!(store.fetch_assets(Space::Personal, 0, 10).unwrap().len(), 1);
         assert_eq!(trashed_count(&store), 0);
@@ -975,7 +1426,9 @@ mod tests {
     #[test]
     fn upsert_preserves_trash_flag_on_conflict() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
         flag_trashed(&store, 1, 9999);
 
         // A re-crawl reports the same item again with a new cache_key/version.
@@ -989,14 +1442,29 @@ mod tests {
         assert_eq!(trashed_count(&store), 1);
         let cache_key: String = store
             .conn
-            .query_row("SELECT cache_key FROM assets WHERE server_id = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT cache_key FROM assets WHERE server_id = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(cache_key, "ck1-new", "the re-crawl still updated other fields");
+        assert_eq!(
+            cache_key, "ck1-new",
+            "the re-crawl still updated other fields"
+        );
         let trashed_at: Option<i64> = store
             .conn
-            .query_row("SELECT trashed_at FROM assets WHERE server_id = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT trashed_at FROM assets WHERE server_id = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(trashed_at, Some(9999), "trashed_at must survive a re-crawl upsert");
+        assert_eq!(
+            trashed_at,
+            Some(9999),
+            "trashed_at must survive a re-crawl upsert"
+        );
     }
 
     /// The batch upsert must preserve the trash flag too (the crawl/sync
@@ -1004,7 +1472,9 @@ mod tests {
     #[test]
     fn batch_upsert_preserves_trash_flag_on_conflict() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
         flag_trashed(&store, 1, 8888);
 
         let mut recrawled = asset(Space::Personal, 1, Some(100), Some(2));
@@ -1018,21 +1488,38 @@ mod tests {
     #[test]
     fn delete_assets_removes_only_the_named_rows_in_space() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 2, Some(200), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Shared, 1, Some(100), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 2, Some(200), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Shared, 1, Some(100), Some(1)))
+            .unwrap();
 
         let removed = store.delete_assets(Space::Personal, &[1]).unwrap();
         assert_eq!(removed, 1);
-        let remaining: Vec<i64> = store.fetch_assets(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
+        let remaining: Vec<i64> = store
+            .fetch_assets(Space::Personal, 0, 10)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
         assert_eq!(remaining, vec![2]);
-        assert_eq!(store.asset_count(Space::Shared).unwrap(), 1, "Shared row with same server_id untouched");
+        assert_eq!(
+            store.asset_count(Space::Shared).unwrap(),
+            1,
+            "Shared row with same server_id untouched"
+        );
     }
 
     #[test]
     fn delete_assets_empty_ids_is_a_no_op() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
         assert_eq!(store.delete_assets(Space::Personal, &[]).unwrap(), 0);
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 1);
     }
@@ -1049,12 +1536,39 @@ mod tests {
         let base = 1_479_513_600; // 2016-11-19 00:00:00 UTC
         let day = 86_400;
         // Three days, with 1, 2, and 3 assets respectively (ascending age).
-        store.upsert_asset(&asset(Space::Personal, 1, Some(base + 2 * 7 * day + 10), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 2, Some(base + 7 * day + 20), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 3, Some(base + 7 * day + 30), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 4, Some(base + 40), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 5, Some(base + 50), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 6, Some(base + 60), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(
+                Space::Personal,
+                1,
+                Some(base + 2 * 7 * day + 10),
+                Some(1),
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&asset(
+                Space::Personal,
+                2,
+                Some(base + 7 * day + 20),
+                Some(1),
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&asset(
+                Space::Personal,
+                3,
+                Some(base + 7 * day + 30),
+                Some(1),
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 4, Some(base + 40), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 5, Some(base + 50), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 6, Some(base + 60), Some(1)))
+            .unwrap();
 
         let hist = store.date_histogram(Space::Personal).unwrap();
         assert_eq!(hist.len(), 3, "three distinct days");
@@ -1079,9 +1593,15 @@ mod tests {
     fn date_histogram_is_space_scoped_and_excludes_trash() {
         let store = Store::open_in_memory().unwrap();
         let base = 1_479_513_600;
-        store.upsert_asset(&asset(Space::Personal, 1, Some(base + 10), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 2, Some(base + 20), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Shared, 9, Some(base + 30), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(base + 10), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 2, Some(base + 20), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Shared, 9, Some(base + 30), Some(1)))
+            .unwrap();
         flag_trashed(&store, 2, 5000);
 
         let hist = store.date_histogram(Space::Personal).unwrap();
@@ -1097,15 +1617,25 @@ mod tests {
     fn date_histogram_puts_null_taken_at_in_trailing_zero_bucket() {
         let store = Store::open_in_memory().unwrap();
         let base = 1_479_513_600;
-        store.upsert_asset(&asset(Space::Personal, 1, Some(base + 10), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 2, None, Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 3, None, Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(base + 10), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 2, None, Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 3, None, Some(1)))
+            .unwrap();
 
         let hist = store.date_histogram(Space::Personal).unwrap();
         assert_eq!(hist.len(), 2);
         assert_eq!(hist[0].count, 1, "the one dated row");
         assert!(hist[0].day_start > 0);
-        assert_eq!(hist.last().unwrap().day_start, 0, "Unknown Date bucket is last");
+        assert_eq!(
+            hist.last().unwrap().day_start,
+            0,
+            "Unknown Date bucket is last"
+        );
         assert_eq!(hist.last().unwrap().count, 2);
     }
 
@@ -1115,10 +1645,15 @@ mod tests {
     fn date_histogram_omits_unknown_bucket_when_no_null_rows_and_is_empty_when_no_rows() {
         let store = Store::open_in_memory().unwrap();
         assert!(store.date_histogram(Space::Personal).unwrap().is_empty());
-        store.upsert_asset(&asset(Space::Personal, 1, Some(1_479_513_610), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(1_479_513_610), Some(1)))
+            .unwrap();
         let hist = store.date_histogram(Space::Personal).unwrap();
         assert_eq!(hist.len(), 1);
-        assert!(hist.iter().all(|b| b.day_start != 0), "no Unknown Date bucket when every row is dated");
+        assert!(
+            hist.iter().all(|b| b.day_start != 0),
+            "no Unknown Date bucket when every row is dated"
+        );
     }
 
     /// THE load-bearing invariant for the grid's (section, row) -> absolute
@@ -1136,17 +1671,48 @@ mod tests {
         let base = 1_479_513_600; // a UTC midnight
         let day = 86_400;
         // Day A (newest): 3 assets, two sharing a taken_at to force the tiebreak.
-        store.upsert_asset(&asset(Space::Personal, 10, Some(base + 2 * day + 500), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 11, Some(base + 2 * day + 500), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 12, Some(base + 2 * day + 100), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(
+                Space::Personal,
+                10,
+                Some(base + 2 * day + 500),
+                Some(1),
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&asset(
+                Space::Personal,
+                11,
+                Some(base + 2 * day + 500),
+                Some(1),
+            ))
+            .unwrap();
+        store
+            .upsert_asset(&asset(
+                Space::Personal,
+                12,
+                Some(base + 2 * day + 100),
+                Some(1),
+            ))
+            .unwrap();
         // Day B: 2 assets.
-        store.upsert_asset(&asset(Space::Personal, 20, Some(base + day + 700), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 21, Some(base + day + 10), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 20, Some(base + day + 700), Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 21, Some(base + day + 10), Some(1)))
+            .unwrap();
         // Day C (oldest dated): 1 asset.
-        store.upsert_asset(&asset(Space::Personal, 30, Some(base + 42), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 30, Some(base + 42), Some(1)))
+            .unwrap();
         // Two undated rows -> the trailing Unknown bucket.
-        store.upsert_asset(&asset(Space::Personal, 40, None, Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 41, None, Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 40, None, Some(1)))
+            .unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 41, None, Some(1)))
+            .unwrap();
 
         let hist = store.date_histogram(Space::Personal).unwrap();
         let total = store.asset_count(Space::Personal).unwrap();
@@ -1154,7 +1720,9 @@ mod tests {
         assert_eq!(u64::from(sum), total, "counts sum to asset_count");
 
         // Read the whole space back in one shot to index by absolute position.
-        let all = store.fetch_assets(Space::Personal, 0, total as u32).unwrap();
+        let all = store
+            .fetch_assets(Space::Personal, 0, total as u32)
+            .unwrap();
         assert_eq!(all.len() as u64, total);
 
         let mut prefix = 0u32;
@@ -1163,7 +1731,10 @@ mod tests {
                 let absolute = (prefix + r) as usize;
                 let a = &all[absolute];
                 if bucket.day_start == 0 {
-                    assert!(a.taken_at.is_none(), "Unknown bucket row must have NULL taken_at");
+                    assert!(
+                        a.taken_at.is_none(),
+                        "Unknown bucket row must have NULL taken_at"
+                    );
                 } else {
                     let row_day = (a.taken_at.unwrap() / day) * day;
                     assert_eq!(
@@ -1301,7 +1872,9 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         // The `asset` helper spreads `..Default::default()`, so it carries the
         // neutral metadata defaults already.
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
+        store
+            .upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1)))
+            .unwrap();
         let page = store.fetch_assets(Space::Personal, 0, 10).unwrap();
         assert_eq!(page.len(), 1);
         let a = &page[0];
@@ -1341,17 +1914,30 @@ mod tests {
         // ...but the metadata reflects the re-crawl.
         let (rating, description, camera): (i64, String, String) = store
             .conn
-            .query_row("SELECT rating, description, camera FROM assets WHERE server_id = 1", [], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })
+            .query_row(
+                "SELECT rating, description, camera FROM assets WHERE server_id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
             .unwrap();
         assert_eq!(rating, 5, "re-crawl must refresh rating");
-        assert_eq!(description, "new caption", "re-crawl must refresh description");
+        assert_eq!(
+            description, "new caption",
+            "re-crawl must refresh description"
+        );
         assert_eq!(camera, "Apple iPhone 15");
         let trashed_at: Option<i64> = store
             .conn
-            .query_row("SELECT trashed_at FROM assets WHERE server_id = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT trashed_at FROM assets WHERE server_id = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(trashed_at, Some(9999), "trashed_at must survive a metadata re-crawl");
+        assert_eq!(
+            trashed_at,
+            Some(9999),
+            "trashed_at must survive a metadata re-crawl"
+        );
     }
 }

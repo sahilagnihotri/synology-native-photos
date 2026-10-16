@@ -83,18 +83,16 @@ pub async fn download_original(
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("download request failed: {e}") })?;
+    let response = request.send().await.map_err(|e| CoreError::Network {
+        message: format!("download request failed: {e}"),
+    })?;
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("reading download body failed: {e}") })?;
+    let bytes = response.bytes().await.map_err(|e| CoreError::Network {
+        message: format!("reading download body failed: {e}"),
+    })?;
     map_binary_or_error(content_type.as_deref(), &bytes)
 }

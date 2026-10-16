@@ -64,11 +64,12 @@ pub async fn probe_capabilities(transport: &Transport) -> Result<Vec<ApiCapabili
         .query(&query)
         .send()
         .await
-        .map_err(|e| CoreError::Network { message: format!("capability probe request failed: {e}") })?;
-    let body = response
-        .text()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("failed to read capability probe body: {e}") })?;
+        .map_err(|e| CoreError::Network {
+            message: format!("capability probe request failed: {e}"),
+        })?;
+    let body = response.text().await.map_err(|e| CoreError::Network {
+        message: format!("failed to read capability probe body: {e}"),
+    })?;
 
     let map: HashMap<String, CapEntry> = decode_envelope(&body)?;
     Ok(map
@@ -96,9 +97,11 @@ pub async fn probe_capabilities(transport: &Transport) -> Result<Vec<ApiCapabili
 /// default version and risking a request against an endpoint that does
 /// not exist on this DSM.
 pub fn pin_version(caps: &[ApiCapability], api: &str, desired: u32) -> Result<u32, CoreError> {
-    let cap = caps
-        .iter()
-        .find(|c| c.name == api)
-        .ok_or_else(|| CoreError::CapabilityUnavailable { api: api.to_string() })?;
+    let cap =
+        caps.iter()
+            .find(|c| c.name == api)
+            .ok_or_else(|| CoreError::CapabilityUnavailable {
+                api: api.to_string(),
+            })?;
     Ok(desired.clamp(cap.min_version, cap.max_version))
 }

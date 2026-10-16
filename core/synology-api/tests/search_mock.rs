@@ -4,8 +4,13 @@ use synology_api::browse::search;
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
-    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false })
-        .expect("transport builds")
+    Transport::new(&Connection {
+        host: server.url(),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    })
+    .expect("transport builds")
 }
 
 /// Pins the real request shape confirmed against the NAS: api
@@ -30,7 +35,9 @@ async fn search_sends_list_item_method_and_keyword_param_with_token_header() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = search(&t, "SID", "food", 0, 10, 1, Some("TOK")).await.expect("search ok");
+    let assets = search(&t, "SID", "food", 0, 10, 1, Some("TOK"))
+        .await
+        .expect("search ok");
     assert_eq!(assets.len(), 1);
     let a = &assets[0];
     assert_eq!(a.id, 73507);
@@ -59,7 +66,9 @@ async fn search_omits_token_header_when_none() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = search(&t, "SID", "food", 0, 10, 1, None).await.expect("search ok");
+    let assets = search(&t, "SID", "food", 0, 10, 1, None)
+        .await
+        .expect("search ok");
     assert!(assets.is_empty());
     m.assert_async().await;
 }
@@ -72,14 +81,22 @@ async fn search_decodes_empty_result_cleanly() {
     let mut server = mockito::Server::new_async().await;
     server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("keyword".into(), "zzzznosuchthing123".into()))
+        .match_query(Matcher::UrlEncoded(
+            "keyword".into(),
+            "zzzznosuchthing123".into(),
+        ))
         .with_status(200)
         .with_body(r#"{"success":true,"data":{"list":[]}}"#)
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = search(&t, "SID", "zzzznosuchthing123", 0, 10, 1, None).await.expect("search ok");
-    assert!(assets.is_empty(), "a keyword with no matches must decode to an empty list, not error");
+    let assets = search(&t, "SID", "zzzznosuchthing123", 0, 10, 1, None)
+        .await
+        .expect("search ok");
+    assert!(
+        assets.is_empty(),
+        "a keyword with no matches must decode to an empty list, not error"
+    );
 }
 
 /// One malformed row (missing id) must be skipped without failing the
@@ -98,8 +115,14 @@ async fn search_skips_malformed_rows_without_failing_the_page() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = search(&t, "SID", "food", 0, 10, 1, None).await.expect("search ok");
-    assert_eq!(assets.len(), 1, "the malformed row (missing id) must be skipped, not fail the whole page");
+    let assets = search(&t, "SID", "food", 0, 10, 1, None)
+        .await
+        .expect("search ok");
+    assert_eq!(
+        assets.len(),
+        1,
+        "the malformed row (missing id) must be skipped, not fail the whole page"
+    );
 }
 
 /// A row missing cache_key is unusable for thumbnails/downloads and is
@@ -111,14 +134,21 @@ async fn search_skips_rows_missing_cache_key() {
         .mock("GET", "/webapi/entry.cgi")
         .match_query(Matcher::Any)
         .with_status(200)
-        .with_body(r#"{"success":true,"data":{"list":[
+        .with_body(
+            r#"{"success":true,"data":{"list":[
             {"id":1,"filename":"nocachekey.jpg","type":"photo"}
-        ]}}"#)
+        ]}}"#,
+        )
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = search(&t, "SID", "food", 0, 10, 1, None).await.expect("search ok");
-    assert!(assets.is_empty(), "a row with no cache_key is not usable and must be skipped");
+    let assets = search(&t, "SID", "food", 0, 10, 1, None)
+        .await
+        .expect("search ok");
+    assert!(
+        assets.is_empty(),
+        "a row with no cache_key is not usable and must be skipped"
+    );
 }
 
 #[tokio::test]
@@ -133,7 +163,10 @@ async fn search_maps_envelope_error() {
         .await;
     let t = transport_for(&server);
     let err = search(&t, "SID", "food", 0, 10, 1, None).await.unwrap_err();
-    assert!(matches!(err, models::CoreError::UnexpectedResponse { .. }), "got {err:?}");
+    assert!(
+        matches!(err, models::CoreError::UnexpectedResponse { .. }),
+        "got {err:?}"
+    );
 }
 
 /// search() is reachable through the crate's public facade, same smoke
@@ -143,11 +176,17 @@ async fn search_reachable_through_facade() {
     let mut server = mockito::Server::new_async().await;
     server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.Foto.Search.Search".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.Foto.Search.Search".into(),
+        ))
         .with_status(200)
         .with_body(r#"{"success":true,"data":{"list":[]}}"#)
         .create_async()
         .await;
     let t = transport_for(&server);
-    assert!(synology_api::search(&t, "SID", "food", 0, 10, 1, None).await.unwrap().is_empty());
+    assert!(synology_api::search(&t, "SID", "food", 0, 10, 1, None)
+        .await
+        .unwrap()
+        .is_empty());
 }

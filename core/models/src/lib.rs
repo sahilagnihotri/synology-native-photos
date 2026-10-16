@@ -5,10 +5,17 @@ uniffi::setup_scaffolding!();
 pub const CRATE_MARKER: &str = "models";
 
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Space { Personal, Shared }
+pub enum Space {
+    Personal,
+    Shared,
+}
 
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MediaKind { Photo, Video, Unknown }
+pub enum MediaKind {
+    Photo,
+    Video,
+    Unknown,
+}
 
 /// Classify a file as `Video` or `Photo` purely from its filename extension.
 ///
@@ -21,7 +28,12 @@ pub enum MediaKind { Photo, Video, Unknown }
 /// video, and a neutral `Unknown` would give the UI nothing useful to show.
 /// The match is case-insensitive (`.MOV` and `.mov` are the same).
 pub fn media_kind_from_filename(filename: &str) -> MediaKind {
-    match filename.rsplit('.').next().map(|ext| ext.to_ascii_lowercase()).as_deref() {
+    match filename
+        .rsplit('.')
+        .next()
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
         Some("mov") | Some("mp4") | Some("m4v") => MediaKind::Video,
         _ => MediaKind::Photo,
     }
@@ -33,10 +45,19 @@ pub fn media_kind_from_filename(filename: &str) -> MediaKind {
 /// grid uses when a requested size is not yet available, so a cell shows the
 /// real image instead of a placeholder while the smaller sizes catch up.
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ThumbnailSize { Sm, M, Xl, Preview }
+pub enum ThumbnailSize {
+    Sm,
+    M,
+    Xl,
+    Preview,
+}
 
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SessionState { Valid, Expired, Invalid }
+pub enum SessionState {
+    Valid,
+    Expired,
+    Invalid,
+}
 
 /// A discovery-browse collection to fetch photos for: one of People,
 /// Places, Tags, the user's Favorites, or one Album (normal or smart).
@@ -109,7 +130,11 @@ pub struct Session {
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn mask(o: &Option<String>) -> &'static str {
-            if o.is_some() { "Some(<redacted>)" } else { "None" }
+            if o.is_some() {
+                "Some(<redacted>)"
+            } else {
+                "None"
+            }
         }
         f.debug_struct("Session")
             .field("sid", &format_args!("<redacted>"))
@@ -248,7 +273,11 @@ pub struct RecycleItem {
 /// gone for good. `Unknown` means DSM did not say (the field was missing, or
 /// the call was refused, which is expected for a non-admin account).
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecycleBinStatus { Enabled, Disabled, Unknown }
+pub enum RecycleBinStatus {
+    Enabled,
+    Disabled,
+    Unknown,
+}
 
 /// One row from `SYNO.Foto.Browse.Album`: either a user-created normal album
 /// or a rule-based smart (condition) album; the two share this one list
@@ -562,7 +591,10 @@ mod tests {
         };
         assert!(c.verify_tls);
         assert!(c.pinned_cert_der.is_none());
-        assert!(!c.allow_untrusted_tls, "allow_untrusted_tls must default-construct false in every call site");
+        assert!(
+            !c.allow_untrusted_tls,
+            "allow_untrusted_tls must default-construct false in every call site"
+        );
     }
 
     #[test]
@@ -586,42 +618,81 @@ mod tests {
             device_did: Some("DEVICE_SECRET_c4d2".to_string()),
         };
         for out in [format!("{:?}", s), format!("{:#?}", s)] {
-            for secret in ["SID_SECRET_9f3a", "SYNOTOKEN_SECRET_77b1", "DEVICE_SECRET_c4d2"] {
+            for secret in [
+                "SID_SECRET_9f3a",
+                "SYNOTOKEN_SECRET_77b1",
+                "DEVICE_SECRET_c4d2",
+            ] {
                 assert!(!out.contains(secret), "Debug leaked {secret}: {out}");
             }
             assert!(out.contains("photobot"), "non-secret field missing: {out}");
             assert!(out.contains("<redacted>"));
         }
-        let none = Session { sid: "x".into(), syno_token: None, username: "u".into(), device_did: None };
+        let none = Session {
+            sid: "x".into(),
+            syno_token: None,
+            username: "u".into(),
+            device_did: None,
+        };
         assert!(format!("{:?}", none).contains("None"));
     }
 
     #[test]
     fn crawl_progress_barrier_flag() {
-        let p = CrawlProgress { space: Space::Shared, done: 10, total: 100, complete: false };
+        let p = CrawlProgress {
+            space: Space::Shared,
+            done: 10,
+            total: 100,
+            complete: false,
+        };
         assert!(!p.complete);
         assert_eq!(p.space, Space::Shared);
     }
 
     #[test]
     fn day_count_holds_day_start_and_count() {
-        let d = DayCount { day_start: 1_479_513_600, count: 7 };
+        let d = DayCount {
+            day_start: 1_479_513_600,
+            count: 7,
+        };
         assert_eq!(d.day_start, 1_479_513_600);
         assert_eq!(d.count, 7);
-        assert_eq!(d, DayCount { day_start: 1_479_513_600, count: 7 });
+        assert_eq!(
+            d,
+            DayCount {
+                day_start: 1_479_513_600,
+                count: 7
+            }
+        );
         // The Unknown Date bucket convention: day_start 0.
-        let unknown = DayCount { day_start: 0, count: 3 };
+        let unknown = DayCount {
+            day_start: 0,
+            count: 3,
+        };
         assert_ne!(unknown, d);
     }
 
     #[test]
     fn core_error_display_messages() {
-        let e = CoreError::Auth { message: "bad pw".to_string() };
+        let e = CoreError::Auth {
+            message: "bad pw".to_string(),
+        };
         assert_eq!(e.to_string(), "authentication failed: bad pw");
-        assert_eq!(CoreError::OtpRequired.to_string(), "two-factor code required or incorrect");
-        assert_eq!(CoreError::WriteRefused.to_string(), "write refused: read-only mode");
-        let cap = CoreError::CapabilityUnavailable { api: "SYNO.Foto.Browse.Item".to_string() };
-        assert_eq!(cap.to_string(), "capability unavailable: SYNO.Foto.Browse.Item");
+        assert_eq!(
+            CoreError::OtpRequired.to_string(),
+            "two-factor code required or incorrect"
+        );
+        assert_eq!(
+            CoreError::WriteRefused.to_string(),
+            "write refused: read-only mode"
+        );
+        let cap = CoreError::CapabilityUnavailable {
+            api: "SYNO.Foto.Browse.Item".to_string(),
+        };
+        assert_eq!(
+            cap.to_string(),
+            "capability unavailable: SYNO.Foto.Browse.Item"
+        );
     }
 
     #[test]
@@ -632,9 +703,24 @@ mod tests {
 
     #[test]
     fn person_holds_unnamed_and_named_shapes() {
-        let unnamed = Person { id: 12279, name: String::new(), item_count: 23, cover_unit_id: Some(39646), show: true };
-        assert!(unnamed.name.is_empty(), "an unnamed person must round-trip as an empty name, not a placeholder string");
-        let named = Person { id: 1, name: "Sahil".to_string(), item_count: 5, cover_unit_id: None, show: false };
+        let unnamed = Person {
+            id: 12279,
+            name: String::new(),
+            item_count: 23,
+            cover_unit_id: Some(39646),
+            show: true,
+        };
+        assert!(
+            unnamed.name.is_empty(),
+            "an unnamed person must round-trip as an empty name, not a placeholder string"
+        );
+        let named = Person {
+            id: 1,
+            name: "Sahil".to_string(),
+            item_count: 5,
+            cover_unit_id: None,
+            show: false,
+        };
         assert_eq!(named.name, "Sahil");
         assert!(!named.show);
     }
@@ -655,9 +741,17 @@ mod tests {
 
     #[test]
     fn subject_and_tag_hold_id_name_count() {
-        let s = Subject { id: 103, name: "Food".to_string(), item_count: 2 };
+        let s = Subject {
+            id: 103,
+            name: "Food".to_string(),
+            item_count: 2,
+        };
         assert_eq!(s.name, "Food");
-        let t = Tag { id: 1, name: "vacation".to_string(), item_count: 4 };
+        let t = Tag {
+            id: 1,
+            name: "vacation".to_string(),
+            item_count: 4,
+        };
         assert_eq!(t.item_count, 4);
     }
 
@@ -677,19 +771,40 @@ mod tests {
 
     #[test]
     fn facet_holds_id_and_name() {
-        let f = Facet { id: 23, name: "iPhone 6s".to_string() };
+        let f = Facet {
+            id: 23,
+            name: "iPhone 6s".to_string(),
+        };
         assert_eq!(f.id, 23);
         assert_eq!(f.name, "iPhone 6s");
-        assert_eq!(f, Facet { id: 23, name: "iPhone 6s".to_string() });
+        assert_eq!(
+            f,
+            Facet {
+                id: 23,
+                name: "iPhone 6s".to_string()
+            }
+        );
     }
 
     #[test]
     fn search_facets_holds_display_only_catalogs() {
         let facets = SearchFacets {
-            cameras: vec![Facet { id: 23, name: "iPhone 6s".to_string() }],
-            apertures: vec![Facet { id: 1, name: "F1.8".to_string() }],
-            geocodings: vec![Facet { id: 12, name: "Oslo".to_string() }],
-            media_types: vec![Facet { id: 0, name: "photo".to_string() }],
+            cameras: vec![Facet {
+                id: 23,
+                name: "iPhone 6s".to_string(),
+            }],
+            apertures: vec![Facet {
+                id: 1,
+                name: "F1.8".to_string(),
+            }],
+            geocodings: vec![Facet {
+                id: 12,
+                name: "Oslo".to_string(),
+            }],
+            media_types: vec![Facet {
+                id: 0,
+                name: "photo".to_string(),
+            }],
         };
         assert_eq!(facets.cameras.len(), 1);
         assert_eq!(facets.apertures[0].name, "F1.8");
@@ -706,7 +821,10 @@ mod tests {
 
     #[test]
     fn search_filters_holds_start_and_end() {
-        let f = SearchFilters { start_time: Some(1_400_000_000), end_time: Some(1_500_000_000) };
+        let f = SearchFilters {
+            start_time: Some(1_400_000_000),
+            end_time: Some(1_500_000_000),
+        };
         assert_eq!(f.start_time, Some(1_400_000_000));
         assert_eq!(f.end_time, Some(1_500_000_000));
         assert_ne!(f, SearchFilters::default());
@@ -714,10 +832,19 @@ mod tests {
 
     #[test]
     fn video_playback_source_variants_are_distinct() {
-        let local = VideoPlaybackSource::LocalFile { path: "/tmp/syno-orig-abc".to_string() };
-        let url = VideoPlaybackSource::Url { url: "https://nas.example.com/stream".to_string() };
+        let local = VideoPlaybackSource::LocalFile {
+            path: "/tmp/syno-orig-abc".to_string(),
+        };
+        let url = VideoPlaybackSource::Url {
+            url: "https://nas.example.com/stream".to_string(),
+        };
         assert_ne!(local, url);
-        assert_eq!(local, VideoPlaybackSource::LocalFile { path: "/tmp/syno-orig-abc".to_string() });
+        assert_eq!(
+            local,
+            VideoPlaybackSource::LocalFile {
+                path: "/tmp/syno-orig-abc".to_string()
+            }
+        );
     }
 
     #[test]

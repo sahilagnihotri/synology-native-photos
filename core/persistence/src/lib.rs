@@ -43,6 +43,8 @@ impl Store {
             )
             .map_err(schema::map_sql)?
             .parse::<i64>()
-            .map_err(|e| CoreError::Storage { message: e.to_string() })
+            .map_err(|e| CoreError::Storage {
+                message: e.to_string(),
+            })
     }
 }

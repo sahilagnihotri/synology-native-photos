@@ -46,7 +46,11 @@ pub struct DeltaReconciler<'a> {
 
 impl<'a> DeltaReconciler<'a> {
     pub fn new(store: &'a Store, source: &'a dyn PageSource, page_limit: u32) -> Self {
-        DeltaReconciler { store, source, page_limit }
+        DeltaReconciler {
+            store,
+            source,
+            page_limit,
+        }
     }
 
     /// Reconciles local state against the server for `space`.
@@ -152,9 +156,17 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl PageSource for ScriptedSource {
-        async fn list_items(&self, _space: Space, offset: u32, limit: u32) -> Result<AssetPage, CoreError> {
+        async fn list_items(
+            &self,
+            _space: Space,
+            offset: u32,
+            limit: u32,
+        ) -> Result<AssetPage, CoreError> {
             let idx = (offset / limit) as usize;
-            Ok(self.pages.get(idx).cloned().unwrap_or(AssetPage { assets: vec![], total: self.total() }))
+            Ok(self.pages.get(idx).cloned().unwrap_or(AssetPage {
+                assets: vec![],
+                total: self.total(),
+            }))
         }
     }
     impl ScriptedSource {
@@ -167,14 +179,25 @@ mod tests {
     async fn changed_version_updates_row() {
         let store = Store::open_in_memory().unwrap();
         store.upsert_assets(&[asset_v(1, 1, Some(100))]).unwrap();
-        let src = ScriptedSource { pages: vec![AssetPage { assets: vec![asset_v(1, 2, Some(100))], total: 1 }] };
+        let src = ScriptedSource {
+            pages: vec![AssetPage {
+                assets: vec![asset_v(1, 2, Some(100))],
+                total: 1,
+            }],
+        };
         let rec = DeltaReconciler::new(&store, &src, 100);
         rec.reconcile(Space::Personal).await.unwrap();
         let local = store.fetch_assets(Space::Personal, 0, 10).unwrap();
         assert_eq!(local.len(), 1);
         assert_eq!(local[0].server_version, Some(2));
         assert_eq!(local[0].cache_key, "ck1-v2");
-        assert_eq!(store.load_sync_state(Space::Personal).unwrap().highest_seen_version, Some(2));
+        assert_eq!(
+            store
+                .load_sync_state(Space::Personal)
+                .unwrap()
+                .highest_seen_version,
+            Some(2)
+        );
     }
 
     #[tokio::test]
@@ -182,7 +205,10 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         store.upsert_assets(&[asset_v(1, 1, Some(100))]).unwrap();
         let src = ScriptedSource {
-            pages: vec![AssetPage { assets: vec![asset_v(1, 1, Some(100)), asset_v(2, 1, Some(200))], total: 2 }],
+            pages: vec![AssetPage {
+                assets: vec![asset_v(1, 1, Some(100)), asset_v(2, 1, Some(200))],
+                total: 2,
+            }],
         };
         let rec = DeltaReconciler::new(&store, &src, 100);
         rec.reconcile(Space::Personal).await.unwrap();
@@ -205,12 +231,20 @@ mod tests {
         store.upsert_assets(&[asset_v(1, 1, Some(9_999))]).unwrap();
         store.set_reconcile_at(Space::Personal, 10_000).unwrap();
         let src = ScriptedSource {
-            pages: vec![AssetPage { assets: vec![asset_v(1, 1, Some(9_999)), asset_v(2, 1, Some(5_000))], total: 2 }],
+            pages: vec![AssetPage {
+                assets: vec![asset_v(1, 1, Some(9_999)), asset_v(2, 1, Some(5_000))],
+                total: 2,
+            }],
         };
         let rec = DeltaReconciler::new(&store, &src, 100);
         rec.reconcile(Space::Personal).await.unwrap();
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 2);
-        let ids: Vec<i64> = store.fetch_assets(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
+        let ids: Vec<i64> = store
+            .fetch_assets(Space::Personal, 0, 10)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
         assert!(ids.contains(&2), "backdated new item was dropped (a hole)");
     }
 
@@ -220,7 +254,12 @@ mod tests {
         store.upsert_assets(&[asset_v(1, 1, Some(100))]).unwrap();
         let mut same = asset_v(1, 1, Some(100));
         same.cache_key = "server-sent-but-same-version".into();
-        let src = ScriptedSource { pages: vec![AssetPage { assets: vec![same], total: 1 }] };
+        let src = ScriptedSource {
+            pages: vec![AssetPage {
+                assets: vec![same],
+                total: 1,
+            }],
+        };
         let rec = DeltaReconciler::new(&store, &src, 100);
         rec.reconcile(Space::Personal).await.unwrap();
         let local = store.fetch_assets(Space::Personal, 0, 10).unwrap();
@@ -234,15 +273,30 @@ mod tests {
     #[tokio::test]
     async fn deleted_on_server_asset_is_removed_locally() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_assets(&[asset_v(1, 1, Some(100)), asset_v(2, 1, Some(200))]).unwrap();
+        store
+            .upsert_assets(&[asset_v(1, 1, Some(100)), asset_v(2, 1, Some(200))])
+            .unwrap();
         // Server now only reports id 1; id 2 was deleted server-side.
-        let src = ScriptedSource { pages: vec![AssetPage { assets: vec![asset_v(1, 1, Some(100))], total: 1 }] };
+        let src = ScriptedSource {
+            pages: vec![AssetPage {
+                assets: vec![asset_v(1, 1, Some(100))],
+                total: 1,
+            }],
+        };
         let rec = DeltaReconciler::new(&store, &src, 100);
         rec.reconcile(Space::Personal).await.unwrap();
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 1);
-        let ids: Vec<i64> = store.fetch_assets(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
+        let ids: Vec<i64> = store
+            .fetch_assets(Space::Personal, 0, 10)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
         assert_eq!(ids, vec![1]);
-        assert!(!ids.contains(&2), "stale row for a server-deleted asset was not removed");
+        assert!(
+            !ids.contains(&2),
+            "stale row for a server-deleted asset was not removed"
+        );
     }
 
     /// Deletion mirroring must respect space isolation: reconciling Personal
@@ -253,12 +307,23 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let mut shared_asset = asset_v(9, 1, Some(900));
         shared_asset.space = Space::Shared;
-        store.upsert_assets(&[asset_v(1, 1, Some(100)), shared_asset]).unwrap();
-        let src = ScriptedSource { pages: vec![AssetPage { assets: vec![asset_v(1, 1, Some(100))], total: 1 }] };
+        store
+            .upsert_assets(&[asset_v(1, 1, Some(100)), shared_asset])
+            .unwrap();
+        let src = ScriptedSource {
+            pages: vec![AssetPage {
+                assets: vec![asset_v(1, 1, Some(100))],
+                total: 1,
+            }],
+        };
         let rec = DeltaReconciler::new(&store, &src, 100);
         rec.reconcile(Space::Personal).await.unwrap();
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 1);
-        assert_eq!(store.asset_count(Space::Shared).unwrap(), 1, "reconciling Personal must not sweep Shared rows");
+        assert_eq!(
+            store.asset_count(Space::Shared).unwrap(),
+            1,
+            "reconciling Personal must not sweep Shared rows"
+        );
     }
 
     #[tokio::test]
@@ -266,13 +331,29 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let src = ScriptedSource {
             pages: vec![
-                AssetPage { assets: vec![asset_v(1, 3, Some(100)), asset_v(2, 5, Some(200))], total: 3 },
-                AssetPage { assets: vec![asset_v(3, 4, Some(300))], total: 3 },
+                AssetPage {
+                    assets: vec![asset_v(1, 3, Some(100)), asset_v(2, 5, Some(200))],
+                    total: 3,
+                },
+                AssetPage {
+                    assets: vec![asset_v(3, 4, Some(300))],
+                    total: 3,
+                },
             ],
         };
         let rec = DeltaReconciler::new(&store, &src, 2);
         rec.reconcile(Space::Personal).await.unwrap();
-        assert_eq!(store.load_sync_state(Space::Personal).unwrap().highest_seen_version, Some(5));
-        assert!(store.load_sync_state(Space::Personal).unwrap().last_reconcile_at.is_some());
+        assert_eq!(
+            store
+                .load_sync_state(Space::Personal)
+                .unwrap()
+                .highest_seen_version,
+            Some(5)
+        );
+        assert!(store
+            .load_sync_state(Space::Personal)
+            .unwrap()
+            .last_reconcile_at
+            .is_some());
     }
 }

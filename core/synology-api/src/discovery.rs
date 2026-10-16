@@ -110,7 +110,10 @@ fn decode_one<T: serde::de::DeserializeOwned>(value: &serde_json::Value, kind: &
     match serde_json::from_value::<T>(value.clone()) {
         Ok(parsed) => Some(parsed),
         Err(e) => {
-            let raw_id = value.get("id").map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
+            let raw_id = value
+                .get("id")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "?".to_string());
             tracing::warn!("skipping malformed {kind} (id={raw_id}): failed to decode: {e}");
             None
         }
@@ -128,21 +131,28 @@ async fn get_body(
 ) -> Result<String, CoreError> {
     transport.throttle().await;
     let query_refs: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let mut request = transport.client().get(transport.entry_url()).query(&query_refs);
+    let mut request = transport
+        .client()
+        .get(transport.entry_url())
+        .query(&query_refs);
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("discovery request failed: {e}") })?;
-    response
-        .text()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("reading discovery response body failed: {e}") })
+    let response = request.send().await.map_err(|e| CoreError::Network {
+        message: format!("discovery request failed: {e}"),
+    })?;
+    response.text().await.map_err(|e| CoreError::Network {
+        message: format!("reading discovery response body failed: {e}"),
+    })
 }
 
-fn base_query<'a>(api: &'a str, version: u32, offset: u32, limit: u32, sid: &'a str) -> Vec<(&'a str, String)> {
+fn base_query<'a>(
+    api: &'a str,
+    version: u32,
+    offset: u32,
+    limit: u32,
+    sid: &'a str,
+) -> Vec<(&'a str, String)> {
     vec![
         ("api", api.to_string()),
         ("version", version.to_string()),
@@ -242,7 +252,11 @@ pub async fn list_tags(
         .iter()
         .filter_map(|raw| {
             let t: RawTag = decode_one(raw, "general tag")?;
-            Some(Tag { id: t.id, name: t.name.unwrap_or_else(|| t.id.to_string()), item_count: t.item_count })
+            Some(Tag {
+                id: t.id,
+                name: t.name.unwrap_or_else(|| t.id.to_string()),
+                item_count: t.item_count,
+            })
         })
         .collect();
     log_skipped("general tag", total, tags.len());
@@ -273,7 +287,11 @@ pub async fn list_subjects(
         .iter()
         .filter_map(|raw| {
             let c: RawConcept = decode_one(raw, "concept")?;
-            Some(Subject { id: c.id, name: c.name.unwrap_or_else(|| c.id.to_string()), item_count: c.item_count })
+            Some(Subject {
+                id: c.id,
+                name: c.name.unwrap_or_else(|| c.id.to_string()),
+                item_count: c.item_count,
+            })
         })
         .collect();
     log_skipped("concept", total, subjects.len());
@@ -283,7 +301,11 @@ pub async fn list_subjects(
 fn log_skipped(kind: &str, total: usize, kept: usize) {
     let skipped = total - kept;
     if skipped > 0 {
-        tracing::warn!("{kind} list: skipped {} of {} elements (failed to decode)", skipped, total);
+        tracing::warn!(
+            "{kind} list: skipped {} of {} elements (failed to decode)",
+            skipped,
+            total
+        );
     }
 }
 
@@ -293,7 +315,12 @@ mod tests {
     use models::Connection;
 
     fn conn(url: &str) -> Connection {
-        Connection { host: url.to_string(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false }
+        Connection {
+            host: url.to_string(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        }
     }
 
     #[tokio::test]
@@ -307,17 +334,24 @@ mod tests {
             ]))
             .match_header("X-SYNO-TOKEN", "TOK")
             .with_status(200)
-            .with_body(r#"{"success":true,"data":{"list":[
+            .with_body(
+                r#"{"success":true,"data":{"list":[
                 {"cover":39646,"id":12279,"item_count":23,"name":"","show":true},
                 {"cover":39727,"id":12285,"item_count":8,"name":"Sahil","show":true}
-            ]}}"#)
+            ]}}"#,
+            )
             .create_async()
             .await;
         let transport = Transport::new(&conn(&server.url())).unwrap();
-        let people = list_people(&transport, "SID", 0, 50, 1, Some("TOK")).await.unwrap();
+        let people = list_people(&transport, "SID", 0, 50, 1, Some("TOK"))
+            .await
+            .unwrap();
         assert_eq!(people.len(), 2);
         assert_eq!(people[0].id, 12279);
-        assert!(people[0].name.is_empty(), "unnamed person must decode to empty name");
+        assert!(
+            people[0].name.is_empty(),
+            "unnamed person must decode to empty name"
+        );
         assert_eq!(people[0].cover_unit_id, Some(39646));
         assert_eq!(people[1].name, "Sahil");
         mock.assert_async().await;
@@ -334,7 +368,9 @@ mod tests {
             .create_async()
             .await;
         let transport = Transport::new(&conn(&server.url())).unwrap();
-        let people = list_people(&transport, "SID", 0, 50, 1, None).await.unwrap();
+        let people = list_people(&transport, "SID", 0, 50, 1, None)
+            .await
+            .unwrap();
         assert!(people.is_empty());
         mock.assert_async().await;
     }
@@ -346,15 +382,23 @@ mod tests {
             .mock("GET", "/webapi/entry.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
-            .with_body(r#"{"success":true,"data":{"list":[
+            .with_body(
+                r#"{"success":true,"data":{"list":[
                 {"cover":1,"id":1,"item_count":1,"name":"","show":true},
                 {"item_count":1}
-            ]}}"#)
+            ]}}"#,
+            )
             .create_async()
             .await;
         let transport = Transport::new(&conn(&server.url())).unwrap();
-        let people = list_people(&transport, "SID", 0, 50, 1, None).await.unwrap();
-        assert_eq!(people.len(), 1, "the malformed row (missing id) must be skipped, not fail the whole page");
+        let people = list_people(&transport, "SID", 0, 50, 1, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            people.len(),
+            1,
+            "the malformed row (missing id) must be skipped, not fail the whole page"
+        );
     }
 
     #[tokio::test]
@@ -370,7 +414,9 @@ mod tests {
             .create_async()
             .await;
         let transport = Transport::new(&conn(&server.url())).unwrap();
-        let places = list_places(&transport, "SID", 0, 50, 1, None).await.unwrap();
+        let places = list_places(&transport, "SID", 0, 50, 1, None)
+            .await
+            .unwrap();
         assert_eq!(places.len(), 1);
         assert_eq!(places[0].name, "Grunerlokka, Oslo");
         assert_eq!(places[0].country, "Norway");
@@ -382,14 +428,20 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         server
             .mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("api".into(), GENERAL_TAG_API.into()))
+            .match_query(mockito::Matcher::UrlEncoded(
+                "api".into(),
+                GENERAL_TAG_API.into(),
+            ))
             .with_status(200)
             .with_body(r#"{"success":true,"data":{"list":[]}}"#)
             .create_async()
             .await;
         let transport = Transport::new(&conn(&server.url())).unwrap();
         let tags = list_tags(&transport, "SID", 0, 50, 1, None).await.unwrap();
-        assert!(tags.is_empty(), "an empty tag list must decode cleanly, not error");
+        assert!(
+            tags.is_empty(),
+            "an empty tag list must decode cleanly, not error"
+        );
     }
 
     #[tokio::test]
@@ -397,9 +449,14 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         server
             .mock("GET", "/webapi/entry.cgi")
-            .match_query(mockito::Matcher::UrlEncoded("api".into(), GENERAL_TAG_API.into()))
+            .match_query(mockito::Matcher::UrlEncoded(
+                "api".into(),
+                GENERAL_TAG_API.into(),
+            ))
             .with_status(200)
-            .with_body(r#"{"success":true,"data":{"list":[{"id":1,"name":"vacation","item_count":4}]}}"#)
+            .with_body(
+                r#"{"success":true,"data":{"list":[{"id":1,"name":"vacation","item_count":4}]}}"#,
+            )
             .create_async()
             .await;
         let transport = Transport::new(&conn(&server.url())).unwrap();
@@ -422,7 +479,9 @@ mod tests {
             .create_async()
             .await;
         let transport = Transport::new(&conn(&server.url())).unwrap();
-        let subjects = list_subjects(&transport, "SID", 0, 50, 1, None).await.unwrap();
+        let subjects = list_subjects(&transport, "SID", 0, 50, 1, None)
+            .await
+            .unwrap();
         assert_eq!(subjects.len(), 1);
         assert_eq!(subjects[0].name, "Food");
         assert_eq!(subjects[0].item_count, 2);
@@ -439,7 +498,9 @@ mod tests {
             .create_async()
             .await;
         let transport = Transport::new(&conn(&server.url())).unwrap();
-        let err = list_people(&transport, "SID", 0, 50, 1, None).await.unwrap_err();
+        let err = list_people(&transport, "SID", 0, 50, 1, None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 }

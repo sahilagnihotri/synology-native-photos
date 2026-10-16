@@ -388,17 +388,15 @@ struct AlbumAdditional {
 /// type, ...) never fails the rest of the page — only that one element is
 /// dropped. `kind` and `raw_id` are for the log message only (`raw_id` is
 /// best-effort: a malformed element may not even have a readable `id`).
-fn decode_one<T: serde::de::DeserializeOwned>(
-    value: &serde_json::Value,
-    kind: &str,
-) -> Option<T> {
+fn decode_one<T: serde::de::DeserializeOwned>(value: &serde_json::Value, kind: &str) -> Option<T> {
     match serde_json::from_value::<T>(value.clone()) {
         Ok(parsed) => Some(parsed),
         Err(e) => {
-            let raw_id = value.get("id").map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
-            tracing::warn!(
-                "skipping malformed {kind} (id={raw_id}): failed to decode: {e}"
-            );
+            let raw_id = value
+                .get("id")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "?".to_string());
+            tracing::warn!("skipping malformed {kind} (id={raw_id}): failed to decode: {e}");
             None
         }
     }
@@ -419,18 +417,19 @@ async fn get_body(
 ) -> Result<String, CoreError> {
     transport.throttle().await;
     let query_refs: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let mut request = transport.client().get(transport.entry_url()).query(&query_refs);
+    let mut request = transport
+        .client()
+        .get(transport.entry_url())
+        .query(&query_refs);
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("browse request failed: {e}") })?;
-    response
-        .text()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("reading browse response body failed: {e}") })
+    let response = request.send().await.map_err(|e| CoreError::Network {
+        message: format!("browse request failed: {e}"),
+    })?;
+    response.text().await.map_err(|e| CoreError::Network {
+        message: format!("reading browse response body failed: {e}"),
+    })
 }
 
 /// `SYNO.Foto.Browse.Item` / `SYNO.FotoTeam.Browse.Item`, `method=list`.
@@ -466,7 +465,10 @@ pub async fn list_items(
     version: u32,
     syno_token: Option<&str>,
 ) -> Result<Vec<Asset>, CoreError> {
-    list_items_inner(transport, sid, space, offset, limit, version, syno_token, None).await
+    list_items_inner(
+        transport, sid, space, offset, limit, version, syno_token, None,
+    )
+    .await
 }
 
 /// Same as `list_items`, but additionally filters the returned rows to one
@@ -485,7 +487,17 @@ pub async fn list_items_filtered(
     version: u32,
     syno_token: Option<&str>,
 ) -> Result<Vec<Asset>, CoreError> {
-    list_items_inner(transport, sid, Space::Personal, offset, limit, version, syno_token, Some(filter)).await
+    list_items_inner(
+        transport,
+        sid,
+        Space::Personal,
+        offset,
+        limit,
+        version,
+        syno_token,
+        Some(filter),
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)] // mirrors the flat DSM request params; the public signature is used by the FFI facade
@@ -716,7 +728,17 @@ pub async fn search(
     version: u32,
     syno_token: Option<&str>,
 ) -> Result<Vec<Asset>, CoreError> {
-    search_filtered(transport, sid, keyword, &SearchFilters::default(), offset, limit, version, syno_token).await
+    search_filtered(
+        transport,
+        sid,
+        keyword,
+        &SearchFilters::default(),
+        offset,
+        limit,
+        version,
+        syno_token,
+    )
+    .await
 }
 
 /// Same as `search`, but additionally narrows results to a `start_time`/
@@ -841,7 +863,11 @@ pub async fn list_albums(
         .collect();
     let skipped = total - albums.len();
     if skipped > 0 {
-        tracing::warn!("browse album list: skipped {} of {} elements (failed to decode)", skipped, total);
+        tracing::warn!(
+            "browse album list: skipped {} of {} elements (failed to decode)",
+            skipped,
+            total
+        );
     }
     Ok(albums)
 }
@@ -881,7 +907,10 @@ mod tests {
     fn unrecognized_type_is_unknown() {
         // A future/unseen type stays Unknown even if it carries a live_type.
         assert_eq!(parse_media_kind("burst", None), MediaKind::Unknown);
-        assert_eq!(parse_media_kind("live_photo", Some("video")), MediaKind::Unknown);
+        assert_eq!(
+            parse_media_kind("live_photo", Some("video")),
+            MediaKind::Unknown
+        );
         assert_eq!(parse_media_kind("", None), MediaKind::Unknown);
     }
 }

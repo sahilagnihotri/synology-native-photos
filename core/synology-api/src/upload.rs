@@ -65,7 +65,9 @@ pub async fn upload_file(
     let file_part = reqwest::multipart::Part::bytes(bytes.to_vec())
         .file_name(filename.to_string())
         .mime_str("application/octet-stream")
-        .map_err(|e| CoreError::Network { message: format!("could not build upload file part: {e}") })?;
+        .map_err(|e| CoreError::Network {
+            message: format!("could not build upload file part: {e}"),
+        })?;
     let form = reqwest::multipart::Form::new()
         .text("api", "SYNO.FileStation.Upload")
         .text("version", "2")
@@ -81,19 +83,21 @@ pub async fn upload_file(
         query.push(("SynoToken", token));
     }
 
-    let mut request = transport.client().post(transport.entry_url()).query(&query).multipart(form);
+    let mut request = transport
+        .client()
+        .post(transport.entry_url())
+        .query(&query)
+        .multipart(form);
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
 
-    let response = request
-        .send()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("upload request failed: {e}") })?;
-    let body = response
-        .text()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("reading upload response body failed: {e}") })?;
+    let response = request.send().await.map_err(|e| CoreError::Network {
+        message: format!("upload request failed: {e}"),
+    })?;
+    let body = response.text().await.map_err(|e| CoreError::Network {
+        message: format!("reading upload response body failed: {e}"),
+    })?;
     decode_write_success(&body)
 }
 
@@ -103,7 +107,12 @@ mod tests {
     use models::Connection;
 
     fn conn(host: &str) -> Connection {
-        Connection { host: host.to_string(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false }
+        Connection {
+            host: host.to_string(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        }
     }
 
     #[tokio::test]
@@ -131,9 +140,16 @@ mod tests {
             .await;
 
         let transport = Transport::new(&conn(&server.url())).expect("transport builds");
-        upload_file(&transport, "SID", Some("TK"), "/home/Photos/Edited", "edited.jpg", b"FAKEJPEGBYTES")
-            .await
-            .expect("upload should succeed");
+        upload_file(
+            &transport,
+            "SID",
+            Some("TK"),
+            "/home/Photos/Edited",
+            "edited.jpg",
+            b"FAKEJPEGBYTES",
+        )
+        .await
+        .expect("upload should succeed");
         mock.assert_async().await;
     }
 
@@ -153,9 +169,16 @@ mod tests {
             .await;
 
         let transport = Transport::new(&conn(&server.url())).expect("transport builds");
-        let err = upload_file(&transport, "SID", Some("TK"), "/home/Photos/Edited", "edited.jpg", b"x")
-            .await
-            .unwrap_err();
+        let err = upload_file(
+            &transport,
+            "SID",
+            Some("TK"),
+            "/home/Photos/Edited",
+            "edited.jpg",
+            b"x",
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 
@@ -174,9 +197,16 @@ mod tests {
             .await;
 
         let transport = Transport::new(&conn(&server.url())).expect("transport builds");
-        upload_file(&transport, "SID", None, "/home/Photos/Edited", "edited.jpg", b"x")
-            .await
-            .expect("upload should succeed without a token");
+        upload_file(
+            &transport,
+            "SID",
+            None,
+            "/home/Photos/Edited",
+            "edited.jpg",
+            b"x",
+        )
+        .await
+        .expect("upload should succeed without a token");
         mock.assert_async().await;
     }
 }

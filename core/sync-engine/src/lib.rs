@@ -17,7 +17,12 @@ pub struct AssetPage {
 #[allow(clippy::double_must_use)] // async_trait adds must_use to the boxed future; not ours
 #[async_trait::async_trait]
 pub trait PageSource: Send + Sync {
-    async fn list_items(&self, space: Space, offset: u32, limit: u32) -> Result<AssetPage, CoreError>;
+    async fn list_items(
+        &self,
+        space: Space,
+        offset: u32,
+        limit: u32,
+    ) -> Result<AssetPage, CoreError>;
 }
 
 #[cfg(test)]
@@ -28,10 +33,18 @@ mod tests {
 
     fn asset(id: i64, ver: i64) -> Asset {
         Asset {
-            id, unit_id: id + 9000, cache_key: format!("ck{id}"), filename: format!("IMG_{id}.jpg"),
-            media_kind: MediaKind::Photo, taken_at: Some(id * 10), added_at: Some(1),
-            width: Some(100), height: Some(100), file_size: Some(1),
-            space: Space::Personal, server_version: Some(ver),
+            id,
+            unit_id: id + 9000,
+            cache_key: format!("ck{id}"),
+            filename: format!("IMG_{id}.jpg"),
+            media_kind: MediaKind::Photo,
+            taken_at: Some(id * 10),
+            added_at: Some(1),
+            width: Some(100),
+            height: Some(100),
+            file_size: Some(1),
+            space: Space::Personal,
+            server_version: Some(ver),
             ..Default::default()
         }
     }
@@ -43,10 +56,18 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PageSource for FakeSource {
-        async fn list_items(&self, _space: Space, offset: u32, limit: u32) -> Result<AssetPage, CoreError> {
+        async fn list_items(
+            &self,
+            _space: Space,
+            offset: u32,
+            limit: u32,
+        ) -> Result<AssetPage, CoreError> {
             self.calls.lock().unwrap().push((offset, limit));
             let idx = (offset / limit) as usize;
-            Ok(self.pages.get(idx).cloned().unwrap_or(AssetPage { assets: vec![], total: 0 }))
+            Ok(self.pages.get(idx).cloned().unwrap_or(AssetPage {
+                assets: vec![],
+                total: 0,
+            }))
         }
     }
 
@@ -54,8 +75,14 @@ mod tests {
     async fn fake_source_returns_pages_in_order() {
         let src = FakeSource {
             pages: vec![
-                AssetPage { assets: vec![asset(1, 1), asset(2, 1)], total: 3 },
-                AssetPage { assets: vec![asset(3, 1)], total: 3 },
+                AssetPage {
+                    assets: vec![asset(1, 1), asset(2, 1)],
+                    total: 3,
+                },
+                AssetPage {
+                    assets: vec![asset(3, 1)],
+                    total: 3,
+                },
             ],
             calls: Mutex::new(vec![]),
         };

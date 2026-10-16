@@ -48,31 +48,71 @@ mod tests {
     #[test]
     fn get_is_none_when_unset() {
         let store = Store::open_in_memory().unwrap();
-        assert_eq!(store.get_app_state(Space::Personal, "trash_album_id").unwrap(), None);
+        assert_eq!(
+            store
+                .get_app_state(Space::Personal, "trash_album_id")
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
     fn set_then_get_round_trips() {
         let store = Store::open_in_memory().unwrap();
-        store.set_app_state(Space::Personal, "trash_album_id", "500").unwrap();
-        assert_eq!(store.get_app_state(Space::Personal, "trash_album_id").unwrap(), Some("500".to_string()));
+        store
+            .set_app_state(Space::Personal, "trash_album_id", "500")
+            .unwrap();
+        assert_eq!(
+            store
+                .get_app_state(Space::Personal, "trash_album_id")
+                .unwrap(),
+            Some("500".to_string())
+        );
     }
 
     #[test]
     fn set_overwrites_existing_value() {
         let store = Store::open_in_memory().unwrap();
-        store.set_app_state(Space::Personal, "trash_album_id", "500").unwrap();
-        store.set_app_state(Space::Personal, "trash_album_id", "777").unwrap();
-        assert_eq!(store.get_app_state(Space::Personal, "trash_album_id").unwrap(), Some("777".to_string()));
+        store
+            .set_app_state(Space::Personal, "trash_album_id", "500")
+            .unwrap();
+        store
+            .set_app_state(Space::Personal, "trash_album_id", "777")
+            .unwrap();
+        assert_eq!(
+            store
+                .get_app_state(Space::Personal, "trash_album_id")
+                .unwrap(),
+            Some("777".to_string())
+        );
     }
 
     #[test]
     fn spaces_are_isolated() {
         let store = Store::open_in_memory().unwrap();
-        store.set_app_state(Space::Personal, "trash_album_id", "500").unwrap();
-        assert_eq!(store.get_app_state(Space::Shared, "trash_album_id").unwrap(), None);
-        store.set_app_state(Space::Shared, "trash_album_id", "900").unwrap();
-        assert_eq!(store.get_app_state(Space::Personal, "trash_album_id").unwrap(), Some("500".to_string()));
-        assert_eq!(store.get_app_state(Space::Shared, "trash_album_id").unwrap(), Some("900".to_string()));
+        store
+            .set_app_state(Space::Personal, "trash_album_id", "500")
+            .unwrap();
+        assert_eq!(
+            store
+                .get_app_state(Space::Shared, "trash_album_id")
+                .unwrap(),
+            None
+        );
+        store
+            .set_app_state(Space::Shared, "trash_album_id", "900")
+            .unwrap();
+        assert_eq!(
+            store
+                .get_app_state(Space::Personal, "trash_album_id")
+                .unwrap(),
+            Some("500".to_string())
+        );
+        assert_eq!(
+            store
+                .get_app_state(Space::Shared, "trash_album_id")
+                .unwrap(),
+            Some("900".to_string())
+        );
     }
 }

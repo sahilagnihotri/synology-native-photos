@@ -126,7 +126,12 @@ impl Store {
     /// finished (reconciling the final count against `expected_total` is the
     /// sync engine's job, not this module's); this method just stores the
     /// value it is given.
-    pub fn set_crawl_complete(&self, space: Space, complete: bool, at_secs: i64) -> Result<(), CoreError> {
+    pub fn set_crawl_complete(
+        &self,
+        space: Space,
+        complete: bool,
+        at_secs: i64,
+    ) -> Result<(), CoreError> {
         ensure_row(self, space)?;
         self.conn
             .execute(
@@ -215,9 +220,18 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         store.save_cursor(Space::Personal, 50, 50, 300).unwrap();
         store.save_cursor(Space::Shared, 10, 50, 80).unwrap();
-        assert_eq!(store.load_sync_state(Space::Personal).unwrap().last_offset, 50);
-        assert_eq!(store.load_sync_state(Space::Shared).unwrap().last_offset, 10);
-        assert_eq!(store.load_sync_state(Space::Shared).unwrap().expected_total, 80);
+        assert_eq!(
+            store.load_sync_state(Space::Personal).unwrap().last_offset,
+            50
+        );
+        assert_eq!(
+            store.load_sync_state(Space::Shared).unwrap().last_offset,
+            10
+        );
+        assert_eq!(
+            store.load_sync_state(Space::Shared).unwrap().expected_total,
+            80
+        );
     }
 
     #[test]
@@ -225,7 +239,9 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         store.save_cursor(Space::Personal, 0, 100, 0).unwrap();
         store.set_highest_version(Space::Personal, 42).unwrap();
-        store.set_crawl_complete(Space::Personal, true, 9999).unwrap();
+        store
+            .set_crawl_complete(Space::Personal, true, 9999)
+            .unwrap();
         let s = store.load_sync_state(Space::Personal).unwrap();
         assert!(s.initial_crawl_complete);
         assert_eq!(s.highest_seen_version, Some(42));

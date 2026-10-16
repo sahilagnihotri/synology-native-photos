@@ -107,7 +107,8 @@ fn ensure_port(host_and_maybe_port: &str) -> String {
     // sense as a port; bracket it and recurse so the branch above handles it
     // uniformly. A host:port pair (`192.168.1.10:8001`, `nas.example.com:8001`)
     // has exactly one colon, so this never misfires on those.
-    if host_and_maybe_port.matches(':').count() > 1 && host_and_maybe_port.parse::<IpAddr>().is_ok() {
+    if host_and_maybe_port.matches(':').count() > 1 && host_and_maybe_port.parse::<IpAddr>().is_ok()
+    {
         return ensure_port(&format!("[{host_and_maybe_port}]"));
     }
     // Plain hostname or IPv4 literal: a port is present only if there is a
@@ -181,11 +182,14 @@ pub fn build_client(connection: &Connection) -> Result<reqwest::Client, CoreErro
 fn pinned_rustls_config(pinned_der: &[u8]) -> Result<rustls::ClientConfig, CoreError> {
     if x509_parser::parse_x509_certificate(pinned_der).is_err() {
         return Err(CoreError::Network {
-            message: "pinned certificate is not valid DER: could not parse as an X.509 certificate".to_string(),
+            message: "pinned certificate is not valid DER: could not parse as an X.509 certificate"
+                .to_string(),
         });
     }
 
-    let verifier = PinnedCertVerifier { pinned_der: pinned_der.to_vec() };
+    let verifier = PinnedCertVerifier {
+        pinned_der: pinned_der.to_vec(),
+    };
     let mut config = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
@@ -294,7 +298,9 @@ pub async fn fetch_server_cert_der(host: &str) -> Result<CertInfo, CoreError> {
         .unwrap_or(5001);
 
     let captured: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
-    let verifier = CapturingVerifier { captured: captured.clone() };
+    let verifier = CapturingVerifier {
+        captured: captured.clone(),
+    };
 
     let mut config = rustls::ClientConfig::builder()
         .dangerous()
@@ -303,20 +309,26 @@ pub async fn fetch_server_cert_der(host: &str) -> Result<CertInfo, CoreError> {
     config.alpn_protocols = vec![b"http/1.1".to_vec()];
 
     let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
-    let server_name = rustls_pki_types::ServerName::try_from(target_host.clone())
-        .or_else(|_| {
+    let server_name =
+        rustls_pki_types::ServerName::try_from(target_host.clone()).or_else(|_| {
             // Bracket-stripped IP literal: ServerName also accepts a bare IP
             // string, but `target_host` may still be missing brackets that
             // were already stripped by `bare_host`; try the raw parse too.
             target_host
                 .parse::<IpAddr>()
                 .map(rustls_pki_types::ServerName::from)
-                .map_err(|_| CoreError::Network { message: format!("invalid host for TLS probe: {target_host}") })
+                .map_err(|_| CoreError::Network {
+                    message: format!("invalid host for TLS probe: {target_host}"),
+                })
         })?;
 
     let tcp = tokio::net::TcpStream::connect((target_host.as_str(), port))
         .await
-        .map_err(|e| CoreError::Network { message: format!("could not connect to {target_host}:{port} to read its certificate: {e}") })?;
+        .map_err(|e| CoreError::Network {
+            message: format!(
+                "could not connect to {target_host}:{port} to read its certificate: {e}"
+            ),
+        })?;
 
     // We only need the handshake to complete far enough to receive the
     // server's certificate chain; a verifier-triggered rejection or a
@@ -335,7 +347,11 @@ pub async fn fetch_server_cert_der(host: &str) -> Result<CertInfo, CoreError> {
     let sha256_hex = sha256_hex(&der);
     let subject = subject_of(&der);
 
-    Ok(CertInfo { der, sha256_hex, subject })
+    Ok(CertInfo {
+        der,
+        sha256_hex,
+        subject,
+    })
 }
 
 /// Hex-encodes the SHA-256 digest of `der`, for display as a TOFU fingerprint.
@@ -378,7 +394,8 @@ impl rustls::client::danger::ServerCertVerifier for CapturingVerifier {
         _ocsp_response: &[u8],
         _now: rustls_pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        *self.captured.lock().expect("cert capture mutex poisoned") = Some(end_entity.as_ref().to_vec());
+        *self.captured.lock().expect("cert capture mutex poisoned") =
+            Some(end_entity.as_ref().to_vec());
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
@@ -464,7 +481,11 @@ impl Transport {
             let wait = match *guard {
                 Some(prev) => {
                     let elapsed = now.duration_since(prev);
-                    if elapsed < MIN_REQUEST_GAP { MIN_REQUEST_GAP - elapsed } else { Duration::ZERO }
+                    if elapsed < MIN_REQUEST_GAP {
+                        MIN_REQUEST_GAP - elapsed
+                    } else {
+                        Duration::ZERO
+                    }
                 }
                 None => Duration::ZERO,
             };
@@ -495,10 +516,7 @@ impl Transport {
             .send()
             .await
             .map_err(scrub_reqwest_error)?;
-        let body = response
-            .text()
-            .await
-            .map_err(scrub_reqwest_error)?;
+        let body = response.text().await.map_err(scrub_reqwest_error)?;
         crate::envelope::decode_envelope(&body)
     }
 
@@ -544,7 +562,9 @@ impl Transport {
 /// travel in the body or as query values, never in the fixed path this
 /// strips down to, can leak through an error message.
 fn scrub_reqwest_error(e: reqwest::Error) -> CoreError {
-    CoreError::Network { message: format!("request failed: {}", e.without_url()) }
+    CoreError::Network {
+        message: format!("request failed: {}", e.without_url()),
+    }
 }
 
 #[cfg(test)]
@@ -553,7 +573,12 @@ mod tests {
     use models::Connection;
 
     fn conn(host: &str, pinned: Option<Vec<u8>>) -> Connection {
-        Connection { host: host.to_string(), verify_tls: true, pinned_cert_der: pinned, allow_untrusted_tls: false }
+        Connection {
+            host: host.to_string(),
+            verify_tls: true,
+            pinned_cert_der: pinned,
+            allow_untrusted_tls: false,
+        }
     }
 
     // --- Section A: host normalization -------------------------------
@@ -566,41 +591,69 @@ mod tests {
     #[test]
     fn bare_ipv4_with_trailing_slash_is_trimmed() {
         assert_eq!(normalize_host("192.168.1.10/"), "https://192.168.1.10:5001");
-        assert_eq!(normalize_host("192.168.1.10//"), "https://192.168.1.10:5001");
+        assert_eq!(
+            normalize_host("192.168.1.10//"),
+            "https://192.168.1.10:5001"
+        );
     }
 
     #[test]
     fn explicit_host_and_port_is_kept() {
-        assert_eq!(normalize_host("192.168.1.10:8001"), "https://192.168.1.10:8001");
-        assert_eq!(normalize_host("https://192.168.1.10:8001"), "https://192.168.1.10:8001");
+        assert_eq!(
+            normalize_host("192.168.1.10:8001"),
+            "https://192.168.1.10:8001"
+        );
+        assert_eq!(
+            normalize_host("https://192.168.1.10:8001"),
+            "https://192.168.1.10:8001"
+        );
     }
 
     #[test]
     fn explicit_http_scheme_is_kept_not_upgraded() {
-        assert_eq!(normalize_host("http://192.168.1.10"), "http://192.168.1.10:5001");
-        assert_eq!(normalize_host("http://192.168.1.10:5000"), "http://192.168.1.10:5000");
+        assert_eq!(
+            normalize_host("http://192.168.1.10"),
+            "http://192.168.1.10:5001"
+        );
+        assert_eq!(
+            normalize_host("http://192.168.1.10:5000"),
+            "http://192.168.1.10:5000"
+        );
     }
 
     #[test]
     fn explicit_https_scheme_with_no_port_still_gets_default_port() {
-        assert_eq!(normalize_host("https://nas.example.com"), "https://nas.example.com:5001");
+        assert_eq!(
+            normalize_host("https://nas.example.com"),
+            "https://nas.example.com:5001"
+        );
     }
 
     #[test]
     fn ipv6_literal_gets_bracketed_default_port() {
         assert_eq!(normalize_host("[::1]"), "https://[::1]:5001");
-        assert_eq!(normalize_host("::1"), "https://[::1]:5001", "unbracketed IPv6 must be bracketed");
+        assert_eq!(
+            normalize_host("::1"),
+            "https://[::1]:5001",
+            "unbracketed IPv6 must be bracketed"
+        );
     }
 
     #[test]
     fn ipv6_literal_with_explicit_port_is_kept() {
         assert_eq!(normalize_host("[::1]:8001"), "https://[::1]:8001");
-        assert_eq!(normalize_host("https://[fe80::1]:5001/"), "https://[fe80::1]:5001");
+        assert_eq!(
+            normalize_host("https://[fe80::1]:5001/"),
+            "https://[fe80::1]:5001"
+        );
     }
 
     #[test]
     fn hostname_only_gets_https_and_default_port() {
-        assert_eq!(normalize_host("nas.example.com"), "https://nas.example.com:5001");
+        assert_eq!(
+            normalize_host("nas.example.com"),
+            "https://nas.example.com:5001"
+        );
     }
 
     #[test]
@@ -612,7 +665,10 @@ mod tests {
 
     #[test]
     fn whitespace_is_trimmed() {
-        assert_eq!(normalize_host("  192.168.1.10  "), "https://192.168.1.10:5001");
+        assert_eq!(
+            normalize_host("  192.168.1.10  "),
+            "https://192.168.1.10:5001"
+        );
     }
 
     // --- Section B/C: build_client TLS paths --------------------------
@@ -624,8 +680,15 @@ mod tests {
 
     #[test]
     fn rejects_bad_pinned_cert() {
-        let err = build_client(&conn("https://nas.ts.net:5001", Some(vec![0x00, 0x01, 0x02]))).unwrap_err();
-        assert!(matches!(err, models::CoreError::Network { .. }), "got {err:?}");
+        let err = build_client(&conn(
+            "https://nas.ts.net:5001",
+            Some(vec![0x00, 0x01, 0x02]),
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, models::CoreError::Network { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -651,7 +714,10 @@ mod tests {
         // The dummy DER above is not valid DER, so this still errors, but on
         // the "bad pinned cert" path, proving the pinned branch (not the
         // dev-toggle branch) was taken even though allow_untrusted_tls=true.
-        assert!(matches!(err, models::CoreError::Network { .. }), "got {err:?}");
+        assert!(
+            matches!(err, models::CoreError::Network { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -672,8 +738,10 @@ mod tests {
         let start = std::time::Instant::now();
         t.throttle().await;
         t.throttle().await;
-        assert!(start.elapsed() >= std::time::Duration::from_millis(140),
-                "second throttle should enforce the inter-request gap");
+        assert!(
+            start.elapsed() >= std::time::Duration::from_millis(140),
+            "second throttle should enforce the inter-request gap"
+        );
     }
 
     #[derive(Debug, serde::Deserialize, PartialEq)]
@@ -686,7 +754,10 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("POST", "/webapi/entry.cgi")
-            .match_header("content-type", mockito::Matcher::Regex("application/x-www-form-urlencoded".into()))
+            .match_header(
+                "content-type",
+                mockito::Matcher::Regex("application/x-www-form-urlencoded".into()),
+            )
             .match_body(mockito::Matcher::AllOf(vec![
                 mockito::Matcher::Regex("api=SYNO.API.Auth".into()),
                 mockito::Matcher::Regex("method=login".into()),
@@ -703,7 +774,12 @@ mod tests {
             .await
             .expect("mocked request should decode");
 
-        assert_eq!(got, Probe { sid: "SID123".to_string() });
+        assert_eq!(
+            got,
+            Probe {
+                sid: "SID123".to_string()
+            }
+        );
         mock.assert_async().await;
     }
 
@@ -735,11 +811,21 @@ mod tests {
         // nor any URL fragment.
         let t = Transport::new(&conn("https://127.0.0.1:1", None)).expect("transport builds");
         let err = t
-            .post_form::<Probe>(&[("api", "SYNO.API.Auth"), ("method", "login"), ("passwd", "s3cr3t-password")])
+            .post_form::<Probe>(&[
+                ("api", "SYNO.API.Auth"),
+                ("method", "login"),
+                ("passwd", "s3cr3t-password"),
+            ])
             .await
             .unwrap_err();
         let message = err.to_string();
-        assert!(!message.contains("127.0.0.1"), "error must not leak the host: {message}");
-        assert!(!message.contains("s3cr3t-password"), "error must not leak form params: {message}");
+        assert!(
+            !message.contains("127.0.0.1"),
+            "error must not leak the host: {message}"
+        );
+        assert!(
+            !message.contains("s3cr3t-password"),
+            "error must not leak form params: {message}"
+        );
     }
 }

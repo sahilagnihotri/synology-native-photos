@@ -199,7 +199,8 @@ const STEPS: &[MigrationStep] = &[
 
 /// Step 5: un-hides every row an older build flagged as trashed.
 fn clear_legacy_trash_flags(conn: &Connection) -> Result<(), CoreError> {
-    conn.execute("UPDATE assets SET in_trash = 0, trashed_at = NULL", []).map_err(map_sql)?;
+    conn.execute("UPDATE assets SET in_trash = 0, trashed_at = NULL", [])
+        .map_err(map_sql)?;
     Ok(())
 }
 
@@ -216,15 +217,19 @@ fn latest_version() -> i64 {
 /// Later modules (queries, writers, sync-state accessors) should call this instead of
 /// re-deriving their own conversion.
 pub(crate) fn map_sql(e: rusqlite::Error) -> CoreError {
-    CoreError::Storage { message: e.to_string() }
+    CoreError::Storage {
+        message: e.to_string(),
+    }
 }
 
 fn user_version(conn: &Connection) -> Result<i64, CoreError> {
-    conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(map_sql)
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(map_sql)
 }
 
 fn set_user_version(conn: &Connection, version: i64) -> Result<(), CoreError> {
-    conn.execute_batch(&format!("PRAGMA user_version = {version}")).map_err(map_sql)
+    conn.execute_batch(&format!("PRAGMA user_version = {version}"))
+        .map_err(map_sql)
 }
 
 /// Applies the base DDL, then runs every migration step whose version is
@@ -324,8 +329,11 @@ fn add_unit_id_column_if_missing(conn: &Connection) -> Result<(), CoreError> {
         .any(|name| name == "unit_id");
     drop(stmt);
     if !has_unit_id {
-        conn.execute("ALTER TABLE assets ADD COLUMN unit_id INTEGER NOT NULL DEFAULT 0", [])
-            .map_err(map_sql)?;
+        conn.execute(
+            "ALTER TABLE assets ADD COLUMN unit_id INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .map_err(map_sql)?;
     }
     Ok(())
 }
@@ -354,15 +362,21 @@ fn add_trash_columns_if_missing(conn: &Connection) -> Result<(), CoreError> {
         names
     };
     if !existing.iter().any(|name| name == "in_trash") {
-        conn.execute("ALTER TABLE assets ADD COLUMN in_trash INTEGER NOT NULL DEFAULT 0", [])
-            .map_err(map_sql)?;
+        conn.execute(
+            "ALTER TABLE assets ADD COLUMN in_trash INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .map_err(map_sql)?;
     }
     if !existing.iter().any(|name| name == "trashed_at") {
         conn.execute("ALTER TABLE assets ADD COLUMN trashed_at INTEGER", [])
             .map_err(map_sql)?;
     }
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_assets_space_trash ON assets (space, in_trash)", [])
-        .map_err(map_sql)?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_assets_space_trash ON assets (space, in_trash)",
+        [],
+    )
+    .map_err(map_sql)?;
     Ok(())
 }
 
@@ -660,11 +674,21 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .expect("location columns readable");
-        assert_eq!(latitude, None, "existing row defaults latitude to NULL (unlocated)");
-        assert_eq!(longitude, None, "existing row defaults longitude to NULL (unlocated)");
+        assert_eq!(
+            latitude, None,
+            "existing row defaults latitude to NULL (unlocated)"
+        );
+        assert_eq!(
+            longitude, None,
+            "existing row defaults longitude to NULL (unlocated)"
+        );
         assert_eq!(user_version(&conn).unwrap(), latest_version());
         let meta: String = conn
-            .query_row("SELECT value FROM schema_meta WHERE key = 'schema_version'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
             .expect("schema_meta mirror set");
         assert_eq!(meta, latest_version().to_string());
 
@@ -697,8 +721,14 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(complete, 0, "a data-bearing migration must reset a completed crawl");
-        assert_eq!(offset, 0, "the paging cursor must rewind so the crawl restarts and backfills GPS");
+        assert_eq!(
+            complete, 0,
+            "a data-bearing migration must reset a completed crawl"
+        );
+        assert_eq!(
+            offset, 0,
+            "the paging cursor must rewind so the crawl restarts and backfills GPS"
+        );
     }
 
     /// A v2 database must gain all twelve media-enrichment columns on upgrade
@@ -731,7 +761,11 @@ mod tests {
         // the latest version (v3 metadata + v4 location), not just v3.
         assert_eq!(user_version(&conn).unwrap(), latest_version());
         let meta: String = conn
-            .query_row("SELECT value FROM schema_meta WHERE key = 'schema_version'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
             .expect("schema_meta mirror set");
         assert_eq!(meta, latest_version().to_string());
 
@@ -759,19 +793,33 @@ mod tests {
         add_metadata_columns_if_missing(&conn).expect("v2 to v3 step");
 
         let (in_trash, trashed_at): (i64, Option<i64>) = conn
-            .query_row("SELECT in_trash, trashed_at FROM assets WHERE server_id = 7", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT in_trash, trashed_at FROM assets WHERE server_id = 7",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .expect("trash columns intact");
-        assert_eq!(in_trash, 1, "the migration must not un-trash an already-trashed row");
-        assert_eq!(trashed_at, Some(9999), "trashed_at must survive the v3 migration");
+        assert_eq!(
+            in_trash, 1,
+            "the migration must not un-trash an already-trashed row"
+        );
+        assert_eq!(
+            trashed_at,
+            Some(9999),
+            "trashed_at must survive the v3 migration"
+        );
 
         // Re-run of the step: still trashed.
         add_metadata_columns_if_missing(&conn).expect("second run is a no-op");
         let in_trash_after: i64 = conn
-            .query_row("SELECT in_trash FROM assets WHERE server_id = 7", [], |r| r.get(0))
+            .query_row("SELECT in_trash FROM assets WHERE server_id = 7", [], |r| {
+                r.get(0)
+            })
             .unwrap();
-        assert_eq!(in_trash_after, 1, "re-running the migration must not clear in_trash");
+        assert_eq!(
+            in_trash_after, 1,
+            "re-running the migration must not clear in_trash"
+        );
     }
 
     /// The v3 metadata migration is NAS-derived (`requires_recrawl: true`), so
@@ -798,8 +846,14 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(complete, 0, "a data-bearing migration must reset a completed crawl");
-        assert_eq!(offset, 0, "the paging cursor must rewind so the crawl restarts and backfills metadata");
+        assert_eq!(
+            complete, 0,
+            "a data-bearing migration must reset a completed crawl"
+        );
+        assert_eq!(
+            offset, 0,
+            "the paging cursor must rewind so the crawl restarts and backfills metadata"
+        );
     }
 
     /// A v4 database holding a row an older build flagged as trashed must,
@@ -819,20 +873,34 @@ mod tests {
         .expect("legacy trashed row");
         let store = crate::Store { conn };
         assert!(
-            store.fetch_assets(Space::Personal, 0, 10).unwrap().is_empty(),
+            store
+                .fetch_assets(Space::Personal, 0, 10)
+                .unwrap()
+                .is_empty(),
             "precondition: the flagged row is hidden before the migration"
         );
 
         run_migrations(&store.conn).expect("v4 to v5 migration");
 
         assert_eq!(user_version(&store.conn).unwrap(), 5);
-        let grid: Vec<i64> = store.fetch_assets(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
-        assert_eq!(grid, vec![7], "the legacy trashed row must be visible again");
+        let grid: Vec<i64> = store
+            .fetch_assets(Space::Personal, 0, 10)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(
+            grid,
+            vec![7],
+            "the legacy trashed row must be visible again"
+        );
         let (in_trash, trashed_at): (i64, Option<i64>) = store
             .conn
-            .query_row("SELECT in_trash, trashed_at FROM assets WHERE server_id = 7", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT in_trash, trashed_at FROM assets WHERE server_id = 7",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .expect("legacy columns still exist");
         assert_eq!((in_trash, trashed_at), (0, None));
     }
@@ -854,15 +922,21 @@ mod tests {
         run_migrations(&conn).expect("migration adds trash columns");
 
         let (in_trash, trashed_at): (i64, Option<i64>) = conn
-            .query_row("SELECT in_trash, trashed_at FROM assets WHERE server_id = 1", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT in_trash, trashed_at FROM assets WHERE server_id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .expect("trash columns readable");
         assert_eq!(in_trash, 0, "existing row defaults to not-trashed");
         assert_eq!(trashed_at, None, "existing row has a NULL trashed_at");
         assert_eq!(user_version(&conn).unwrap(), latest_version());
         let meta: String = conn
-            .query_row("SELECT value FROM schema_meta WHERE key = 'schema_version'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
             .expect("schema_meta mirror set");
         assert_eq!(meta, latest_version().to_string());
 
@@ -898,8 +972,14 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(complete, 0, "a batch containing a data-bearing step must reset a completed crawl");
-        assert_eq!(offset, 0, "the paging cursor must rewind so the crawl restarts and backfills metadata");
+        assert_eq!(
+            complete, 0,
+            "a batch containing a data-bearing step must reset a completed crawl"
+        );
+        assert_eq!(
+            offset, 0,
+            "the paging cursor must rewind so the crawl restarts and backfills metadata"
+        );
     }
 
     #[test]
@@ -917,7 +997,10 @@ mod tests {
                 .collect()
         };
         for expected in ["albums", "assets", "schema_meta", "sync_state"] {
-            assert!(names.contains(&expected.to_string()), "missing table {expected}");
+            assert!(
+                names.contains(&expected.to_string()),
+                "missing table {expected}"
+            );
         }
     }
 
@@ -940,13 +1023,18 @@ mod tests {
     #[test]
     fn already_current_database_is_a_no_op_and_does_not_re_reset_barrier() {
         let store = crate::Store::open_in_memory().expect("open");
-        store.set_crawl_complete(models::Space::Personal, true, 123).unwrap();
+        store
+            .set_crawl_complete(models::Space::Personal, true, 123)
+            .unwrap();
 
         run_migrations(&store.conn).expect("migrate again on current db");
 
         assert_eq!(user_version(&store.conn).unwrap(), latest_version());
         let s = store.load_sync_state(models::Space::Personal).unwrap();
-        assert!(s.initial_crawl_complete, "already-current migration must not touch the barrier");
+        assert!(
+            s.initial_crawl_complete,
+            "already-current migration must not touch the barrier"
+        );
     }
 
     /// A database created before `unit_id` existed must still open cleanly:
@@ -964,7 +1052,9 @@ mod tests {
         run_migrations(&conn).expect("migration adds unit_id");
 
         let unit_id: i64 = conn
-            .query_row("SELECT unit_id FROM assets WHERE server_id = 1", [], |r| r.get(0))
+            .query_row("SELECT unit_id FROM assets WHERE server_id = 1", [], |r| {
+                r.get(0)
+            })
             .expect("unit_id column readable");
         assert_eq!(unit_id, 0, "legacy row defaults unit_id to 0");
         assert_eq!(user_version(&conn).unwrap(), latest_version());
@@ -1011,7 +1101,9 @@ mod tests {
         // All rows gained unit_id=0 (the column exists; a real crawl will
         // overwrite it with the true value from the NAS).
         let zero_unit_id_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM assets WHERE unit_id = 0", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM assets WHERE unit_id = 0", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(zero_unit_id_count, 3);
 
@@ -1025,14 +1117,24 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .unwrap();
-        assert_eq!(complete, 0, "previously-complete space must have its barrier reset");
-        assert_eq!(offset, 0, "cursor must rewind so the crawl restarts from the beginning");
+        assert_eq!(
+            complete, 0,
+            "previously-complete space must have its barrier reset"
+        );
+        assert_eq!(
+            offset, 0,
+            "cursor must rewind so the crawl restarts from the beginning"
+        );
         assert_eq!(limit, 0);
 
         // Shared never had a completed crawl: nothing to reset, its all-zero
         // row is left exactly as it was.
         let shared_complete: i64 = conn
-            .query_row("SELECT initial_crawl_complete FROM sync_state WHERE space = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT initial_crawl_complete FROM sync_state WHERE space = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(shared_complete, 0);
 
@@ -1047,6 +1149,9 @@ mod tests {
     fn fresh_database_has_no_spurious_barrier_reset() {
         let store = crate::Store::open_in_memory().expect("open");
         let s = store.load_sync_state(models::Space::Personal).unwrap();
-        assert!(!s.initial_crawl_complete, "fresh db starts with the barrier down, not reset");
+        assert!(
+            !s.initial_crawl_complete,
+            "fresh db starts with the barrier down, not reset"
+        );
     }
 }

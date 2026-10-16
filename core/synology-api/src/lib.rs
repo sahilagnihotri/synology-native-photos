@@ -20,16 +20,19 @@ pub mod upload;
 pub use album_write::delete_album;
 pub use auth::{login, logout};
 pub use browse::{
-    filter_items, list_albums, list_items, list_items_filtered, search, search_filtered, CollectionFilter,
+    filter_items, list_albums, list_items, list_items_filtered, search, search_filtered,
+    CollectionFilter,
 };
 pub use delete_item::permanent_delete;
 pub use discovery::{list_people, list_places, list_subjects, list_tags};
 pub use download::download_original;
-pub use envelope::{decode_envelope, decode_write_success, map_error_code, SynoError, SynoResponse};
+pub use envelope::{
+    decode_envelope, decode_write_success, map_error_code, SynoError, SynoResponse,
+};
 pub use info::{pin_version, probe_capabilities};
 pub use recycle::{
-    delete_recycle_item, ensure_recycle_photos_path, list_recycle_photos, recycle_bin_status, recycle_thumbnail, restore_recycle_item,
-    trigger_reindex,
+    delete_recycle_item, ensure_recycle_photos_path, list_recycle_photos, recycle_bin_status,
+    recycle_thumbnail, restore_recycle_item, trigger_reindex,
 };
 pub use search_filter::search_facets;
 pub use thumbnail::fetch_thumbnail;

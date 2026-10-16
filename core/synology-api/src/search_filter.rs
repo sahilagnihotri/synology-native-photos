@@ -96,7 +96,10 @@ fn flatten_geocoding(nodes: &[RawGeocodingNode], out: &mut Vec<Facet>) {
 
 fn to_facets(raw: &[RawFacet]) -> Vec<Facet> {
     raw.iter()
-        .map(|f| Facet { id: f.id, name: f.name.clone().unwrap_or_else(|| f.id.to_string()) })
+        .map(|f| Facet {
+            id: f.id,
+            name: f.name.clone().unwrap_or_else(|| f.id.to_string()),
+        })
         .collect()
 }
 
@@ -104,21 +107,26 @@ fn to_facets(raw: &[RawFacet]) -> Vec<Facet> {
 /// response body. Same token discipline as every other module in this
 /// crate: `X-SYNO-TOKEN` sent when `syno_token` is `Some`, omitted (never
 /// sent empty) when `None`.
-async fn get_body(transport: &Transport, query: &[(&str, String)], syno_token: Option<&str>) -> Result<String, CoreError> {
+async fn get_body(
+    transport: &Transport,
+    query: &[(&str, String)],
+    syno_token: Option<&str>,
+) -> Result<String, CoreError> {
     transport.throttle().await;
     let query_refs: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let mut request = transport.client().get(transport.entry_url()).query(&query_refs);
+    let mut request = transport
+        .client()
+        .get(transport.entry_url())
+        .query(&query_refs);
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("search filter request failed: {e}") })?;
-    response
-        .text()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("reading search filter response body failed: {e}") })
+    let response = request.send().await.map_err(|e| CoreError::Network {
+        message: format!("search filter request failed: {e}"),
+    })?;
+    response.text().await.map_err(|e| CoreError::Network {
+        message: format!("reading search filter response body failed: {e}"),
+    })
 }
 
 /// `SYNO.Foto.Search.Filter`, `method=list`, version 1 (versions 1-4 were
@@ -166,21 +174,49 @@ mod tests {
             children: vec![RawGeocodingNode {
                 id: 12,
                 name: Some("Oslo".to_string()),
-                children: vec![RawGeocodingNode { id: 50, name: Some("Grunerlokka".to_string()), children: vec![] }],
+                children: vec![RawGeocodingNode {
+                    id: 50,
+                    name: Some("Grunerlokka".to_string()),
+                    children: vec![],
+                }],
             }],
         }];
         let mut out = Vec::new();
         flatten_geocoding(&tree, &mut out);
         assert_eq!(out.len(), 3);
-        assert_eq!(out[0], Facet { id: 1, name: "Norway".to_string() });
-        assert_eq!(out[1], Facet { id: 12, name: "Oslo".to_string() });
-        assert_eq!(out[2], Facet { id: 50, name: "Grunerlokka".to_string() });
+        assert_eq!(
+            out[0],
+            Facet {
+                id: 1,
+                name: "Norway".to_string()
+            }
+        );
+        assert_eq!(
+            out[1],
+            Facet {
+                id: 12,
+                name: "Oslo".to_string()
+            }
+        );
+        assert_eq!(
+            out[2],
+            Facet {
+                id: 50,
+                name: "Grunerlokka".to_string()
+            }
+        );
     }
 
     #[test]
     fn missing_name_falls_back_to_id() {
         let raw = vec![RawFacet { id: 99, name: None }];
         let facets = to_facets(&raw);
-        assert_eq!(facets, vec![Facet { id: 99, name: "99".to_string() }]);
+        assert_eq!(
+            facets,
+            vec![Facet {
+                id: 99,
+                name: "99".to_string()
+            }]
+        );
     }
 }

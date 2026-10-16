@@ -99,9 +99,15 @@ mod tests {
     #[test]
     fn upsert_and_fetch_albums_ordered_by_name_within_space() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_album(&album(Space::Personal, 1, "Zebra")).unwrap();
-        store.upsert_album(&album(Space::Personal, 2, "Apple")).unwrap();
-        store.upsert_album(&album(Space::Shared, 3, "ShouldNotAppear")).unwrap();
+        store
+            .upsert_album(&album(Space::Personal, 1, "Zebra"))
+            .unwrap();
+        store
+            .upsert_album(&album(Space::Personal, 2, "Apple"))
+            .unwrap();
+        store
+            .upsert_album(&album(Space::Shared, 3, "ShouldNotAppear"))
+            .unwrap();
         let names: Vec<String> = store
             .fetch_albums(Space::Personal)
             .unwrap()
@@ -114,7 +120,9 @@ mod tests {
     #[test]
     fn upsert_album_idempotent() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_album(&album(Space::Personal, 1, "Trip")).unwrap();
+        store
+            .upsert_album(&album(Space::Personal, 1, "Trip"))
+            .unwrap();
         let mut updated = album(Space::Personal, 1, "Trip 2024");
         updated.item_count = 42;
         store.upsert_album(&updated).unwrap();
@@ -127,9 +135,15 @@ mod tests {
     #[test]
     fn fetch_albums_does_not_leak_across_spaces() {
         let store = Store::open_in_memory().unwrap();
-        store.upsert_album(&album(Space::Personal, 1, "Family")).unwrap();
-        store.upsert_album(&album(Space::Shared, 2, "Team Trip")).unwrap();
-        store.upsert_album(&album(Space::Shared, 3, "Team Party")).unwrap();
+        store
+            .upsert_album(&album(Space::Personal, 1, "Family"))
+            .unwrap();
+        store
+            .upsert_album(&album(Space::Shared, 2, "Team Trip"))
+            .unwrap();
+        store
+            .upsert_album(&album(Space::Shared, 3, "Team Party"))
+            .unwrap();
 
         let personal = store.fetch_albums(Space::Personal).unwrap();
         assert_eq!(personal.len(), 1);

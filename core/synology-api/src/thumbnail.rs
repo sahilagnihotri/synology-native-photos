@@ -86,10 +86,9 @@ pub async fn fetch_thumbnail(
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("thumbnail request failed: {e}") })?;
+    let response = request.send().await.map_err(|e| CoreError::Network {
+        message: format!("thumbnail request failed: {e}"),
+    })?;
     // A not-yet-generated ("converting") or missing thumbnail comes back as an
     // HTTP error (e.g. 404) with an HTML error page, not image bytes. Reject it
     // on the status code before we ever try to treat the body as an image, so
@@ -102,10 +101,9 @@ pub async fn fetch_thumbnail(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| CoreError::Network { message: format!("reading thumbnail body failed: {e}") })?;
+    let bytes = response.bytes().await.map_err(|e| CoreError::Network {
+        message: format!("reading thumbnail body failed: {e}"),
+    })?;
     if !status.is_success() {
         return Err(CoreError::UnexpectedResponse {
             message: format!(

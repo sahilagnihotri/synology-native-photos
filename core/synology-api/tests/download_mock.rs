@@ -4,8 +4,13 @@ use synology_api::download::download_original;
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
-    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false })
-        .expect("transport builds")
+    Transport::new(&Connection {
+        host: server.url(),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    })
+    .expect("transport builds")
 }
 
 // NOTE: mocked path is `/webapi/entry.cgi`, matching the verified fact in
@@ -40,7 +45,10 @@ async fn download_shared_uses_fototeam_namespace() {
     let mut server = mockito::Server::new_async().await;
     let _m = server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.FotoTeam.Download".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.FotoTeam.Download".into(),
+        ))
         .with_status(200)
         .with_header("content-type", "application/octet-stream")
         .with_body(b"X")

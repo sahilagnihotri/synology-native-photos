@@ -4,8 +4,13 @@ use synology_api::thumbnail::{fetch_thumbnail, size_param};
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
-    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false })
-        .expect("transport builds")
+    Transport::new(&Connection {
+        host: server.url(),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    })
+    .expect("transport builds")
 }
 
 #[test]
@@ -35,9 +40,18 @@ async fn fetch_thumbnail_returns_binary_bytes() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let bytes = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2, None)
-        .await
-        .expect("thumb ok");
+    let bytes = fetch_thumbnail(
+        &t,
+        "SID",
+        Space::Personal,
+        101,
+        "CK101",
+        ThumbnailSize::Sm,
+        2,
+        None,
+    )
+    .await
+    .expect("thumb ok");
     assert_eq!(bytes, jpeg_magic);
 }
 
@@ -79,7 +93,10 @@ async fn fetch_thumbnail_sends_unit_id_as_id_param_not_item_id() {
     .expect("thumb ok when id param carries unit_id");
     assert_eq!(bytes, jpeg_magic);
     _m.assert_async().await;
-    assert_ne!(item_id, unit_id, "sanity: the two ids really are different in this fixture");
+    assert_ne!(
+        item_id, unit_id,
+        "sanity: the two ids really are different in this fixture"
+    );
 }
 
 #[tokio::test]
@@ -94,9 +111,18 @@ async fn fetch_thumbnail_json_error_maps_to_core_error() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let err = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2, None)
-        .await
-        .unwrap_err();
+    let err = fetch_thumbnail(
+        &t,
+        "SID",
+        Space::Personal,
+        101,
+        "CK101",
+        ThumbnailSize::Sm,
+        2,
+        None,
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(err, models::CoreError::Auth { .. }), "got {err:?}");
 }
 
@@ -106,16 +132,28 @@ async fn fetch_thumbnail_shared_uses_fototeam_namespace() {
     let jpeg_magic = vec![0xFF, 0xD8, 0xFF, 0xE0];
     let _m = server
         .mock("GET", "/webapi/entry.cgi")
-        .match_query(Matcher::UrlEncoded("api".into(), "SYNO.FotoTeam.Thumbnail".into()))
+        .match_query(Matcher::UrlEncoded(
+            "api".into(),
+            "SYNO.FotoTeam.Thumbnail".into(),
+        ))
         .with_status(200)
         .with_header("content-type", "image/jpeg")
         .with_body(jpeg_magic.clone())
         .create_async()
         .await;
     let t = transport_for(&server);
-    let bytes = fetch_thumbnail(&t, "SID", Space::Shared, 202, "CK202", ThumbnailSize::M, 2, None)
-        .await
-        .expect("thumb ok");
+    let bytes = fetch_thumbnail(
+        &t,
+        "SID",
+        Space::Shared,
+        202,
+        "CK202",
+        ThumbnailSize::M,
+        2,
+        None,
+    )
+    .await
+    .expect("thumb ok");
     assert_eq!(bytes, jpeg_magic);
 }
 
@@ -133,9 +171,18 @@ async fn fetch_thumbnail_sends_syno_token_header_when_present() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let bytes = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2, Some("TOK123"))
-        .await
-        .expect("thumb ok with token header");
+    let bytes = fetch_thumbnail(
+        &t,
+        "SID",
+        Space::Personal,
+        101,
+        "CK101",
+        ThumbnailSize::Sm,
+        2,
+        Some("TOK123"),
+    )
+    .await
+    .expect("thumb ok with token header");
     assert_eq!(bytes, jpeg_magic);
     _m.assert_async().await;
 }
@@ -154,9 +201,18 @@ async fn fetch_thumbnail_omits_syno_token_header_when_absent() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let bytes = fetch_thumbnail(&t, "SID", Space::Personal, 101, "CK101", ThumbnailSize::Sm, 2, None)
-        .await
-        .expect("thumb ok without token header");
+    let bytes = fetch_thumbnail(
+        &t,
+        "SID",
+        Space::Personal,
+        101,
+        "CK101",
+        ThumbnailSize::Sm,
+        2,
+        None,
+    )
+    .await
+    .expect("thumb ok without token header");
     assert_eq!(bytes, jpeg_magic);
     _m.assert_async().await;
 }

@@ -94,7 +94,10 @@ pub fn decode_write_success(body: &str) -> Result<(), CoreError> {
         if let Some(list) = data.error_list {
             if !list.is_empty() {
                 return Err(CoreError::UnexpectedResponse {
-                    message: format!("write reported {} per-item error(s) in error_list", list.len()),
+                    message: format!(
+                        "write reported {} per-item error(s) in error_list",
+                        list.len()
+                    ),
                 });
             }
         }
@@ -146,22 +149,28 @@ pub fn map_binary_or_error(content_type: Option<&str>, bytes: &[u8]) -> Result<V
     // `CGImageSourceCreateThumbnailAtIndex failed` in the UI. Fail closed here
     // so the caller shows a placeholder and can retry once the NAS finishes,
     // instead of caching an HTML page as if it were an image.
-    let is_html = content_type.map(|ct| ct.contains("text/html")).unwrap_or(false);
+    let is_html = content_type
+        .map(|ct| ct.contains("text/html"))
+        .unwrap_or(false);
     if is_html {
         return Err(CoreError::UnexpectedResponse {
             message: "binary endpoint returned an HTML error page instead of image/file bytes (item missing, or its thumbnail is still being generated)".to_string(),
         });
     }
-    let is_json = content_type.map(|ct| ct.contains("application/json")).unwrap_or(false);
+    let is_json = content_type
+        .map(|ct| ct.contains("application/json"))
+        .unwrap_or(false);
     if !is_json {
         return Ok(bytes.to_vec());
     }
-    let parsed: SynoResponse<serde_json::Value> = serde_json::from_slice(bytes).map_err(|e| CoreError::Decode {
-        message: format!("binary error envelope parse failed: {e}"),
-    })?;
+    let parsed: SynoResponse<serde_json::Value> =
+        serde_json::from_slice(bytes).map_err(|e| CoreError::Decode {
+            message: format!("binary error envelope parse failed: {e}"),
+        })?;
     if parsed.success {
         return Err(CoreError::UnexpectedResponse {
-            message: "binary endpoint returned JSON success instead of image/file bytes".to_string(),
+            message: "binary endpoint returned JSON success instead of image/file bytes"
+                .to_string(),
         });
     }
     let code = parsed.error.map(|e| e.code).unwrap_or(-1);
@@ -218,7 +227,10 @@ mod tests {
     fn success_false_unknown_code_fails_closed_unexpected() {
         let err = decode_envelope::<Known>(r#"{ "success": false, "error": { "code": 9999 } }"#)
             .unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -230,20 +242,25 @@ mod tests {
     #[test]
     fn success_true_missing_data_fails_closed() {
         let err = decode_envelope::<Known>(r#"{ "success": true }"#).unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
     fn binary_content_type_returns_bytes_as_is() {
         let jpeg_magic = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
-        let got = map_binary_or_error(Some("image/jpeg"), &jpeg_magic).expect("binary body must pass through");
+        let got = map_binary_or_error(Some("image/jpeg"), &jpeg_magic)
+            .expect("binary body must pass through");
         assert_eq!(got, jpeg_magic);
     }
 
     #[test]
     fn missing_content_type_is_treated_as_binary() {
         let bytes = vec![1, 2, 3, 4];
-        let got = map_binary_or_error(None, &bytes).expect("no content-type must not be treated as an error");
+        let got = map_binary_or_error(None, &bytes)
+            .expect("no content-type must not be treated as an error");
         assert_eq!(got, bytes);
     }
 
@@ -253,7 +270,10 @@ mod tests {
         // an HTML error page; it must never be returned as if it were an image.
         let body = b"<html><head><title>404</title></head><body>Not Found</body></html>";
         let err = map_binary_or_error(Some("text/html; charset=utf-8"), body).unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -267,7 +287,10 @@ mod tests {
     fn json_content_type_with_unknown_code_fails_closed() {
         let body = br#"{"success":false,"error":{"code":9999}}"#;
         let err = map_binary_or_error(Some("application/json"), body).unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -276,12 +299,16 @@ mod tests {
         // itself unexpected; it must not be mistaken for image data.
         let body = br#"{"success":true,"data":{}}"#;
         let err = map_binary_or_error(Some("application/json"), body).unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
     fn json_content_type_garbage_body_maps_to_decode() {
-        let err = map_binary_or_error(Some("application/json; charset=utf-8"), b"not json").unwrap_err();
+        let err =
+            map_binary_or_error(Some("application/json; charset=utf-8"), b"not json").unwrap_err();
         assert!(matches!(err, CoreError::Decode { .. }), "got {err:?}");
     }
 
@@ -298,7 +325,8 @@ mod tests {
     #[test]
     fn write_success_empty_error_list_is_ok() {
         // The album add_item shape: success with an empty error_list.
-        decode_write_success(r#"{"success":true,"data":{"error_list":[]}}"#).expect("empty error_list must be Ok");
+        decode_write_success(r#"{"success":true,"data":{"error_list":[]}}"#)
+            .expect("empty error_list must be Ok");
     }
 
     #[test]
@@ -311,9 +339,13 @@ mod tests {
     fn write_success_non_empty_error_list_fails_closed() {
         // A per-item failure reported under a success envelope must not be
         // treated as a completed write.
-        let err = decode_write_success(r#"{"success":true,"data":{"error_list":[{"id":1,"code":123}]}}"#)
-            .unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        let err =
+            decode_write_success(r#"{"success":true,"data":{"error_list":[{"id":1,"code":123}]}}"#)
+                .unwrap_err();
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -325,7 +357,10 @@ mod tests {
     #[test]
     fn write_success_false_unknown_code_fails_closed() {
         let err = decode_write_success(r#"{"success":false,"error":{"code":9999}}"#).unwrap_err();
-        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]

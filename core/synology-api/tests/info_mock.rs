@@ -12,8 +12,13 @@ use synology_api::info::{pin_version, probe_capabilities};
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
-    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false })
-        .expect("transport builds")
+    Transport::new(&Connection {
+        host: server.url(),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    })
+    .expect("transport builds")
 }
 
 /// Real response shape captured against the user's own NAS: every API in
@@ -47,19 +52,28 @@ async fn probe_parses_real_shape_fixture_into_capabilities() {
     assert_eq!(auth.min_version, 1);
     assert_eq!(auth.max_version, 7);
 
-    let item = caps.iter().find(|c| c.name == "SYNO.Foto.Browse.Item").unwrap();
+    let item = caps
+        .iter()
+        .find(|c| c.name == "SYNO.Foto.Browse.Item")
+        .unwrap();
     assert_eq!(item.path, "entry.cgi");
     assert_eq!(item.min_version, 1);
     assert_eq!(item.max_version, 7);
 
     // The real NAS advertises a narrower window for Thumbnail than the
     // browse APIs; the probe must preserve that per-API window exactly.
-    let thumb = caps.iter().find(|c| c.name == "SYNO.Foto.Thumbnail").unwrap();
+    let thumb = caps
+        .iter()
+        .find(|c| c.name == "SYNO.Foto.Thumbnail")
+        .unwrap();
     assert_eq!(thumb.path, "entry.cgi");
     assert_eq!(thumb.min_version, 1);
     assert_eq!(thumb.max_version, 2);
 
-    let team_item = caps.iter().find(|c| c.name == "SYNO.FotoTeam.Browse.Item").unwrap();
+    let team_item = caps
+        .iter()
+        .find(|c| c.name == "SYNO.FotoTeam.Browse.Item")
+        .unwrap();
     assert_eq!(team_item.min_version, 1);
     assert_eq!(team_item.max_version, 7);
 }
@@ -82,7 +96,9 @@ async fn probe_ignores_unknown_extra_fields_per_api() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let caps = probe_capabilities(&t).await.expect("unknown fields must not break decode");
+    let caps = probe_capabilities(&t)
+        .await
+        .expect("unknown fields must not break decode");
     assert_eq!(caps.len(), 1);
     assert_eq!(caps[0].name, "SYNO.Foto.Browse.Item");
     assert_eq!(caps[0].max_version, 4);

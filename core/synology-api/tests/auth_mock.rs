@@ -4,8 +4,13 @@ use synology_api::auth::{login, logout};
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
-    Transport::new(&Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false })
-        .expect("transport builds")
+    Transport::new(&Connection {
+        host: server.url(),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    })
+    .expect("transport builds")
 }
 
 /// Every login test in this file mocks a POST to /webapi/entry.cgi and
@@ -31,7 +36,9 @@ async fn login_success_returns_session_with_sid_and_token() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let session = login(&t, "photouser", "pw", None, None).await.expect("login ok");
+    let session = login(&t, "photouser", "pw", None, None)
+        .await
+        .expect("login ok");
     assert_eq!(session.sid, "ABC123");
     assert_eq!(session.syno_token.as_deref(), Some("TKN9"));
     assert_eq!(session.device_did.as_deref(), Some("DEV1"));
@@ -79,7 +86,9 @@ async fn login_with_otp_code_succeeds() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let session = login(&t, "photouser", "pw", Some("654321"), None).await.expect("otp login ok");
+    let session = login(&t, "photouser", "pw", Some("654321"), None)
+        .await
+        .expect("otp login ok");
     assert_eq!(session.sid, "OTPSID");
     assert_eq!(session.syno_token, None);
     assert_eq!(session.device_did, None);
@@ -100,7 +109,9 @@ async fn login_with_otp_sends_enable_device_token_and_device_name() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    login(&t, "photouser", "pw", Some("654321"), None).await.expect("otp login with device-trust request ok");
+    login(&t, "photouser", "pw", Some("654321"), None)
+        .await
+        .expect("otp login with device-trust request ok");
 }
 
 #[tokio::test]
@@ -120,7 +131,9 @@ async fn login_without_otp_never_sends_enable_device_token() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    login(&t, "photouser", "pw", None, None).await.expect("plain login ok");
+    login(&t, "photouser", "pw", None, None)
+        .await
+        .expect("plain login ok");
     _trap.assert_async().await;
 }
 
@@ -140,7 +153,9 @@ async fn login_with_otp_and_enable_device_token_stores_returned_token() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let session = login(&t, "photouser", "pw", Some("111111"), None).await.expect("first login with otp ok");
+    let session = login(&t, "photouser", "pw", Some("111111"), None)
+        .await
+        .expect("first login with otp ok");
     assert_eq!(session.device_did.as_deref(), Some("DEVICE-TOKEN-XYZ"), "the returned device token must be captured onto Session.device_did so the caller can persist it");
 }
 
@@ -157,7 +172,9 @@ async fn login_with_otp_decodes_device_id_field_name_too() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let session = login(&t, "photouser", "pw", Some("222222"), None).await.expect("login ok");
+    let session = login(&t, "photouser", "pw", Some("222222"), None)
+        .await
+        .expect("login ok");
     assert_eq!(session.device_did.as_deref(), Some("DEVICE-TOKEN-ALT"));
 }
 
@@ -206,7 +223,9 @@ async fn login_with_device_token_sends_both_candidate_param_names() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    login(&t, "photouser", "pw", None, Some("DEVICE-TOKEN-XYZ")).await.expect("login ok");
+    login(&t, "photouser", "pw", None, Some("DEVICE-TOKEN-XYZ"))
+        .await
+        .expect("login ok");
 }
 
 #[tokio::test]
@@ -223,8 +242,13 @@ async fn login_with_stale_device_token_falls_back_to_otp_required() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let err = login(&t, "photouser", "pw", None, Some("STALE-TOKEN")).await.unwrap_err();
-    assert!(matches!(err, models::CoreError::OtpRequired), "a rejected device token must fall back to OtpRequired, got {err:?}");
+    let err = login(&t, "photouser", "pw", None, Some("STALE-TOKEN"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, models::CoreError::OtpRequired),
+        "a rejected device token must fall back to OtpRequired, got {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -238,7 +262,9 @@ async fn login_bad_credentials_maps_to_auth() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let err = login(&t, "photouser", "wrong", None, None).await.unwrap_err();
+    let err = login(&t, "photouser", "wrong", None, None)
+        .await
+        .unwrap_err();
     assert!(matches!(err, models::CoreError::Auth { .. }), "got {err:?}");
 }
 
@@ -262,7 +288,9 @@ async fn login_params_are_sent_in_the_post_body_not_the_url() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    login(&t, "photouser", "my-s3cret-pw", None, None).await.expect("login ok, proving passwd travelled in the body the mock matched");
+    login(&t, "photouser", "my-s3cret-pw", None, None)
+        .await
+        .expect("login ok, proving passwd travelled in the body the mock matched");
 }
 
 #[tokio::test]
@@ -272,14 +300,30 @@ async fn login_error_never_contains_password_or_field_name() {
     // could hand back) must never mention the password value or even the
     // literal field name "passwd" - if either did, that alone proves a leak
     // even if the value differs from the raw password.
-    let connection = Connection { host: "https://127.0.0.1:1".to_string(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
+    let connection = Connection {
+        host: "https://127.0.0.1:1".to_string(),
+        verify_tls: true,
+        pinned_cert_der: None,
+        allow_untrusted_tls: false,
+    };
     let t = Transport::new(&connection).expect("transport builds");
     let password = "s3cr3t-do-not-leak-me";
-    let err = login(&t, "photouser", password, None, None).await.unwrap_err();
+    let err = login(&t, "photouser", password, None, None)
+        .await
+        .unwrap_err();
     let message = err.to_string();
-    assert!(!message.contains(password), "error message must not contain the password: {message}");
-    assert!(!message.to_lowercase().contains("passwd"), "error message must not contain the field name 'passwd': {message}");
-    assert!(!message.contains("127.0.0.1"), "error message must not contain the request URL/host: {message}");
+    assert!(
+        !message.contains(password),
+        "error message must not contain the password: {message}"
+    );
+    assert!(
+        !message.to_lowercase().contains("passwd"),
+        "error message must not contain the field name 'passwd': {message}"
+    );
+    assert!(
+        !message.contains("127.0.0.1"),
+        "error message must not contain the request URL/host: {message}"
+    );
 }
 
 #[tokio::test]
@@ -293,7 +337,9 @@ async fn logout_is_idempotent_on_400() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    logout(&t, "ABC123").await.expect("logout treats 400 as already-out");
+    logout(&t, "ABC123")
+        .await
+        .expect("logout treats 400 as already-out");
 }
 
 #[tokio::test]

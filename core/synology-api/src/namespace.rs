@@ -51,7 +51,10 @@ mod tests {
     fn personal_maps_to_foto() {
         assert_eq!(browse_item_api(Space::Personal), "SYNO.Foto.Browse.Item");
         assert_eq!(browse_album_api(Space::Personal), "SYNO.Foto.Browse.Album");
-        assert_eq!(normal_album_api(Space::Personal), "SYNO.Foto.Browse.NormalAlbum");
+        assert_eq!(
+            normal_album_api(Space::Personal),
+            "SYNO.Foto.Browse.NormalAlbum"
+        );
         assert_eq!(thumbnail_api(Space::Personal), "SYNO.Foto.Thumbnail");
         assert_eq!(download_api(Space::Personal), "SYNO.Foto.Download");
     }
@@ -59,8 +62,14 @@ mod tests {
     #[test]
     fn shared_maps_to_fototeam() {
         assert_eq!(browse_item_api(Space::Shared), "SYNO.FotoTeam.Browse.Item");
-        assert_eq!(browse_album_api(Space::Shared), "SYNO.FotoTeam.Browse.Album");
-        assert_eq!(normal_album_api(Space::Shared), "SYNO.FotoTeam.Browse.NormalAlbum");
+        assert_eq!(
+            browse_album_api(Space::Shared),
+            "SYNO.FotoTeam.Browse.Album"
+        );
+        assert_eq!(
+            normal_album_api(Space::Shared),
+            "SYNO.FotoTeam.Browse.NormalAlbum"
+        );
         assert_eq!(thumbnail_api(Space::Shared), "SYNO.FotoTeam.Thumbnail");
         assert_eq!(download_api(Space::Shared), "SYNO.FotoTeam.Download");
     }
