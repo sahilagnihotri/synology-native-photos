@@ -2,14 +2,14 @@
 # Cross-boundary FFI smoke test: proves Swift can call real PhotosCore
 # methods (not just core_version) through the built xcframework.
 #
-# Compiles bindings/PhotosCore.swift + bindings/models.swift against the
+# Compiles platforms/macos/Generated/PhotosCore.swift and models.swift against the
 # built PhotosCore.xcframework's headers/module.modulemap and links
 # libphotoscore.a, then runs a standalone Swift program that constructs
 # PhotosCore, calls a real local-read method (assetCount/fetchAssets), and
 # calls thumbnail()/login() with no prior session to prove CoreError
 # round-trips across the boundary on a fail-closed path (no NAS needed).
 #
-# Self-healing: builds bindings/xcframework via `make` first if missing.
+# Self-healing: builds the bindings and xcframework via `make` first if missing.
 #
 # Usage:
 #   scripts/ffi-smoke.sh
@@ -28,13 +28,13 @@ trap 'rm -rf "$WORKDIR"' EXIT
 
 step "Cross-boundary FFI smoke test"
 
-if [ ! -d "$XCF" ] || [ ! -f "$ROOT/bindings/PhotosCore.swift" ]; then
+if [ ! -d "$XCF" ] || [ ! -f "$ROOT/platforms/macos/Generated/PhotosCore.swift" ]; then
   warn "xcframework/bindings missing; running make xcframework to self-heal..."
   load_cargo_env
   ( cd "$ROOT" && make xcframework )
 fi
 
-cp "$ROOT/bindings/PhotosCore.swift" "$ROOT/bindings/models.swift" "$WORKDIR/"
+cp "$ROOT/platforms/macos/Generated/PhotosCore.swift" "$ROOT/platforms/macos/Generated/models.swift" "$WORKDIR/"
 
 cat > "$WORKDIR/main.swift" << 'EOF'
 import Foundation

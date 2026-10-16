@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Xcode build-phase helper for the PhotosCore framework target.
 #
-# The PhotosCore framework target compiles bindings/PhotosCore.swift and
-# bindings/models.swift against the C headers and static lib that live
+# The PhotosCore framework target compiles platforms/macos/Generated/PhotosCore.swift and
+# platforms/macos/Generated/models.swift against the C headers and static lib that live
 # inside PhotosCore.xcframework (gitignored build output). If that
 # xcframework hasn't been built yet, the Swift compile and link steps that
 # follow this Run Script phase would fail with confusing header/symbol

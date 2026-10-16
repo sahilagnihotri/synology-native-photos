@@ -1,6 +1,6 @@
 RUST_TARGETS = aarch64-apple-darwin
 LIB = target/aarch64-apple-darwin/release/libphotoscore.a
-BINDINGS_DIR = bindings
+BINDINGS_DIR = platforms/macos/Generated
 XCF = build/macos/PhotosCore.xcframework
 
 # Build the core for the app's deployment target (app/project.yml), not the

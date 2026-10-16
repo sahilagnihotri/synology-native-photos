@@ -24,9 +24,9 @@ targets:
     type: framework
     platform: macOS
     sources:
-      - path: ../bindings/PhotosCore.swift
+      - path: ../platforms/macos/Generated/PhotosCore.swift
         group: Generated
-      - path: ../bindings/models.swift
+      - path: ../platforms/macos/Generated/models.swift
         group: Generated
     preBuildScripts:
       - name: "Ensure PhotosCore.xcframework"
@@ -122,7 +122,7 @@ targets:
         CODE_SIGN_IDENTITY: "Apple Development"
         DEVELOPMENT_TEAM: "5W67TF3579"
         # PhotosCoreFFI/modelsFFI are the raw UniFFI C scaffolding that
-        # bindings/PhotosCore.swift and bindings/models.swift guard behind
+        # Generated/PhotosCore.swift and Generated/models.swift guard behind
         # `#if canImport(...)`. No public symbol of the PhotosCore Swift
         # module ever names these C types (verified: the only C-level type
         # crossing into public API is the opaque UnsafeMutableRawPointer),

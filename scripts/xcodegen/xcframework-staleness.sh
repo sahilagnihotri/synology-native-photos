@@ -16,7 +16,7 @@ LIB="$ROOT/build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
 
 stale() { echo stale; exit 10; }
 
-if [ ! -f "$LIB" ] || [ ! -f "$ROOT/bindings/PhotosCore.swift" ] || [ ! -f "$ROOT/bindings/models.swift" ]; then
+if [ ! -f "$LIB" ] || [ ! -f "$ROOT/platforms/macos/Generated/PhotosCore.swift" ] || [ ! -f "$ROOT/platforms/macos/Generated/models.swift" ]; then
   stale
 fi
 

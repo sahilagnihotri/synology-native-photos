@@ -219,7 +219,7 @@
 		1D00A125755FB343EA939483 /* PhotoGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridView.swift; sourceTree = "<group>"; };
 		20A0192A32BAF5394DABD16A /* DiscoveryTilesModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryTilesModelTests.swift; sourceTree = "<group>"; };
 		26029924943A07B0D282DB66 /* SidebarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarItem.swift; sourceTree = "<group>"; };
-		2634315CEAE9E3A7FCD216EA /* PhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PhotosCore.swift; path = ../../bindings/PhotosCore.swift; sourceTree = "<group>"; };
+		2634315CEAE9E3A7FCD216EA /* PhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PhotosCore.swift; path = ../../platforms/macos/Generated/PhotosCore.swift; sourceTree = "<group>"; };
 		27E68E0B02703E1415A50EB2 /* GridNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridNavigation.swift; sourceTree = "<group>"; };
 		296BFF6532C62D4695818C90 /* MySynologyPhotosApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MySynologyPhotosApp.swift; sourceTree = "<group>"; };
 		2B8E258EA3DA5DF7F6B3721E /* GridKeyActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridKeyActionTests.swift; sourceTree = "<group>"; };
@@ -308,7 +308,7 @@
 		D7BD5E4B798FD93DB7A69C2F /* ThumbnailCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCacheTests.swift; sourceTree = "<group>"; };
 		D86D866F6034C6CA1B338AFA /* DetailPagingModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailPagingModelTests.swift; sourceTree = "<group>"; };
 		D883A540635C00A4E04A82ED /* OriginalImageCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OriginalImageCacheTests.swift; sourceTree = "<group>"; };
-		D8C85D7FE8FA1BD2BC66CEEE /* models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = models.swift; path = ../../bindings/models.swift; sourceTree = "<group>"; };
+		D8C85D7FE8FA1BD2BC66CEEE /* models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = models.swift; path = ../../platforms/macos/Generated/models.swift; sourceTree = "<group>"; };
 		D9730B3AF99693217448E6D1 /* SearchFilterBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchFilterBarView.swift; sourceTree = "<group>"; };
 		DA9A92C92FB43449DBE5E804 /* SearchFilterModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchFilterModel.swift; sourceTree = "<group>"; };
 		DB97BF60FC8939B778310158 /* PhotoMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoMapView.swift; sourceTree = "<group>"; };

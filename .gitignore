@@ -3,7 +3,7 @@
 **/*.rs.bk
 Cargo.lock.orig
 
-# UniFFI / build artifacts (bindings/ is committed on purpose, not ignored)
+# UniFFI bindings in platforms/macos/Generated are committed on purpose, not ignored
 # All build outputs (xcframework, dmg staging and installers) live under build/
 /build
 
