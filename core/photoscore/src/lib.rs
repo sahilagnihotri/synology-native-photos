@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use models::{
     Album, ApiCapability, Asset, CertInfo, Connection, CoreError, CrawlProgress, DayCount, DiscoveryCollection,
-    MediaKind, Person, Place, RecycleItem, SearchFacets, SearchFilters, Session, SessionState, Space, Subject, Tag,
-    ThumbnailData, ThumbnailSize, VideoPlaybackSource,
+    MediaKind, Person, Place, RecycleBinStatus, RecycleItem, SearchFacets, SearchFilters, Session, SessionState, Space,
+    Subject, Tag, ThumbnailData, ThumbnailSize, VideoPlaybackSource,
 };
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
@@ -839,6 +839,17 @@ impl PhotosCore {
     pub async fn fetch_recently_deleted(&self, offset: u32, limit: u32) -> Result<Vec<RecycleItem>, CoreError> {
         let (transport, sid, syno_token) = self.recycle_call_context()?;
         synology_api::list_recycle_photos(&transport, &sid, syno_token.as_deref(), offset, limit).await
+    }
+
+    /// Whether the DSM recycle bin for user home folders is on, read live
+    /// from the NAS every call (the user can flip it in DSM at any time). The
+    /// everyday delete is only recoverable while this is `Enabled`; the UI
+    /// asks before every delete. `Unknown` when DSM refuses or omits the
+    /// setting (expected for a non-admin account). Fails closed with
+    /// `CoreError::Auth` if no session is held.
+    pub async fn recycle_bin_status(&self) -> Result<RecycleBinStatus, CoreError> {
+        let (transport, sid, syno_token) = self.recycle_call_context()?;
+        synology_api::recycle_bin_status(&transport, &sid, syno_token.as_deref()).await
     }
 
     /// RESTORE: moves each of `recycle_paths` back out of the recycle bin to
@@ -2881,6 +2892,39 @@ mod core_tests {
     async fn fetch_recently_deleted_without_login_returns_auth_error() {
         let core = core_at("fetch-recycle-noauth");
         let err = core.fetch_recently_deleted(0, 50).await.unwrap_err();
+        assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn recycle_bin_status_reads_the_user_home_setting() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _home = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Core.User.Home".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "get".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true,"data":{"enable":true,"enable_recycle_bin":false}}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("recycle-status", &server).await;
+        assert_eq!(core.recycle_bin_status().await.expect("status ok"), RecycleBinStatus::Disabled);
+    }
+
+    #[tokio::test]
+    async fn recycle_bin_status_without_login_returns_auth_error() {
+        let core = core_at("recycle-status-noauth");
+        let err = core.recycle_bin_status().await.unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
     }
 

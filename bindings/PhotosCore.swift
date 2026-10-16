@@ -865,6 +865,16 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func reconcileDelta(space: Space) async throws  -> CrawlProgress
     
     /**
+     * Whether the DSM recycle bin for user home folders is on, read live
+     * from the NAS every call (the user can flip it in DSM at any time). The
+     * everyday delete is only recoverable while this is `Enabled`; the UI
+     * asks before every delete. `Unknown` when DSM refuses or omits the
+     * setting (expected for a non-admin account). Fails closed with
+     * `CoreError::Auth` if no session is held.
+     */
+    func recycleBinStatus() async throws  -> RecycleBinStatus
+    
+    /**
      * Fetches a thumbnail for one recycled file (by its recycle path) for the
      * Recently Deleted grid. Returns the raw image bytes; `size` is passed
      * through to File Station's own scale keyword. A JSON error from the NAS
@@ -1743,6 +1753,31 @@ open func reconcileDelta(space: Space)async throws  -> CrawlProgress  {
             completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
             freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeCrawlProgress_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Whether the DSM recycle bin for user home folders is on, read live
+     * from the NAS every call (the user can flip it in DSM at any time). The
+     * everyday delete is only recoverable while this is `Enabled`; the UI
+     * asks before every delete. `Unknown` when DSM refuses or omits the
+     * setting (expected for a non-admin account). Fails closed with
+     * `CoreError::Auth` if no session is held.
+     */
+open func recycleBinStatus()async throws  -> RecycleBinStatus  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_photoscore_fn_method_photoscore_recycle_bin_status(
+                    self.uniffiClonePointer()
+                    
+                )
+            },
+            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
+            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
+            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeRecycleBinStatus_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -2744,6 +2779,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_reconcile_delta() != 18507) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_photoscore_checksum_method_photoscore_recycle_bin_status() != 56504) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_recycle_thumbnail() != 29421) {

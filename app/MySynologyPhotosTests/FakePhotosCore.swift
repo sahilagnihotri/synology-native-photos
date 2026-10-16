@@ -45,6 +45,9 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     // MARK: - Real delete + recycle bin scripted results
 
     var deleteAssetsResult: Result<Void, CoreError> = .success(())
+    /// Result for `recycleBinStatus`. Defaults to enabled so a delete test
+    /// that never scripts it sees the ordinary recoverable delete.
+    var recycleBinStatusResult: Result<RecycleBinStatus, CoreError> = .success(.enabled)
     var restoreRecentlyDeletedResult: Result<Void, CoreError> = .success(())
     var emptyRecentlyDeletedResult: Result<Void, CoreError> = .success(())
     /// Result for `recycleThumbnail`. Defaults to a tiny non-empty payload so
@@ -223,6 +226,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     // MARK: - Real delete + recycle bin call tracking
 
     private(set) var deleteAssetsCallCount = 0
+    private(set) var recycleBinStatusCallCount = 0
     private(set) var fetchRecentlyDeletedCallCount = 0
     private(set) var restoreRecentlyDeletedCallCount = 0
     private(set) var emptyRecentlyDeletedCallCount = 0
@@ -467,6 +471,11 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
         lastDeleteAssetsSpace = space
         lastDeleteAssetsIds = assetIds
         try deleteAssetsResult.get()
+    }
+
+    func recycleBinStatus() async throws -> RecycleBinStatus {
+        recycleBinStatusCallCount += 1
+        return try recycleBinStatusResult.get()
     }
 
     func fetchRecentlyDeleted(offset: UInt32, limit: UInt32) async throws -> [RecycleItem] {
