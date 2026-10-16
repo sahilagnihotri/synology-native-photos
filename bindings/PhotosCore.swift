@@ -618,30 +618,6 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func deleteAssets(space: Space, assetIds: [Int64]) async throws 
     
     /**
-     * Everyday delete: moves `asset_ids` into the `Recently Deleted` album on
-     * the NAS, then (ONLY on server success) flags them `in_trash` locally in
-     * one transaction so they leave the library grid and appear in the trash
-     * view.
-     *
-     * SAFETY: this NEVER calls the raw Foto delete verb; the move is fully
-     * reversible via `restore_from_trash`. Server confirms first: on any
-     * error from `add_items`, no local flag changes (fail closed). An empty
-     * `asset_ids` is a no-op. Serialized with every other trash mutation via
-     * `trash_lock`.
-     *
-     * ATOMICITY: the server move and the local flag write are each
-     * individually transactional but NOT jointly atomic. The only failure
-     * window is "server move succeeded, local flag write failed" (e.g. the
-     * store was momentarily busy): the item is in the NAS trash album but not
-     * yet hidden locally. That is the safe direction (nothing is lost or
-     * permanently deleted) and self-heals on the next `reconcile_trash`,
-     * which re-derives the local flags from the album's real membership.
-     *
-     * Requires a live session; fails closed with `CoreError::Auth`.
-     */
-    func deleteToTrash(space: Space, assetIds: [Int64]) async throws 
-    
-    /**
      * Downloads the original full-resolution bytes for `unit_id` to a
      * temp file and returns its absolute path. Read-only: never writes
      * anything back to the NAS.
@@ -670,26 +646,6 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * batch deletes nothing at all.
      */
     func emptyRecentlyDeleted(recyclePaths: [String]) async throws 
-    
-    /**
-     * Resolves the app-owned `Recently Deleted` album for `space`, creating
-     * it on the NAS if it does not exist yet.
-     *
-     * OWNERSHIP BY ID, NEVER BY NAME (safety): the app persists the id of the
-     * album it created (`app_state`), and this method adopts an existing
-     * album ONLY when its id equals that stored id and it is still present on
-     * the NAS. A user's own album that merely happens to be named
-     * "Recently Deleted" is never adopted, so its contents can never be
-     * silently flagged as trash (and thus permanent-delete eligible). If no
-     * id is stored, or the stored id no longer exists on the NAS, a fresh
-     * album is created, its returned id persisted, and the in-memory cache
-     * refreshed to it (never left serving the dead id).
-     *
-     * Serialized with every other trash mutation via `trash_lock`. Requires a
-     * live session; fails closed with `CoreError::Auth`. Never touches the
-     * raw delete verb: this only manages an album.
-     */
-    func ensureTrashAlbum(space: Space) async throws  -> Album
     
     /**
      * Lists albums (`SYNO.Foto.Browse.Album`), a live network call every
@@ -808,13 +764,6 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func fetchTags(offset: UInt32, limit: UInt32) async throws  -> [Tag]
     
     /**
-     * Windowed local read of trashed assets in `space`, most-recently-trashed
-     * first. No network access at all; same lock discipline as
-     * `fetch_assets`.
-     */
-    func fetchTrash(space: Space, offset: UInt32, limit: UInt32) throws  -> [Asset]
-    
-    /**
      * Windowed local read of assets in `space` matching the Quick Filter
      * facets (media kind, a `taken_at` floor/ceiling in unix seconds, and a
      * minimum star rating), newest-first with the exact same ordering as
@@ -895,39 +844,6 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func login(connection: Connection, username: String, password: String, otpCode: String?, deviceToken: String?) async throws  -> Session
     
     /**
-     * Gated PERMANENT delete: the only path to the raw Foto delete verb.
-     *
-     * SAFETY (the point of the hybrid design): this FIRST asserts, against
-     * the local mirror, that every id in `asset_ids` is currently
-     * `in_trash`. If any is not, it returns `CoreError::WriteRefused`
-     * WITHOUT making any network call at all (see the `all_in_trash` guard
-     * below). That guarantees the destructive endpoint can never be reached
-     * for an asset that skipped the reversible trash step, closing off any UI
-     * bug that tries to permanently delete a live photo directly. Only after
-     * the guard passes does it call `permanent_delete`; on server success it
-     * removes the local rows entirely (the NAS drops the item from the trash
-     * album automatically when the item is deleted, so no separate
-     * `remove_items` is needed). Empty `asset_ids` is a no-op.
-     *
-     * SERIALIZED: holds `trash_lock` across the whole guard-then-delete
-     * sequence, so a concurrent `restore_from_trash` cannot clear an item's
-     * `in_trash` flag in the window between the guard check and the network
-     * delete. Without that, the guard could pass on a still-trashed asset, a
-     * restore could run, and the raw delete would then land on an asset the
-     * user just restored. The lock makes the check-and-delete atomic against
-     * every other trash mutation.
-     *
-     * ATOMICITY of the server-then-local steps: the network delete and the
-     * local row removal are individually transactional but not jointly
-     * atomic; the only failure window ("deleted on the NAS, local row still
-     * present") is the safe direction (the item shows in the trash view until
-     * the next reconcile drops it) and self-heals on `reconcile_trash`.
-     *
-     * Requires a live session; fails closed with `CoreError::Auth`.
-     */
-    func permanentlyDelete(space: Space, assetIds: [Int64]) async throws 
-    
-    /**
      * Probe `SYNO.API.Info` over the live session and cache the discovered
      * capability set into `Live.capabilities` for later version pinning
      * (Tasks 36/37 read it via `pin_version`).
@@ -949,31 +865,6 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     func reconcileDelta(space: Space) async throws  -> CrawlProgress
     
     /**
-     * Reconciles the local `in_trash` flags against the real membership of
-     * the `Recently Deleted` album on the NAS. Flags `in_trash = 1` for every
-     * current member not already flagged, and (guardedly) clears `in_trash`
-     * for any locally-trashed id that is no longer a member, which is how a
-     * restore performed from another Synology client (e.g. the mobile app) is
-     * picked up. Safe to call after a crawl. Serialized with every other
-     * trash mutation via `trash_lock`. Requires a live session.
-     *
-     * SAFETY against a spurious empty/short listing: clearing flags is the
-     * only direction that can un-hide (and thus re-expose to permanent
-     * delete) trashed items, so it is gated. This method resolves the trash
-     * album by its stored id ONLY (never adopts by name, never creates here),
-     * and treats the album's `item_count` as ground truth: it clears
-     * non-member flags ONLY when the fully paged member set is authoritative,
-     * i.e. the enumerated count equals `item_count`. If no trash album is
-     * known, or the enumerated count does not match `item_count` (a truncated
-     * or spurious-empty listing), it SKIPS the clear entirely and logs,
-     * rather than mass-clearing every local trash flag. Flagging members as
-     * trashed (the hide direction) is always safe and is applied regardless.
-     * A member-fetch error propagates before any local mutation (fail
-     * closed).
-     */
-    func reconcileTrash(space: Space) async throws 
-    
-    /**
      * Fetches a thumbnail for one recycled file (by its recycle path) for the
      * Recently Deleted grid. Returns the raw image bytes; `size` is passed
      * through to File Station's own scale keyword. A JSON error from the NAS
@@ -981,23 +872,6 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * UI can treat as "show a placeholder". Requires a live session.
      */
     func recycleThumbnail(recyclePath: String, size: String) async throws  -> Data
-    
-    /**
-     * Restore: removes `asset_ids` from the `Recently Deleted` album on the
-     * NAS, then (ONLY on server success) clears their local `in_trash` flag
-     * so they return to the library grid. Reverses `delete_to_trash` exactly.
-     * Fail closed on any error; empty `asset_ids` is a no-op. Serialized with
-     * every other trash mutation via `trash_lock`.
-     *
-     * ATOMICITY: same shape as `delete_to_trash`. The server remove and the
-     * local flag clear are individually transactional but not jointly atomic;
-     * the only failure window ("removed on the NAS, still flagged locally")
-     * is the safe direction (the item stays visible in the trash view, never
-     * lost) and self-heals on the next `reconcile_trash`.
-     *
-     * Requires a live session; fails closed with `CoreError::Auth`.
-     */
-    func restoreFromTrash(space: Space, assetIds: [Int64]) async throws 
     
     /**
      * RESTORE: moves each of `recycle_paths` back out of the recycle bin to
@@ -1133,11 +1007,6 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * Fails closed with `CoreError::Auth` if no session is held.
      */
     func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: ThumbnailSize) async throws  -> ThumbnailData
-    
-    /**
-     * Local count of trashed assets in `space`. No network access.
-     */
-    func trashCount(space: Space) throws  -> UInt32
     
     /**
      * Resolves how the detail viewer should play back `asset` (a video,
@@ -1365,45 +1234,6 @@ open func deleteAssets(space: Space, assetIds: [Int64])async throws   {
 }
     
     /**
-     * Everyday delete: moves `asset_ids` into the `Recently Deleted` album on
-     * the NAS, then (ONLY on server success) flags them `in_trash` locally in
-     * one transaction so they leave the library grid and appear in the trash
-     * view.
-     *
-     * SAFETY: this NEVER calls the raw Foto delete verb; the move is fully
-     * reversible via `restore_from_trash`. Server confirms first: on any
-     * error from `add_items`, no local flag changes (fail closed). An empty
-     * `asset_ids` is a no-op. Serialized with every other trash mutation via
-     * `trash_lock`.
-     *
-     * ATOMICITY: the server move and the local flag write are each
-     * individually transactional but NOT jointly atomic. The only failure
-     * window is "server move succeeded, local flag write failed" (e.g. the
-     * store was momentarily busy): the item is in the NAS trash album but not
-     * yet hidden locally. That is the safe direction (nothing is lost or
-     * permanently deleted) and self-heals on the next `reconcile_trash`,
-     * which re-derives the local flags from the album's real membership.
-     *
-     * Requires a live session; fails closed with `CoreError::Auth`.
-     */
-open func deleteToTrash(space: Space, assetIds: [Int64])async throws   {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_photoscore_fn_method_photoscore_delete_to_trash(
-                    self.uniffiClonePointer(),
-                    FfiConverterTypeSpace_lower(space),FfiConverterSequenceInt64.lower(assetIds)
-                )
-            },
-            pollFunc: ffi_photoscore_rust_future_poll_void,
-            completeFunc: ffi_photoscore_rust_future_complete_void,
-            freeFunc: ffi_photoscore_rust_future_free_void,
-            liftFunc: { $0 },
-            errorHandler: FfiConverterTypeCoreError_lift
-        )
-}
-    
-    /**
      * Downloads the original full-resolution bytes for `unit_id` to a
      * temp file and returns its absolute path. Read-only: never writes
      * anything back to the NAS.
@@ -1459,41 +1289,6 @@ open func emptyRecentlyDeleted(recyclePaths: [String])async throws   {
             completeFunc: ffi_photoscore_rust_future_complete_void,
             freeFunc: ffi_photoscore_rust_future_free_void,
             liftFunc: { $0 },
-            errorHandler: FfiConverterTypeCoreError_lift
-        )
-}
-    
-    /**
-     * Resolves the app-owned `Recently Deleted` album for `space`, creating
-     * it on the NAS if it does not exist yet.
-     *
-     * OWNERSHIP BY ID, NEVER BY NAME (safety): the app persists the id of the
-     * album it created (`app_state`), and this method adopts an existing
-     * album ONLY when its id equals that stored id and it is still present on
-     * the NAS. A user's own album that merely happens to be named
-     * "Recently Deleted" is never adopted, so its contents can never be
-     * silently flagged as trash (and thus permanent-delete eligible). If no
-     * id is stored, or the stored id no longer exists on the NAS, a fresh
-     * album is created, its returned id persisted, and the in-memory cache
-     * refreshed to it (never left serving the dead id).
-     *
-     * Serialized with every other trash mutation via `trash_lock`. Requires a
-     * live session; fails closed with `CoreError::Auth`. Never touches the
-     * raw delete verb: this only manages an album.
-     */
-open func ensureTrashAlbum(space: Space)async throws  -> Album  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_photoscore_fn_method_photoscore_ensure_trash_album(
-                    self.uniffiClonePointer(),
-                    FfiConverterTypeSpace_lower(space)
-                )
-            },
-            pollFunc: ffi_photoscore_rust_future_poll_rust_buffer,
-            completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
-            freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeAlbum_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -1764,21 +1559,6 @@ open func fetchTags(offset: UInt32, limit: UInt32)async throws  -> [Tag]  {
 }
     
     /**
-     * Windowed local read of trashed assets in `space`, most-recently-trashed
-     * first. No network access at all; same lock discipline as
-     * `fetch_assets`.
-     */
-open func fetchTrash(space: Space, offset: UInt32, limit: UInt32)throws  -> [Asset]  {
-    return try  FfiConverterSequenceTypeAsset.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
-    uniffi_photoscore_fn_method_photoscore_fetch_trash(self.uniffiClonePointer(),
-        FfiConverterTypeSpace_lower(space),
-        FfiConverterUInt32.lower(offset),
-        FfiConverterUInt32.lower(limit),$0
-    )
-})
-}
-    
-    /**
      * Windowed local read of assets in `space` matching the Quick Filter
      * facets (media kind, a `taken_at` floor/ceiling in unix seconds, and a
      * minimum star rating), newest-first with the exact same ordering as
@@ -1917,54 +1697,6 @@ open func login(connection: Connection, username: String, password: String, otpC
 }
     
     /**
-     * Gated PERMANENT delete: the only path to the raw Foto delete verb.
-     *
-     * SAFETY (the point of the hybrid design): this FIRST asserts, against
-     * the local mirror, that every id in `asset_ids` is currently
-     * `in_trash`. If any is not, it returns `CoreError::WriteRefused`
-     * WITHOUT making any network call at all (see the `all_in_trash` guard
-     * below). That guarantees the destructive endpoint can never be reached
-     * for an asset that skipped the reversible trash step, closing off any UI
-     * bug that tries to permanently delete a live photo directly. Only after
-     * the guard passes does it call `permanent_delete`; on server success it
-     * removes the local rows entirely (the NAS drops the item from the trash
-     * album automatically when the item is deleted, so no separate
-     * `remove_items` is needed). Empty `asset_ids` is a no-op.
-     *
-     * SERIALIZED: holds `trash_lock` across the whole guard-then-delete
-     * sequence, so a concurrent `restore_from_trash` cannot clear an item's
-     * `in_trash` flag in the window between the guard check and the network
-     * delete. Without that, the guard could pass on a still-trashed asset, a
-     * restore could run, and the raw delete would then land on an asset the
-     * user just restored. The lock makes the check-and-delete atomic against
-     * every other trash mutation.
-     *
-     * ATOMICITY of the server-then-local steps: the network delete and the
-     * local row removal are individually transactional but not jointly
-     * atomic; the only failure window ("deleted on the NAS, local row still
-     * present") is the safe direction (the item shows in the trash view until
-     * the next reconcile drops it) and self-heals on `reconcile_trash`.
-     *
-     * Requires a live session; fails closed with `CoreError::Auth`.
-     */
-open func permanentlyDelete(space: Space, assetIds: [Int64])async throws   {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_photoscore_fn_method_photoscore_permanently_delete(
-                    self.uniffiClonePointer(),
-                    FfiConverterTypeSpace_lower(space),FfiConverterSequenceInt64.lower(assetIds)
-                )
-            },
-            pollFunc: ffi_photoscore_rust_future_poll_void,
-            completeFunc: ffi_photoscore_rust_future_complete_void,
-            freeFunc: ffi_photoscore_rust_future_free_void,
-            liftFunc: { $0 },
-            errorHandler: FfiConverterTypeCoreError_lift
-        )
-}
-    
-    /**
      * Probe `SYNO.API.Info` over the live session and cache the discovered
      * capability set into `Live.capabilities` for later version pinning
      * (Tasks 36/37 read it via `pin_version`).
@@ -2016,46 +1748,6 @@ open func reconcileDelta(space: Space)async throws  -> CrawlProgress  {
 }
     
     /**
-     * Reconciles the local `in_trash` flags against the real membership of
-     * the `Recently Deleted` album on the NAS. Flags `in_trash = 1` for every
-     * current member not already flagged, and (guardedly) clears `in_trash`
-     * for any locally-trashed id that is no longer a member, which is how a
-     * restore performed from another Synology client (e.g. the mobile app) is
-     * picked up. Safe to call after a crawl. Serialized with every other
-     * trash mutation via `trash_lock`. Requires a live session.
-     *
-     * SAFETY against a spurious empty/short listing: clearing flags is the
-     * only direction that can un-hide (and thus re-expose to permanent
-     * delete) trashed items, so it is gated. This method resolves the trash
-     * album by its stored id ONLY (never adopts by name, never creates here),
-     * and treats the album's `item_count` as ground truth: it clears
-     * non-member flags ONLY when the fully paged member set is authoritative,
-     * i.e. the enumerated count equals `item_count`. If no trash album is
-     * known, or the enumerated count does not match `item_count` (a truncated
-     * or spurious-empty listing), it SKIPS the clear entirely and logs,
-     * rather than mass-clearing every local trash flag. Flagging members as
-     * trashed (the hide direction) is always safe and is applied regardless.
-     * A member-fetch error propagates before any local mutation (fail
-     * closed).
-     */
-open func reconcileTrash(space: Space)async throws   {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_photoscore_fn_method_photoscore_reconcile_trash(
-                    self.uniffiClonePointer(),
-                    FfiConverterTypeSpace_lower(space)
-                )
-            },
-            pollFunc: ffi_photoscore_rust_future_poll_void,
-            completeFunc: ffi_photoscore_rust_future_complete_void,
-            freeFunc: ffi_photoscore_rust_future_free_void,
-            liftFunc: { $0 },
-            errorHandler: FfiConverterTypeCoreError_lift
-        )
-}
-    
-    /**
      * Fetches a thumbnail for one recycled file (by its recycle path) for the
      * Recently Deleted grid. Returns the raw image bytes; `size` is passed
      * through to File Station's own scale keyword. A JSON error from the NAS
@@ -2075,38 +1767,6 @@ open func recycleThumbnail(recyclePath: String, size: String)async throws  -> Da
             completeFunc: ffi_photoscore_rust_future_complete_rust_buffer,
             freeFunc: ffi_photoscore_rust_future_free_rust_buffer,
             liftFunc: FfiConverterData.lift,
-            errorHandler: FfiConverterTypeCoreError_lift
-        )
-}
-    
-    /**
-     * Restore: removes `asset_ids` from the `Recently Deleted` album on the
-     * NAS, then (ONLY on server success) clears their local `in_trash` flag
-     * so they return to the library grid. Reverses `delete_to_trash` exactly.
-     * Fail closed on any error; empty `asset_ids` is a no-op. Serialized with
-     * every other trash mutation via `trash_lock`.
-     *
-     * ATOMICITY: same shape as `delete_to_trash`. The server remove and the
-     * local flag clear are individually transactional but not jointly atomic;
-     * the only failure window ("removed on the NAS, still flagged locally")
-     * is the safe direction (the item stays visible in the trash view, never
-     * lost) and self-heals on the next `reconcile_trash`.
-     *
-     * Requires a live session; fails closed with `CoreError::Auth`.
-     */
-open func restoreFromTrash(space: Space, assetIds: [Int64])async throws   {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_photoscore_fn_method_photoscore_restore_from_trash(
-                    self.uniffiClonePointer(),
-                    FfiConverterTypeSpace_lower(space),FfiConverterSequenceInt64.lower(assetIds)
-                )
-            },
-            pollFunc: ffi_photoscore_rust_future_poll_void,
-            completeFunc: ffi_photoscore_rust_future_complete_void,
-            freeFunc: ffi_photoscore_rust_future_free_void,
-            liftFunc: { $0 },
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -2349,17 +2009,6 @@ open func thumbnail(space: Space, unitId: Int64, cacheKey: String, size: Thumbna
             liftFunc: FfiConverterTypeThumbnailData_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
-}
-    
-    /**
-     * Local count of trashed assets in `space`. No network access.
-     */
-open func trashCount(space: Space)throws  -> UInt32  {
-    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
-    uniffi_photoscore_fn_method_photoscore_trash_count(self.uniffiClonePointer(),
-        FfiConverterTypeSpace_lower(space),$0
-    )
-})
 }
     
     /**
@@ -3037,16 +2686,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_delete_assets() != 9665) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_delete_to_trash() != 16481) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_photoscore_checksum_method_photoscore_download_original() != 35832) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_empty_recently_deleted() != 38051) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_photoscore_checksum_method_photoscore_ensure_trash_album() != 39040) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_fetch_albums() != 62551) {
@@ -3082,9 +2725,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_fetch_tags() != 10636) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_fetch_trash() != 16800) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_photoscore_checksum_method_photoscore_filter_assets() != 5216) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3100,22 +2740,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_login() != 52991) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_permanently_delete() != 19583) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_photoscore_checksum_method_photoscore_probe_capabilities() != 23336) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_reconcile_delta() != 18507) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_reconcile_trash() != 26236) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_photoscore_checksum_method_photoscore_recycle_thumbnail() != 29421) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_photoscore_checksum_method_photoscore_restore_from_trash() != 6217) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_restore_recently_deleted() != 32885) {
@@ -3137,9 +2768,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_thumbnail() != 41967) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_photoscore_checksum_method_photoscore_trash_count() != 13931) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_video_playback_source() != 55502) {
