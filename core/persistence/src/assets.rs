@@ -348,6 +348,7 @@ impl Store {
     /// because a SQL comparison against NULL is never true. That is the
     /// intended behaviour: an undated asset cannot satisfy a "taken between"
     /// constraint, so it drops out of a date-filtered view.
+    #[allow(clippy::too_many_arguments)] // one optional param per facet; photoscore calls this directly
     pub fn filter_assets(
         &self,
         space: Space,
@@ -1241,8 +1242,8 @@ mod tests {
         let day = 86_400;
         // Three days, with 1, 2, and 3 assets respectively (ascending age).
         store.upsert_asset(&asset(Space::Personal, 1, Some(base + 2 * 7 * day + 10), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 2, Some(base + 1 * 7 * day + 20), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 3, Some(base + 1 * 7 * day + 30), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 2, Some(base + 7 * day + 20), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 3, Some(base + 7 * day + 30), Some(1))).unwrap();
         store.upsert_asset(&asset(Space::Personal, 4, Some(base + 40), Some(1))).unwrap();
         store.upsert_asset(&asset(Space::Personal, 5, Some(base + 50), Some(1))).unwrap();
         store.upsert_asset(&asset(Space::Personal, 6, Some(base + 60), Some(1))).unwrap();
@@ -1331,8 +1332,8 @@ mod tests {
         store.upsert_asset(&asset(Space::Personal, 11, Some(base + 2 * day + 500), Some(1))).unwrap();
         store.upsert_asset(&asset(Space::Personal, 12, Some(base + 2 * day + 100), Some(1))).unwrap();
         // Day B: 2 assets.
-        store.upsert_asset(&asset(Space::Personal, 20, Some(base + 1 * day + 700), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 21, Some(base + 1 * day + 10), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 20, Some(base + day + 700), Some(1))).unwrap();
+        store.upsert_asset(&asset(Space::Personal, 21, Some(base + day + 10), Some(1))).unwrap();
         // Day C (oldest dated): 1 asset.
         store.upsert_asset(&asset(Space::Personal, 30, Some(base + 42), Some(1))).unwrap();
         // Two undated rows -> the trailing Unknown bucket.
