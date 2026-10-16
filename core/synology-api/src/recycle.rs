@@ -270,6 +270,27 @@ pub(crate) fn original_parent_folder(recycle_path: &str) -> Result<String, CoreE
     }
 }
 
+/// Fail closed unless `path` names a file INSIDE the Photos subtree of the home
+/// recycle bin. Every mutating recycle call (restore, permanent delete) runs
+/// this before any network traffic, so a caller bug can never hand File
+/// Station Delete a live original (safety invariant: originals are immutable).
+/// Requires the exact `RECYCLE_PHOTOS_ROOT/` prefix and rejects empty, `.` and
+/// `..` segments, so a path such as `/home/#recycle/Photos/../../Photos/a.jpg`
+/// cannot climb back out of the recycle bin.
+pub fn ensure_recycle_photos_path(path: &str) -> Result<(), CoreError> {
+    let refuse = || CoreError::UnexpectedResponse {
+        message: format!("refusing a path outside {RECYCLE_PHOTOS_ROOT}: {path}"),
+    };
+    let rest = path
+        .strip_prefix(RECYCLE_PHOTOS_ROOT)
+        .and_then(|r| r.strip_prefix('/'))
+        .ok_or_else(refuse)?;
+    if rest.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..") {
+        return Err(refuse());
+    }
+    Ok(())
+}
+
 /// JSON-encode a single path as the one-element array string File Station
 /// expects for its `path` param, e.g. `["/home/#recycle/Photos/a.jpg"]`.
 /// Using `serde_json` (not `format!`) so a path containing a quote or
@@ -296,6 +317,7 @@ pub async fn restore_recycle_item(
     syno_token: Option<&str>,
     recycle_path: &str,
 ) -> Result<(), CoreError> {
+    ensure_recycle_photos_path(recycle_path)?;
     let dest = original_parent_folder(recycle_path)?;
     let path_array = json_path_array(recycle_path)?;
     let form: Vec<(&str, &str)> = vec![
@@ -314,13 +336,15 @@ pub async fn restore_recycle_item(
 
 /// PERMANENTLY delete one recycled file with `SYNO.FileStation.Delete`
 /// (`method=start`). This is unrecoverable (it empties the file from the
-/// recycle bin). Fails closed on a non-success envelope.
+/// recycle bin). Refuses any path outside the recycle bin's Photos subtree
+/// before any network call. Fails closed on a non-success envelope.
 pub async fn delete_recycle_item(
     transport: &Transport,
     sid: &str,
     syno_token: Option<&str>,
     recycle_path: &str,
 ) -> Result<(), CoreError> {
+    ensure_recycle_photos_path(recycle_path)?;
     let path_array = json_path_array(recycle_path)?;
     let form: Vec<(&str, &str)> = vec![
         ("api", "SYNO.FileStation.Delete"),
@@ -420,6 +444,37 @@ mod tests {
         // origin, so restore must refuse rather than guess.
         let err = original_parent_folder("/home/Photos/iPhone/IMG.JPG").unwrap_err();
         assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn ensure_recycle_photos_path_accepts_files_inside_the_recycle_photos_tree() {
+        for ok in [
+            "/home/#recycle/Photos/a.jpg",
+            "/home/#recycle/Photos/iPhone/2016/09/IMG_0924.JPG",
+            "/home/#recycle/Photos/dir.with.dots/..hidden.jpg",
+        ] {
+            assert!(ensure_recycle_photos_path(ok).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn ensure_recycle_photos_path_rejects_anything_else() {
+        for bad in [
+            "",
+            "/",
+            "/home/Photos/a.jpg",
+            "/home/#recycle/Photos",
+            "/home/#recycle/Photos/",
+            "/home/#recycle/PhotosX/a.jpg",
+            "/home/#recycle/Photos//a.jpg",
+            "/home/#recycle/Photos/./a.jpg",
+            "/home/#recycle/Photos/../a.jpg",
+            "/home/#recycle/Photos/x/../../../Photos/a.jpg",
+            "home/#recycle/Photos/a.jpg",
+            "/home/Photos/#recycle/Photos/a.jpg",
+        ] {
+            assert!(ensure_recycle_photos_path(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

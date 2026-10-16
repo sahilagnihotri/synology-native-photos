@@ -28,7 +28,7 @@ pub use download::download_original;
 pub use envelope::{decode_envelope, decode_write_success, map_error_code, SynoError, SynoResponse};
 pub use info::{pin_version, probe_capabilities};
 pub use recycle::{
-    delete_recycle_item, list_recycle_photos, recycle_thumbnail, restore_recycle_item, trigger_reindex,
+    delete_recycle_item, ensure_recycle_photos_path, list_recycle_photos, recycle_thumbnail, restore_recycle_item, trigger_reindex,
 };
 pub use search_filter::search_facets;
 pub use thumbnail::fetch_thumbnail;

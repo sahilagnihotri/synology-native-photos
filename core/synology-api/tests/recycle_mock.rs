@@ -220,6 +220,51 @@ async fn delete_recycle_item_sends_filestation_delete() {
 }
 
 #[tokio::test]
+async fn delete_recycle_item_refuses_paths_outside_the_recycle_bin_without_any_network_call() {
+    let mut server = mockito::Server::new_async().await;
+    // A File Station Delete reaching the NAS for any of these is a live
+    // original being destroyed.
+    let _trap = server
+        .mock("POST", "/webapi/entry.cgi")
+        .expect(0)
+        .with_status(200)
+        .with_body(r#"{"success":true}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    for bad in [
+        "/home/Photos/iPhone/2016/09/IMG_0924.JPG",
+        "/home/#recycle/Photos/../../Photos/IMG_0924.JPG",
+        "/home/#recycle/Photos",
+        "/home/#recycle/Photos/",
+        "/home/#recycle/other/a.jpg",
+        "/volume1/homes/me/Photos/a.jpg",
+    ] {
+        let err = delete_recycle_item(&t, "SID", None, bad).await.unwrap_err();
+        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "{bad}: got {err:?}");
+    }
+    _trap.assert_async().await;
+}
+
+#[tokio::test]
+async fn restore_recycle_item_refuses_a_traversal_out_of_the_recycle_bin() {
+    let mut server = mockito::Server::new_async().await;
+    let _trap = server
+        .mock("POST", "/webapi/entry.cgi")
+        .expect(0)
+        .with_status(200)
+        .with_body(r#"{"success":true}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let err = restore_recycle_item(&t, "SID", None, "/home/#recycle/Photos/../../Photos/a.jpg")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+    _trap.assert_async().await;
+}
+
+#[tokio::test]
 async fn delete_recycle_item_fails_closed_on_a_server_error() {
     let mut server = mockito::Server::new_async().await;
     let _del = server

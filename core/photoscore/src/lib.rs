@@ -879,10 +879,14 @@ impl PhotosCore {
     /// restored before the failure when partial progress was made). Any file
     /// already moved before the failure stays restored on disk and is picked
     /// up by the next successful re-index or crawl. An empty `recycle_paths`
-    /// is a no-op. Serialized via `trash_lock`; requires a live session.
+    /// is a no-op. Serialized via `trash_lock`; requires a live session. Every
+    /// path is checked to lie inside the recycle bin before the first move.
     pub async fn restore_recently_deleted(&self, recycle_paths: Vec<String>) -> Result<(), CoreError> {
         if recycle_paths.is_empty() {
             return Ok(());
+        }
+        for path in &recycle_paths {
+            synology_api::ensure_recycle_photos_path(path)?;
         }
         let _lock = self.trash_lock.lock().await;
         let (transport, sid, syno_token) = self.recycle_call_context()?;
@@ -907,10 +911,15 @@ impl PhotosCore {
     /// the DSM recycle bin (File Station delete). This is the point of no
     /// return; the caller (UI) must confirm first. Stops and fails closed on
     /// the first error. An empty `recycle_paths` is a no-op. Serialized via
-    /// `trash_lock`; requires a live session.
+    /// `trash_lock`; requires a live session. Every path is checked to lie
+    /// inside the recycle bin BEFORE the first delete, so one bad path in a
+    /// batch deletes nothing at all.
     pub async fn empty_recently_deleted(&self, recycle_paths: Vec<String>) -> Result<(), CoreError> {
         if recycle_paths.is_empty() {
             return Ok(());
+        }
+        for path in &recycle_paths {
+            synology_api::ensure_recycle_photos_path(path)?;
         }
         let _lock = self.trash_lock.lock().await;
         let (transport, sid, syno_token) = self.recycle_call_context()?;
@@ -3643,6 +3652,70 @@ mod core_tests {
         let core = logged_in_core("empty-recycle", &server).await;
         core.empty_recently_deleted(vec!["/home/#recycle/Photos/a.jpg".into()]).await.expect("empty ok");
         _del.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn empty_recently_deleted_deletes_nothing_when_any_path_is_outside_the_recycle_bin() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        // The valid first path must NOT be deleted either: the batch is
+        // checked as a whole before any delete goes out.
+        let _del_trap = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("SYNO.FileStation.Delete".into()))
+            .expect(0)
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("empty-recycle-guard", &server).await;
+        let err = core
+            .empty_recently_deleted(vec![
+                "/home/#recycle/Photos/a.jpg".into(),
+                "/home/Photos/iPhone/IMG_0924.JPG".into(),
+            ])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        _del_trap.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn restore_recently_deleted_moves_nothing_when_any_path_is_outside_the_recycle_bin() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _move_trap = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("SYNO.FileStation.CopyMove".into()))
+            .expect(0)
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("restore-recycle-guard", &server).await;
+        let err = core
+            .restore_recently_deleted(vec![
+                "/home/#recycle/Photos/a.jpg".into(),
+                "/home/#recycle/Photos/../x/b.jpg".into(),
+            ])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::UnexpectedResponse { .. }), "got {err:?}");
+        _move_trap.assert_async().await;
     }
 
     #[tokio::test]
