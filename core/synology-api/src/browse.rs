@@ -527,6 +527,44 @@ async fn list_items_inner(
     decode_item_list(&body, space, "browse item")
 }
 
+/// `SYNO.Foto.Browse.Item` / `SYNO.FotoTeam.Browse.Item`, `method=list` with
+/// `album_id`: one page of the items inside the album `album_id`.
+///
+/// VERIFIED against the real NAS (DSM 7.3.2, Personal space, v4): `album_id`
+/// is a genuine server-side filter on `Browse.Item list` (an unknown param
+/// such as `foo=1` is silently ignored, while `album_id=<nonexistent>` answers
+/// DSM error 609, so the param is read). The item payload is the same shape
+/// as a plain `list_items` page, so this shares its `ITEM_ADDITIONAL` key set
+/// and tolerant per-element decoder. The probed account has no albums, so a
+/// non-empty album page was never captured; the shape is inferred from the
+/// identical API's plain listing.
+///
+/// Same `X-SYNO-TOKEN` handling as `list_items`.
+#[allow(clippy::too_many_arguments)] // mirrors the flat DSM request params, like filter_items
+pub async fn list_album_items(
+    transport: &Transport,
+    sid: &str,
+    space: Space,
+    album_id: i64,
+    offset: u32,
+    limit: u32,
+    version: u32,
+    syno_token: Option<&str>,
+) -> Result<Vec<Asset>, CoreError> {
+    let query: Vec<(&str, String)> = vec![
+        ("api", browse_item_api(space).to_string()),
+        ("version", version.to_string()),
+        ("method", "list".to_string()),
+        ("album_id", album_id.to_string()),
+        ("offset", offset.to_string()),
+        ("limit", limit.to_string()),
+        ("additional", ITEM_ADDITIONAL.to_string()),
+        ("_sid", sid.to_string()),
+    ];
+    let body = get_body(transport, &query, syno_token).await?;
+    decode_item_list(&body, space, "browse album item")
+}
+
 /// `SYNO.Foto.Browse.Item` / `SYNO.FotoTeam.Browse.Item`, `method=list`,
 /// narrowed by any combination of a `start_time`/`end_time` taken-at range
 /// (unix seconds) and a `person_id` and/or `geocoding_id` cluster. Every
