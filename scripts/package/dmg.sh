@@ -44,7 +44,7 @@ done
 
 APP_NAME="MySynologyPhotos"
 SCHEME="MySynologyPhotos"
-PROJECT="$ROOT/app/$APP_NAME.xcodeproj"
+PROJECT="$ROOT/platforms/macos/$APP_NAME.xcodeproj"
 BUILD_DD="$ROOT/build/macos/dmg-derived-data"
 
 ensure_project() {
@@ -54,7 +54,7 @@ ensure_project() {
       err "xcodegen not found. Install it (brew install xcodegen) or run scripts/setup/macos.sh."
       exit 1
     fi
-    ( cd "$ROOT/app" && xcodegen generate )
+    ( cd "$ROOT/platforms/macos" && xcodegen generate )
   fi
 }
 

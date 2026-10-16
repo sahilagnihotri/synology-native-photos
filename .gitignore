@@ -4,16 +4,11 @@
 Cargo.lock.orig
 
 # UniFFI bindings in platforms/macos/Generated are committed on purpose, not ignored
-# All build outputs (xcframework, dmg staging and installers) live under build/
+# All build outputs (xcframework, GitVersion.swift, dmg staging and installers) live under build/
 /build
 
-# Generated at build time (short git SHA for the About window)
-app/Generated/
-
 # Xcode
-app/DerivedData/
-app/**/xcuserdata/
-app/**/*.xcuserstate
+platforms/*/DerivedData/
 *.xcuserstate
 **/xcuserdata/
 DerivedData/

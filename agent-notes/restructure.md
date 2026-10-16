@@ -32,3 +32,12 @@
   renames), no stray bindings/ dir. Build log compiles platforms/macos/Generated/{PhotosCore,models}.swift and
   says "fresh at .../build/macos/PhotosCore.xcframework".
 - Gates: Rust 364/0/1, Swift 498/0/0, staleness test 8/8.
+
+### Step 3: app/ to platforms/macos/
+- git mv of project.yml, MySynologyPhotos.xcodeproj, MySynologyPhotos, MySynologyPhotosTests,
+  MySynologyPhotosUITests. Untracked app/Generated/GitVersion.swift and app/.DS_Store removed with the empty app/.
+- GitVersion.swift is now generated into build/macos/Generated (a build output, kept out of the
+  tracked Generated/ bindings, whose whole dir make xcframework passes as -headers).
+- New DerivedData folder (MySynologyPhotos-ekvskhdv...). Build log: "fresh at .../build/macos/PhotosCore.xcframework",
+  "wrote GitVersion.shortSHA = 93177b3 -> .../build/macos/Generated/GitVersion.swift".
+- Gates: Rust 364/0/1, Swift 498/0/0.

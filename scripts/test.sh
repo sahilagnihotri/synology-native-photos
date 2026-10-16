@@ -52,9 +52,9 @@ run_core_tests() {
 
 run_app_tests() {
   step "Swift / macOS app tests"
-  if [ -d "$ROOT/app" ] && ls "$ROOT/app"/*.xcodeproj >/dev/null 2>&1; then
+  if [ -d "$ROOT/platforms/macos" ] && ls "$ROOT/platforms/macos"/*.xcodeproj >/dev/null 2>&1; then
     local proj scheme
-    proj="$(ls -d "$ROOT/app"/*.xcodeproj | head -n1)"
+    proj="$(ls -d "$ROOT/platforms/macos"/*.xcodeproj | head -n1)"
     scheme="$(basename "$proj" .xcodeproj)"
     # Unit tests only: the UI test target drives the app through System
     # Events, which raises an automation permission prompt on every run.
@@ -72,11 +72,11 @@ run_app_tests() {
       ${sign_args[@]+"${sign_args[@]}"} \
       | { have xcpretty && xcpretty || cat; }
     ok "app tests done"
-  elif [ -f "$ROOT/app/Package.swift" ]; then
-    ( cd "$ROOT/app" && swift test )
+  elif [ -f "$ROOT/platforms/macos/Package.swift" ]; then
+    ( cd "$ROOT/platforms/macos" && swift test )
     ok "app tests done (SwiftPM)"
   else
-    warn "no Xcode project or Package.swift at app/ yet; skipping app tests."
+    warn "no Xcode project or Package.swift at platforms/macos/ yet; skipping app tests."
   fi
 }
 

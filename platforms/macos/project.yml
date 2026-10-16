@@ -24,17 +24,17 @@ targets:
     type: framework
     platform: macOS
     sources:
-      - path: ../platforms/macos/Generated/PhotosCore.swift
+      - path: Generated/PhotosCore.swift
         group: Generated
-      - path: ../platforms/macos/Generated/models.swift
+      - path: Generated/models.swift
         group: Generated
     preBuildScripts:
       - name: "Ensure PhotosCore.xcframework"
         script: |
-          "${SRCROOT}/../scripts/xcodegen/ensure-xcframework.sh"
+          "${SRCROOT}/../../scripts/xcodegen/ensure-xcframework.sh"
         shell: /bin/bash
         outputFiles:
-          - "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
+          - "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
         # Always run. With an output and no inputs, Xcode skips this phase
         # whenever the lib exists, so a Rust edit never reached the staleness
         # check. The script is a cheap find when the lib is fresh.
@@ -50,8 +50,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
-        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
+        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64"
         OTHER_LDFLAGS: ["-lphotoscore", "-lc++"]
   MySynologyPhotos:
     type: application
@@ -61,21 +61,23 @@ targets:
       # Generated at build time by the preBuildScript below. Referenced by
       # an explicit path (not a directory glob) and marked optional so
       # `xcodegen generate` still succeeds on a clean checkout where this
-      # gitignored file is absent. It lives in app/Generated (outside the
-      # globbed MySynologyPhotos dir) so it is never a duplicate file ref.
-      - path: Generated/GitVersion.swift
+      # gitignored file is absent. It lives in build/macos/Generated with the
+      # other build outputs (outside the globbed MySynologyPhotos dir, so it is
+      # never a duplicate file ref, and outside the tracked Generated/ bindings,
+      # which make xcframework packages as headers).
+      - path: ../../build/macos/Generated/GitVersion.swift
         optional: true
     preBuildScripts:
       - name: "Generate GitVersion.swift"
         script: |
-          "${SRCROOT}/../scripts/xcodegen/generate-git-version.sh" "${SRCROOT}/Generated/GitVersion.swift"
+          "${SRCROOT}/../../scripts/xcodegen/generate-git-version.sh" "${SRCROOT}/../../build/macos/Generated/GitVersion.swift"
         shell: /bin/bash
         # outputFiles makes the new build system treat the compile of
         # GitVersion.swift as depending on this phase, so the phase runs
         # before Compile Sources and the build does not pre-fail when the
         # generated file is missing on a fresh checkout.
         outputFiles:
-          - "$(SRCROOT)/Generated/GitVersion.swift"
+          - "$(SRCROOT)/../../build/macos/Generated/GitVersion.swift"
         # Always run so the SHA stays fresh across commits; the script itself
         # only rewrites the file (and thus triggers a recompile) when the SHA
         # actually changed.
@@ -126,12 +128,12 @@ targets:
         # `#if canImport(...)`. No public symbol of the PhotosCore Swift
         # module ever names these C types (verified: the only C-level type
         # crossing into public API is the opaque UnsafeMutableRawPointer),
-        # so app/test code never imports them and never sees their symbols.
+        # so app and test code never imports them and never sees their symbols.
         # Swift's explicit-module dependency scanner still needs the two
         # C modules to *resolve* wherever PhotosCore is imported, so this
         # search path is required at the Clang-module level even though
         # nothing here uses it directly.
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
   MySynologyPhotosTests:
     type: bundle.unit-test
     platform: macOS
@@ -145,7 +147,7 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
   MySynologyPhotosUITests:
     type: bundle.ui-testing
     platform: macOS
@@ -159,7 +161,7 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
 aggregateTargets:
   # A no-product target that packages the app into a .dmg installer. It depends
   # on the app target, so building the "Installer" scheme first builds
@@ -174,7 +176,7 @@ aggregateTargets:
     buildScripts:
       - name: "Package DMG"
         script: |
-          "${SRCROOT}/../scripts/package/dmg-from-app.sh" "${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app"
+          "${SRCROOT}/../../scripts/package/dmg-from-app.sh" "${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app"
         shell: /bin/bash
         # Always repackage: the dmg should reflect whatever was just built, and
         # declaring no outputs would otherwise make Xcode warn on every build.

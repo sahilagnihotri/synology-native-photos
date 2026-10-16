@@ -40,7 +40,7 @@ version() {
   local v
   v="$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
   if [ -z "$v" ]; then
-    v="$(grep -m1 'MARKETING_VERSION' "$ROOT/app/project.yml" 2>/dev/null | sed -E 's/.*"([0-9.]+)".*/\1/')"
+    v="$(grep -m1 'MARKETING_VERSION' "$ROOT/platforms/macos/project.yml" 2>/dev/null | sed -E 's/.*"([0-9.]+)".*/\1/')"
   fi
   [ -n "$v" ] && printf '%s\n' "$v" || printf '%s\n' "1.0"
 }

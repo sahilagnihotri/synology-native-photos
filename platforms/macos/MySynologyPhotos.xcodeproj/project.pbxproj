@@ -49,7 +49,6 @@
 		31CB585941DFF9AAF2D28512 /* TempCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD654ED7E0ACB192E00B78BF /* TempCacheTests.swift */; };
 		332CB6484272BEBA730B3BB3 /* GridZoomModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5B7CF6BEF6141147B168F9 /* GridZoomModelTests.swift */; };
 		34755BD880CF7A3273C89154 /* GridAccessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B3E65B1696F2634925288B7 /* GridAccessibility.swift */; };
-		3AE87C2809DD566BC5B80CFF /* GitVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 697E8F0B413FE3FAB6C4E107 /* GitVersion.swift */; };
 		3D9AA8CB4A5C55BA7E6890DD /* DetailQuickLookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51E4C490EEBD36B32C889BB2 /* DetailQuickLookView.swift */; };
 		3DAD8AAB6076DBCE489ED2C0 /* PhotosCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AAE5385EF9E827D9C82952D0 /* PhotosCore.framework */; };
 		3E5A2D86D326A2FB08302C14 /* PhotosCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AAE5385EF9E827D9C82952D0 /* PhotosCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -67,6 +66,7 @@
 		5A837B87BA07B0010DB3CAD0 /* DiscoveryTileGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3481D965A9176824300ADFE /* DiscoveryTileGridView.swift */; };
 		63FFF6EE59E8543363B853B1 /* DetailKeyActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 077217B5CE7E7DF708203AE5 /* DetailKeyActionTests.swift */; };
 		648F4F013BDC2A10FD8FC815 /* PathMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA593282DC399F4A89DD46CA /* PathMonitorTests.swift */; };
+		65013ADF397FA35520BF35BC /* GitVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948AAF129FEA6D9018720C79 /* GitVersion.swift */; };
 		6659A9B2DC408B2B3FE42CE7 /* SidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26029924943A07B0D282DB66 /* SidebarItem.swift */; };
 		6CEDDAB843A9ABF6B9FC82E7 /* PhotosCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AAE5385EF9E827D9C82952D0 /* PhotosCore.framework */; };
 		7526127E725BCF9D3CFAE77C /* ThumbnailCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7BD5E4B798FD93DB7A69C2F /* ThumbnailCacheTests.swift */; };
@@ -219,7 +219,7 @@
 		1D00A125755FB343EA939483 /* PhotoGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridView.swift; sourceTree = "<group>"; };
 		20A0192A32BAF5394DABD16A /* DiscoveryTilesModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryTilesModelTests.swift; sourceTree = "<group>"; };
 		26029924943A07B0D282DB66 /* SidebarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarItem.swift; sourceTree = "<group>"; };
-		2634315CEAE9E3A7FCD216EA /* PhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PhotosCore.swift; path = ../../platforms/macos/Generated/PhotosCore.swift; sourceTree = "<group>"; };
+		2634315CEAE9E3A7FCD216EA /* PhotosCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosCore.swift; sourceTree = "<group>"; };
 		27E68E0B02703E1415A50EB2 /* GridNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridNavigation.swift; sourceTree = "<group>"; };
 		296BFF6532C62D4695818C90 /* MySynologyPhotosApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MySynologyPhotosApp.swift; sourceTree = "<group>"; };
 		2B8E258EA3DA5DF7F6B3721E /* GridKeyActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridKeyActionTests.swift; sourceTree = "<group>"; };
@@ -252,7 +252,6 @@
 		667B70F3EF7DE37F0BD560AF /* RecentlyDeletedModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentlyDeletedModelTests.swift; sourceTree = "<group>"; };
 		66A56A5B864837FC92546EDE /* GridAccessibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridAccessibilityTests.swift; sourceTree = "<group>"; };
 		6930D0BA16A881B622F3DE08 /* RootRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootRouterTests.swift; sourceTree = "<group>"; };
-		697E8F0B413FE3FAB6C4E107 /* GitVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitVersion.swift; sourceTree = "<group>"; };
 		6B453DBBFEE46ACC7943CDFB /* MySynologyPhotosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MySynologyPhotosTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6B49D845168DD738722FCD12 /* PathMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathMonitor.swift; sourceTree = "<group>"; };
 		6C390E43343C5D6F33891FF3 /* RecentlyDeletedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentlyDeletedView.swift; sourceTree = "<group>"; };
@@ -272,6 +271,7 @@
 		92FF390318573161C8225F00 /* PhotoDragExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoDragExportTests.swift; sourceTree = "<group>"; };
 		9311A324D3D6F7EDB1B86B11 /* SpaceToggleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceToggleTests.swift; sourceTree = "<group>"; };
 		9369821E51C14ED3065E441C /* QuickFilterModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickFilterModel.swift; sourceTree = "<group>"; };
+		948AAF129FEA6D9018720C79 /* GitVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitVersion.swift; sourceTree = "<group>"; };
 		9499701621931F374043039B /* DetailVideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailVideoPlayerView.swift; sourceTree = "<group>"; };
 		953CD6054623E476B6440BCB /* AboutInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutInfo.swift; sourceTree = "<group>"; };
 		98BEBA200FC7AA5108A6FA99 /* DetailVideoPlayerViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailVideoPlayerViewTests.swift; sourceTree = "<group>"; };
@@ -308,7 +308,7 @@
 		D7BD5E4B798FD93DB7A69C2F /* ThumbnailCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCacheTests.swift; sourceTree = "<group>"; };
 		D86D866F6034C6CA1B338AFA /* DetailPagingModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailPagingModelTests.swift; sourceTree = "<group>"; };
 		D883A540635C00A4E04A82ED /* OriginalImageCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OriginalImageCacheTests.swift; sourceTree = "<group>"; };
-		D8C85D7FE8FA1BD2BC66CEEE /* models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = models.swift; path = ../../platforms/macos/Generated/models.swift; sourceTree = "<group>"; };
+		D8C85D7FE8FA1BD2BC66CEEE /* models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = models.swift; sourceTree = "<group>"; };
 		D9730B3AF99693217448E6D1 /* SearchFilterBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchFilterBarView.swift; sourceTree = "<group>"; };
 		DA9A92C92FB43449DBE5E804 /* SearchFilterModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchFilterModel.swift; sourceTree = "<group>"; };
 		DB97BF60FC8939B778310158 /* PhotoMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoMapView.swift; sourceTree = "<group>"; };
@@ -355,6 +355,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		00364C92DA17313CB768825C /* synology-native-photos */ = {
+			isa = PBXGroup;
+			children = (
+				80010BBA1230FC314ADAA5E9 /* build */,
+			);
+			name = "synology-native-photos";
+			path = ../..;
+			sourceTree = "<group>";
+		};
 		02929D7799919061A05B7CE3 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -366,7 +375,6 @@
 		084A319B11BFB5FD5FECCE80 /* Generated */ = {
 			isa = PBXGroup;
 			children = (
-				697E8F0B413FE3FAB6C4E107 /* GitVersion.swift */,
 				D8C85D7FE8FA1BD2BC66CEEE /* models.swift */,
 				2634315CEAE9E3A7FCD216EA /* PhotosCore.swift */,
 			);
@@ -453,6 +461,14 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
+		4C16B8C247DE3D911FBA0995 /* Generated */ = {
+			isa = PBXGroup;
+			children = (
+				948AAF129FEA6D9018720C79 /* GitVersion.swift */,
+			);
+			path = Generated;
+			sourceTree = "<group>";
+		};
 		4F00F14F0416919D24E4214F /* Auth */ = {
 			isa = PBXGroup;
 			children = (
@@ -489,6 +505,14 @@
 			path = Grid;
 			sourceTree = "<group>";
 		};
+		80010BBA1230FC314ADAA5E9 /* build */ = {
+			isa = PBXGroup;
+			children = (
+				9FBF8660DE5FF581492DAA9E /* macos */,
+			);
+			path = build;
+			sourceTree = "<group>";
+		};
 		82FDFA53AF67E4A1654B8545 /* CoreBridge */ = {
 			isa = PBXGroup;
 			children = (
@@ -514,6 +538,14 @@
 				032EE054666122469C7C1D2C /* ThumbnailCache.swift */,
 			);
 			path = Thumbnails;
+			sourceTree = "<group>";
+		};
+		9FBF8660DE5FF581492DAA9E /* macos */ = {
+			isa = PBXGroup;
+			children = (
+				4C16B8C247DE3D911FBA0995 /* Generated */,
+			);
+			path = macos;
 			sourceTree = "<group>";
 		};
 		A533CD21AD338011C31CC54B /* MySynologyPhotosTests */ = {
@@ -585,6 +617,7 @@
 				EEC3549AFA1727D176078D61 /* MySynologyPhotos */,
 				A533CD21AD338011C31CC54B /* MySynologyPhotosTests */,
 				B338EC17E2D0471B8FF8E462 /* MySynologyPhotosUITests */,
+				00364C92DA17313CB768825C /* synology-native-photos */,
 				16558035784585C1FDC3AA74 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -821,11 +854,11 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(SRCROOT)/Generated/GitVersion.swift",
+				"$(SRCROOT)/../../build/macos/Generated/GitVersion.swift",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/../scripts/xcodegen/generate-git-version.sh\" \"${SRCROOT}/Generated/GitVersion.swift\"\n";
+			shellScript = "\"${SRCROOT}/../../scripts/xcodegen/generate-git-version.sh\" \"${SRCROOT}/../../build/macos/Generated/GitVersion.swift\"\n";
 		};
 		60D7F9293B60F3E86B24D07E /* Package DMG */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -844,7 +877,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/../scripts/package/dmg-from-app.sh\" \"${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app\"\n";
+			shellScript = "\"${SRCROOT}/../../scripts/package/dmg-from-app.sh\" \"${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app\"\n";
 		};
 		F8D4C089D4C7CD779742E55F /* Ensure PhotosCore.xcframework */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -860,11 +893,11 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a",
+				"$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/../scripts/xcodegen/ensure-xcframework.sh\"\n";
+			shellScript = "\"${SRCROOT}/../../scripts/xcodegen/ensure-xcframework.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -914,7 +947,7 @@
 				9A749285CD13094A4E16FDF1 /* DiscoveryTilesModel.swift in Sources */,
 				DA35F817325D79390E243229 /* EmptyLibraryView.swift in Sources */,
 				A702778667D46164996A51E6 /* FilterQuery.swift in Sources */,
-				3AE87C2809DD566BC5B80CFF /* GitVersion.swift in Sources */,
+				65013ADF397FA35520BF35BC /* GitVersion.swift in Sources */,
 				34755BD880CF7A3273C89154 /* GridAccessibility.swift in Sources */,
 				98FCBF3F0F3E8D889EB97D64 /* GridDateSections.swift in Sources */,
 				D37FBF132214448A33E97746 /* GridKeyAction.swift in Sources */,
@@ -1124,7 +1157,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1148,13 +1181,13 @@
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64";
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64";
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"-lphotoscore",
@@ -1187,7 +1220,7 @@
 				DEVELOPMENT_TEAM = 5W67TF3579;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
 				INFOPLIST_KEY_CFBundleDisplayName = "MySynology Photos";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1277,7 +1310,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1300,7 +1333,7 @@
 				DEVELOPMENT_TEAM = 5W67TF3579;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
 				INFOPLIST_KEY_CFBundleDisplayName = "MySynology Photos";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1319,7 +1352,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -1343,13 +1376,13 @@
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64";
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64";
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"-lphotoscore",
@@ -1371,7 +1404,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/Headers";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

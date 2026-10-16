@@ -18,8 +18,8 @@
 # Usage:
 #   generate-git-version.sh [output_path]
 # When run from the Xcode build phase the output path is passed explicitly
-# ("${SRCROOT}/Generated/GitVersion.swift"). When run by hand with no arg it
-# defaults to app/Generated/GitVersion.swift under the repo root.
+# ("${SRCROOT}/../../build/macos/Generated/GitVersion.swift"). When run by hand
+# with no arg it defaults to build/macos/Generated/GitVersion.swift under the repo root.
 
 set -uo pipefail
 
@@ -27,7 +27,7 @@ OUT="${1:-}"
 if [ -z "$OUT" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-  OUT="$ROOT/app/Generated/GitVersion.swift"
+  OUT="$ROOT/build/macos/Generated/GitVersion.swift"
 fi
 
 SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
