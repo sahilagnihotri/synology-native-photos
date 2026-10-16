@@ -56,7 +56,10 @@ private enum LaunchOutcome {
 /// been used).
 @MainActor
 private func makeLaunchOutcome() -> LaunchOutcome {
-    let storedHost = (try? KeychainSID.loadMostRecentAccount())?.host ?? ""
+    // A unit test host never reads stored sessions (see KeychainService).
+    let storedHost = KeychainService.isUnitTestHost
+        ? ""
+        : (try? KeychainSID.loadMostRecentAccount())?.host ?? ""
     let paths = AppPaths.standard()
     do {
         try paths.ensureDirectoriesExist()
@@ -94,6 +97,11 @@ struct MySynologyPhotosApp: App {
     /// `.loggedOut` and renders the login screen.
     @MainActor
     private static func makeOutcomeAndRestore() -> LaunchOutcome {
+        // As the host of a unit test run, touch no stored state at all: no
+        // legacy migration, no session restore. Tests set up their own.
+        if KeychainService.isUnitTestHost {
+            return makeLaunchOutcome()
+        }
         // One-time cleanup: any pin left over from the old Keychain-backed
         // store is copied to the file store and removed from the Keychain,
         // so a launch after upgrading past this change never prompts for

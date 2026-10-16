@@ -7,6 +7,15 @@ struct KeychainSIDTests {
     private let user = "kctestuser"
     private func cleanup() { try? KeychainSID.clear(host: host, username: user) }
 
+    /// Tests must never touch the user's real keychain items: an ad hoc
+    /// signed test host reading them raises a login keychain password prompt
+    /// on every run, and a test clearing them would sign the user out.
+    @Test func unitTestRunsUseSeparateKeychainServices() {
+        #expect(KeychainService.isUnitTestHost)
+        #expect(KeychainService.name("se.agnihotri.mysynologyphotos.session")
+                == "se.agnihotri.mysynologyphotos.session.tests")
+    }
+
     @Test func saveThenLoadRoundTrips() throws {
         cleanup(); defer { cleanup() }
         let s = Session(sid: "SID-ABC", synoToken: "TOK", username: user, deviceDid: "DID9")

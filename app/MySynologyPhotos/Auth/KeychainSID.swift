@@ -13,6 +13,28 @@ struct StoredSession: Codable, Equatable {
     let host: String
 }
 
+/// Keychain service names, kept apart for unit test runs.
+///
+/// A keychain item's access list is bound to the code signature of the app
+/// that created it. Test builds signed ad hoc get a new signature on every
+/// build, so a test host touching the user's real items makes macOS ask for
+/// the login keychain password on every run. Under the XCTest host every
+/// service gets a `.tests` suffix, so tests only ever see their own items and
+/// never read, overwrite or delete the user's real session.
+enum KeychainService {
+    /// True when this process is the host app of a unit test run.
+    static let isUnitTestHost: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        return env["XCTestConfigurationFilePath"] != nil
+            || env["XCTestBundlePath"] != nil
+            || env["XCTestSessionIdentifier"] != nil
+    }()
+
+    static func name(_ base: String) -> String {
+        isUnitTestHost ? base + ".tests" : base
+    }
+}
+
 enum KeychainError: Error {
     case unexpectedStatus(OSStatus)
     case encodeFailed
@@ -27,7 +49,7 @@ enum KeychainError: Error {
 /// ever talks to the user's own NAS and must not leak session material off
 /// the device.
 enum KeychainSID {
-    private static let service = "se.agnihotri.mysynologyphotos.session"
+    private static let service = KeychainService.name("se.agnihotri.mysynologyphotos.session")
 
     private static func account(host: String, username: String) -> String {
         "\(host)|\(username)"
@@ -157,7 +179,7 @@ enum KeychainSID {
 /// prompt, because a pinned certificate is public server-identity data, not
 /// a secret, and never belonged in the Keychain in the first place.
 private enum LegacyKeychainCertPin {
-    static let service = "se.agnihotri.mysynologyphotos.certpin"
+    static let service = KeychainService.name("se.agnihotri.mysynologyphotos.certpin")
 
     static func baseQuery(host: String? = nil) -> [String: Any] {
         var query: [String: Any] = [
@@ -320,7 +342,7 @@ enum KeychainCertPin {
 /// is kept) across a plain sign-out. Only an explicit "forget this device"
 /// action clears it.
 enum KeychainDeviceToken {
-    private static let service = "se.agnihotri.mysynologyphotos.devicetoken"
+    private static let service = KeychainService.name("se.agnihotri.mysynologyphotos.devicetoken")
 
     private static func account(host: String, username: String) -> String {
         "\(host)|\(username)"
