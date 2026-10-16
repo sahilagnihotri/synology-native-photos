@@ -2,6 +2,24 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-10-16: real NAS delete and restore verification
+
+With Sahil's go ahead, on one real photo (`IMG_7517.PNG`, 900,892 bytes,
+`/home/Photos/MobileBackup/iPhone/2026/07`) using the app's exact calls:
+- `SYNO.Foto.Browse.Item delete` (v7) moves the file to
+  `/home/#recycle/Photos/<same relative path>` within 1 s, same size; the
+  original path then returns 408.
+- Restore with `SYNO.FileStation.CopyMove start` (`overwrite=false`,
+  `remove_src=true`) completed in under 1 s: the recycle path returns 408 and the
+  file is back at its original path, same size. Photos re-indexed it within
+  seconds under a NEW id (see TODO).
+- Permanent delete with `SYNO.FileStation.Delete start` on a probe file of our own
+  (never a photo) finished within 2 s. Both are well inside the 20 s poll budget.
+- File Station returns 408 for a missing file or folder (CONFIRMED). DSM leaves
+  the emptied recycle folders in place, so polling ends on "file not listed"
+  rather than on 408 for the folder; both are treated as done.
+- `SYNO.Core.User.Home get` reports `enable_recycle_bin: true` for user homes.
+
 ## Session 2026-10-16 (parallel batch): cleanup, tests, build infra
 
 - Removed the superseded trash-album flow from the core: seven FFI methods
