@@ -30,3 +30,11 @@ DerivedData/
 
 # Packaged dmg installers (built by scripts/package/dmg.sh / make dmg)
 /dist
+
+# Defensive: secrets and signing material must never be committed
+syno_session*
+*.pem
+*.p12
+.env
+.env.*
+*.mobileprovision
