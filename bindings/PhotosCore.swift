@@ -665,7 +665,9 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * the DSM recycle bin (File Station delete). This is the point of no
      * return; the caller (UI) must confirm first. Stops and fails closed on
      * the first error. An empty `recycle_paths` is a no-op. Serialized via
-     * `trash_lock`; requires a live session.
+     * `trash_lock`; requires a live session. Every path is checked to lie
+     * inside the recycle bin BEFORE the first delete, so one bad path in a
+     * batch deletes nothing at all.
      */
     func emptyRecentlyDeleted(recyclePaths: [String]) async throws 
     
@@ -1007,7 +1009,8 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * restored before the failure when partial progress was made). Any file
      * already moved before the failure stays restored on disk and is picked
      * up by the next successful re-index or crawl. An empty `recycle_paths`
-     * is a no-op. Serialized via `trash_lock`; requires a live session.
+     * is a no-op. Serialized via `trash_lock`; requires a live session. Every
+     * path is checked to lie inside the recycle bin before the first move.
      */
     func restoreRecentlyDeleted(recyclePaths: [String]) async throws 
     
@@ -1439,7 +1442,9 @@ open func downloadOriginal(space: Space, unitId: Int64, cacheKey: String)async t
      * the DSM recycle bin (File Station delete). This is the point of no
      * return; the caller (UI) must confirm first. Stops and fails closed on
      * the first error. An empty `recycle_paths` is a no-op. Serialized via
-     * `trash_lock`; requires a live session.
+     * `trash_lock`; requires a live session. Every path is checked to lie
+     * inside the recycle bin BEFORE the first delete, so one bad path in a
+     * batch deletes nothing at all.
      */
 open func emptyRecentlyDeleted(recyclePaths: [String])async throws   {
     return
@@ -2116,7 +2121,8 @@ open func restoreFromTrash(space: Space, assetIds: [Int64])async throws   {
      * restored before the failure when partial progress was made). Any file
      * already moved before the failure stays restored on disk and is picked
      * up by the next successful re-index or crawl. An empty `recycle_paths`
-     * is a no-op. Serialized via `trash_lock`; requires a live session.
+     * is a no-op. Serialized via `trash_lock`; requires a live session. Every
+     * path is checked to lie inside the recycle bin before the first move.
      */
 open func restoreRecentlyDeleted(recyclePaths: [String])async throws   {
     return
@@ -3037,7 +3043,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_download_original() != 35832) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_empty_recently_deleted() != 29716) {
+    if (uniffi_photoscore_checksum_method_photoscore_empty_recently_deleted() != 38051) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_ensure_trash_album() != 39040) {
@@ -3112,7 +3118,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_restore_from_trash() != 6217) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_restore_recently_deleted() != 33694) {
+    if (uniffi_photoscore_checksum_method_photoscore_restore_recently_deleted() != 32885) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 22452) {
