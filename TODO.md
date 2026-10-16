@@ -2,10 +2,12 @@
 
 Only pending work. Completed items live in `Fixed.md`. Live scratch progress in `.superpowers/sdd/progress.md` (gitignored).
 
+Last Updated: 2026-10-16
+
 ## In progress
 
-- [ ] Apple Photos-style UI + keyboard model: sidebar, zoomable grid, multi-select, and keyboard map (arrows/space/return/escape/cmd-A, delete routes to a safe-confirm affordance until Phase 2) shipped; see `.superpowers/sdd/fix-apple-photos-ui-report.md` for what landed. Still open: real delete wiring (Phase 2) and date-section headers (see Phase 3+ below). Brief: `.superpowers/sdd/fix-apple-photos-ui-brief.md`. Design spec: `documentation/design/2026-07-24-apple-photos-ui.md`.
-- [ ] Polished viewer (shift-arrow select, zoom+pan, info panel, drag-to-Finder export) shipped; see `.superpowers/sdd/feature-polished-viewer-report.md`. Still open: camera/EXIF and per-asset location in the info panel (no cheap read-only API found; `Place`/Geocoding is a collection concept, not a field on `Asset`), and video drag-export/streaming verification against a real video asset (untested against the live NAS this pass).
+- [ ] Polished viewer: video drag-export and streaming are untested against a real video asset on the live NAS. Per-asset location in the info panel is still open (`Place`/Geocoding is a collection concept, not a field on `Asset`).
+- [ ] Real delete cleanup: remove the superseded trash-album core methods (`deleteToTrash`/`restoreFromTrash`/`fetchTrash`/`trashCount`/`reconcileTrash`/`ensureTrashAlbum` and the app-trash `permanentlyDelete` in `core/photoscore/src/lib.rs`). Still exported over FFI, unused by the app.
 
 ## Viewer + browsing enhancements (feedback 2026-07-25)
 
@@ -14,8 +16,6 @@ richer info panel (EXIF/rating/description/video metadata), click-drag pan,
 timeline date-section headers + date scrubber, and Quick Filter (file type / date
 / rating). Remaining:
 
-- [ ] Edit (crop/rotate): IN PROGRESS. Non-destructive: uploads the edited copy as
-  a NEW asset (FileStation.Upload + Foto reindex, both verified); original immutable.
 - [ ] Share link: DEFERRED pending the exact API shape. Create is
   `SYNO.Foto.Sharing.Passphrase set_shared` with a `policy` param whose type is
   undocumented (a JSON object returns `{"reason":"type"}`); reads/updates key on a
@@ -31,9 +31,6 @@ timeline date-section headers + date scrubber, and Quick Filter (file type / dat
 - [ ] Favorites in the Quick Filter: NOT feasible on this NAS (no server read
   filter and no local `favorite` column). People + Geolocation landed (see
   `Fixed.md`). Revisit only if a future DSM exposes a favorite filter.
-- [ ] Code hygiene: remove the now-dead trash-album methods from the core
-  (`deleteToTrash`/`restoreFromTrash`/`fetchTrash`/`trashCount`/`reconcileTrash`/
-  `ensureTrashAlbum` and the app-trash `permanentlyDelete`), superseded by real delete.
 
 ## Needs visual confirmation (feedback 2026-07-26)
 
@@ -91,9 +88,9 @@ Bigger bets:
 - [ ] Duplicates detection (review #23); Memories/For You (review #22); People
   naming/merge, captions, batch adjust, slideshow (review #25).
 
-## Performance (feedback 2026-07-26)
+## Performance
 
-- [ ] Detail viewer is slow to open images/videos and slower than the old QuickLook. Cause: `DetailImageView` calls `downloadOriginal` on EVERY open (no download cache, does not consult the tiny FIFO TempFileCache first) and decodes with `NSImage(contentsOf:)` at FULL resolution (does not use `ImageDownsample` like the grid does), with no decoded-image RAM cache. Fix (next pass, after Edit; same Detail files): a keyed on-disk original cache (by `cache_key`, shared by photo + video so re-opens never re-download), a byte-cost-bounded `NSCache` of decoded images, downsampled decode for the initial display (reuse `ImageDownsample`, full-res on zoom), and progressive thumbnail-first display. Generous cache sizes (user has 128/64 GB RAM + NVMe).
+- [ ] `PhotoEditorView.swift` downloads the original directly each time, bypassing the two tier `OriginalImageCache`. Route it through the cache.
 
 ## Distribution
 
@@ -108,12 +105,16 @@ Bigger bets:
 
 ## Build infra
 
-- [ ] Make the xcframework rebuild self-healing. The `ensure-xcframework` preBuildScript only builds `PhotosCore.xcframework` when it is MISSING, not when the Rust core changed, so after any core pass the app build fails with "cannot find uniffi_..._checksum" until `make xcframework` is run by hand. Fix the preBuildScript to rebuild when the core sources are newer than the packaged xcframework (compare mtimes, run `make xcframework`). Until fixed: run `make xcframework` after every core change before building the app.
+- [ ] The xcframework self-heal only watches `core/**/*.rs`. Changes to `Cargo.toml` or the UDL alone do not trigger a rebuild.
+- [ ] 63 clippy warnings in `synology-api` and `sync-engine` (mostly fn item to integer casts).
+- [ ] Swift 6 concurrency warnings: `GridZoomModel.swift:27` and `ThumbnailCache.swift:103`.
 
 ## Security (before real use)
 
 - [ ] Change the DSM password `xatkiW-pitkew-dizno7` (exposed in chat during debugging).
 - [ ] Switch the app from the main DSM account to a dedicated least-privilege `photosclient` user (Photos-only). Main account used during dev only. Steps in `documentation/phase0-probe-results.md`.
+- [ ] Tailscale host and IP appear in tracked files (`CLAUDE.md`, docs, tests). The repo is PUBLIC; low risk, consider placeholders.
+- [ ] Add defensive `.gitignore` patterns (`syno_session*`, `*.pem`, `*.p12`, `.env*`, `*.mobileprovision`).
 
 ## Empirical NAS probes
 
@@ -122,7 +123,9 @@ Bigger bets:
 
 ## Phase 2: manage (own plan)
 
-- [ ] IN PROGRESS: REAL delete (design pivot 2026-07-25). The hybrid trash-album delete was built, then superseded after the user saw it: an app-album delete leaves the photo in the Synology library (still shows in the web app), which is not what "delete" should mean. New model: everyday Delete = the real Foto delete (removes from the library everywhere, lands in the DSM recycle bin), recoverable via a File-Station-backed Recently Deleted. Core DONE + verified end to end against the real NAS (delete -> #recycle, FileStation.Thumb works on #recycle, CopyMove restore with remove_src + Foto reindex brings it back; commits 8dfc989/a7f4cea/64c3216/a72598f). Swift UI rework in progress: real delete in the grid AND the full-photo viewer, RecycleItem-based Recently Deleted (thumbnails/restore/permanent-empty), plus a Refresh so NAS-side changes reflect. Cleanup still owed: remove the now-superseded trash-album core methods; delete the vestigial NAS "Recently Deleted" album (id 4) the old design created; clear the local in_trash flag so IMG_1837 (never really deleted) un-hides.
+- [ ] HIGH: recycle bin enabled check before delete. Nothing verifies the DSM recycle bin is on for the homes share. If it is off, delete is permanent while the UI says it can be restored. Needs a real NAS probe (one fresh OTP) of `SYNO.Core.Share` / `SYNO.Core.RecycleBin` for the homes share recycle setting.
+- [ ] Verify on the real NAS: File Station error 408 for a missing folder (assumed from the official guide in `recycle.rs` `FS_NO_SUCH_FILE`), and that restore and permanent delete completion polling behave as mocked.
+- [ ] UI tests for the delete and permanent delete confirm dialogs (none exist). Note, not a bug: Return confirms the everyday delete dialog by the user's explicit choice.
 - [ ] Albums (browse, create, add/remove); replace the sidebar Albums placeholder.
 - [ ] Search filter facets (`SYNO.Foto.Search.Filter`): confirmed present and working (camera, geocoding, time buckets, folder_filter, etc.) but deferred this pass; plain keyword search shipped instead (see `Fixed.md`).
 - [ ] Favoriting/naming mutations: read-only People/Places/Tags/Favorites browsing shipped (see `Fixed.md`); toggling a favorite, naming a person, and creating/editing tags are still not implemented (mutations, gated separately).
@@ -130,7 +133,5 @@ Bigger bets:
 
 ## Phase 3+
 
-- [ ] Non-destructive editing (upload edited copies as new assets; originals immutable).
-- [ ] Grid date-section headers (if deferred by the UI overhaul).
 - [ ] QuickConnect / DDNS remote access.
 - [ ] Windows UI (core already designed to allow it).

@@ -2,6 +2,31 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-10-16: recycle guards, test script, stale TODO cleanup
+
+- Recycle restore and permanent delete now refuse any path outside
+  `/home/#recycle/Photos` (traversal safe; a whole batch is checked before the
+  first request is sent) (`dce9c23`).
+- Restore refuses a name clash at the destination. Restore and permanent delete
+  now poll the recycle folder until the file has actually left it (about 20 s
+  timeout) before reporting success (`d7d5cef`).
+- The core is built for the app's macOS 26 deployment target, `scripts/test.sh app`
+  runs only the unit tests, and `ADHOC_SIGN=1` signs ad hoc for shells that cannot
+  see the login keychain (`05dd0e3`). Swift bindings regenerated (`848d47a`).
+- Measured: `cargo test --workspace` 385 passed, 0 failed, 1 ignored (the real NAS
+  test). Swift unit tests 470 passed, 0 failed, 0 skipped. Every new guard test was
+  falsified (guard reverted, test watched fail, guard restored).
+- Moved here from TODO.md because they are already shipped:
+  - Edit (crop/rotate): saves a new asset into `/home/Photos/Edited`, original
+    untouched (`82b9995`).
+  - Detail viewer performance: two tier `OriginalImageCache`, downsampled decode,
+    thumbnail first (`996b061`, `048d6d5`, `c9fc8b3`).
+  - xcframework self-heal: `scripts/xcodegen/ensure-xcframework.sh` rebuilds when
+    `core/**/*.rs` is newer (`67c1e89`).
+  - Real delete UI: grid key, context menu, toolbar, viewer, confirm alert, Cmd-Z,
+    Recently Deleted restore and confirmed permanent delete.
+  - Grid date-section headers and non-destructive editing (Phase 3+ items).
+
 ## Session 2026-07-26 (cont.): renamed the app to MySynology Photos
 
 - Full rename of the APP (not the core) to avoid using Synology's exact product
@@ -257,7 +282,7 @@ Report: `.superpowers/sdd/feature-discovery-browse-report.md`.
 - Leaf-certificate pinning via a custom rustls verifier (exact DER match) instead of add_root_certificate, which failed the handshake against the NAS leaf cert (`00b3f49`).
 - Grid snapshot crash on login fixed: `diffable` made optional with a pending-snapshot catch-up (`d96686d`).
 - Login hardening: host normalization, TOFU cert pin, device-token 2FA (skip OTP after first), no password in error messages, remember-me, show/hide password toggle (`7e6683e`, `965aa39`, `7cac4ef`, `3b7b41a`, `7249e6e`).
-- Self-healing xcframework rebuild when Rust sources are newer than the built lib (`498ac16`), which had been serving stale binaries.
+- Self-healing xcframework rebuild when Rust sources are newer than the built lib (`67c1e89`), which had been serving stale binaries. Corrected 2026-10-16: an earlier version of this line cited a hash that does not exist.
 - CLAUDE.md documents real-NAS debugging: device-token OTP reuse + verified API gotchas (`10fdeac`).
 - Apple Photos UI + keyboard design spec (`c0fcbeb`); Phase 2 plan + project regen (`f505790`).
 
