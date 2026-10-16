@@ -115,8 +115,9 @@ Bigger bets:
 
 ## Phase 2: manage (own plan)
 
-- [ ] HIGH: recycle bin enabled check before delete. Nothing verifies the DSM recycle bin is on for the homes share. If it is off, delete is permanent while the UI says it can be restored. Needs a real NAS probe (one fresh OTP) of `SYNO.Core.Share` / `SYNO.Core.RecycleBin` for the homes share recycle setting.
-- [ ] Verify on the real NAS: File Station error 408 for a missing folder (assumed from the official guide in `recycle.rs` `FS_NO_SUCH_FILE`), and that restore and permanent delete completion polling behave as mocked.
+- [ ] HIGH: recycle bin enabled check before delete (in progress, worker recycle-check). Probed 2026-10-16: `SYNO.Core.User.Home get` returns `enable_recycle_bin` (true on this NAS); it is an admin API, so a non-admin `photosclient` likely gets Unknown. `SYNO.Core.Share get homes` does not return the field.
+- [ ] Verify on the real NAS that restore and permanent delete completion polling behave as mocked. Needs one real soft delete and restore of a photo, so it waits for Sahil's go ahead. (408 for a missing folder CONFIRMED on the NAS 2026-10-16.)
+- [ ] Recently Deleted shows an empty bin for ANY non auth error on the recycle root (`list_recycle_photos` depth 0), e.g. a network drop. Only 408 should mean empty; other errors should surface.
 - [ ] Albums (browse, create, add/remove); replace the sidebar Albums placeholder.
 - [ ] The old trash-album flow left a "Recently Deleted" album on the NAS. Nothing in the app reads or removes it any more. Delete it by hand in Synology Photos if unwanted (the app never touches it).
 - [ ] Albums write API: `create_album`, `add_items` and `remove_items` were removed from `synology-api` as unused in `86864c6`. The Albums item above needs them: recover from `86864c6^` (`core/synology-api/src/album_write.rs` and its mock tests). `delete_album` and `normal_album_api` remain.

@@ -5,6 +5,10 @@ Status: queued, in-progress, awaiting-verification, verified, abandoned.
 
 ## CURRENT (2026-10-16)
 
-No workers in flight. The 2026-10-16 parallel batch (W1 to W8) is verified and recorded in `Fixed.md`.
+The 2026-10-16 parallel batch (W1 to W8) is verified and recorded in `Fixed.md`.
 
-Blocked on the user: DSM password change, `photosclient` user, one OTP for the recycle bin probe.
+| ID | Goal | Owned paths | Worker | Status | Closes (TODO.md) |
+|----|------|-------------|--------|--------|------------------|
+| W9 | Recycle bin enabled check before delete | `core/synology-api/src/recycle.rs` and a new module, `core/photoscore/`, `bindings/`, `app/MySynologyPhotos/Grid/DeleteController.swift`, delete dialog views, FakePhotosCore, delete tests | recycle-check (Opus) | in-progress | Phase 2: HIGH recycle bin check |
+
+Blocked on the user: DSM password change, `photosclient` user, go ahead for one real soft delete and restore to verify polling.
