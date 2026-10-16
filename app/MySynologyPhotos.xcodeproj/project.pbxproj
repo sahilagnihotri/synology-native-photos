@@ -848,6 +848,7 @@
 		};
 		F8D4C089D4C7CD779742E55F /* Ensure PhotosCore.xcframework */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);

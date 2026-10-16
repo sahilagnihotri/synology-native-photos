@@ -35,6 +35,10 @@ targets:
         shell: /bin/bash
         outputFiles:
           - "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
+        # Always run. With an output and no inputs, Xcode skips this phase
+        # whenever the lib exists, so a Rust edit never reached the staleness
+        # check. The script is a cheap find when the lib is fresh.
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_NAME: PhotosCore
