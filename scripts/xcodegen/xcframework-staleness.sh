@@ -12,7 +12,7 @@
 
 set -euo pipefail
 ROOT="${1:?usage: xcframework-staleness.sh <repo-root>}"
-LIB="$ROOT/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
+LIB="$ROOT/build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
 
 stale() { echo stale; exit 10; }
 

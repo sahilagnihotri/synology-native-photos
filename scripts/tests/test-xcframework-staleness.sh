@@ -13,12 +13,12 @@ n=0
 # Fresh tree: everything old (2020), lib newer (2021).
 mk() {
   local d="$BASE/t$n"
-  mkdir -p "$d/PhotosCore.xcframework/macos-arm64" "$d/bindings" "$d/core/a/src" "$d/core/photoscore/src"
+  mkdir -p "$d/build/macos/PhotosCore.xcframework/macos-arm64" "$d/bindings" "$d/core/a/src" "$d/core/photoscore/src"
   touch "$d/bindings/PhotosCore.swift" "$d/bindings/models.swift" \
         "$d/core/a/src/lib.rs" "$d/core/a/Cargo.toml" "$d/core/photoscore/src/x.udl" \
         "$d/Cargo.toml" "$d/Cargo.lock"
   find "$d" -type f -exec touch -t 202001010000 {} +
-  touch -t 202101010000 "$d/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
+  touch -t 202101010000 "$d/build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
   echo "$d"
 }
 
@@ -35,7 +35,7 @@ n=3; d="$(mk)"; touch "$d/core/a/Cargo.toml"; expect "newer crate Cargo.toml is 
 n=4; d="$(mk)"; touch "$d/Cargo.toml"; expect "newer root Cargo.toml is stale" stale "$d"
 n=5; d="$(mk)"; touch "$d/Cargo.lock"; expect "newer Cargo.lock is stale" stale "$d"
 n=6; d="$(mk)"; touch "$d/core/photoscore/src/x.udl"; expect "newer .udl is stale" stale "$d"
-n=7; d="$(mk)"; rm "$d/PhotosCore.xcframework/macos-arm64/libphotoscore.a"; expect "missing lib is stale" stale "$d"
+n=7; d="$(mk)"; rm "$d/build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"; expect "missing lib is stale" stale "$d"
 n=8; d="$(mk)"; rm "$d/bindings/models.swift"; expect "missing bindings is stale" stale "$d"
 
 [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

@@ -1,7 +1,7 @@
 RUST_TARGETS = aarch64-apple-darwin
 LIB = target/aarch64-apple-darwin/release/libphotoscore.a
 BINDINGS_DIR = bindings
-XCF = PhotosCore.xcframework
+XCF = build/macos/PhotosCore.xcframework
 
 # Build the core for the app's deployment target (app/project.yml), not the
 # host OS. Without this, rustc and the cc crate target the running macOS, and
@@ -35,6 +35,7 @@ bindings:
 # block, so `import PhotosCoreFFI` and `import modelsFFI` both resolve).
 xcframework: bindings
 	rm -rf $(XCF)
+	mkdir -p $(dir $(XCF))
 	xcodebuild -create-xcframework \
 		-library $(LIB) \
 		-headers $(BINDINGS_DIR) \
@@ -42,9 +43,9 @@ xcframework: bindings
 
 # Build a distributable dmg installer (Release .app + /Applications alias).
 # Delegates to the packaging script, which rebuilds the xcframework first so
-# the app never links a stale core. Output: dist/MySynologyPhotos-<version>.dmg.
+# the app never links a stale core. Output: build/macos/dist/MySynologyPhotos-<version>.dmg.
 dmg:
 	scripts/package/dmg.sh
 
 clean:
-	cargo clean && rm -rf $(BINDINGS_DIR) $(XCF) build dist
+	cargo clean && rm -rf build

@@ -31,8 +31,8 @@ if [ -z "$APP" ] || [ ! -d "$APP" ]; then
 fi
 
 ROOT="$(repo_root)"
-OUT_DIR="${2:-$ROOT/dist}"
-STAGE_DIR="$ROOT/build/dmg-stage"
+OUT_DIR="${2:-$ROOT/build/macos/dist}"
+STAGE_DIR="$ROOT/build/macos/dmg-stage"
 
 # Version tag for the dmg filename and volume name: the latest git tag
 # (v1.0.1 -> 1.0.1), falling back to the project's MARKETING_VERSION, then 1.0.

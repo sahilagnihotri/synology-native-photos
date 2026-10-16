@@ -4,7 +4,7 @@
 Cargo.lock.orig
 
 # UniFFI / build artifacts (bindings/ is committed on purpose, not ignored)
-/PhotosCore.xcframework
+# All build outputs (xcframework, dmg staging and installers) live under build/
 /build
 
 # Generated at build time (short git SHA for the About window)
@@ -27,9 +27,6 @@ DerivedData/
 
 # SDD scratch (subagent-driven-development ledger and briefs)
 .superpowers/
-
-# Packaged dmg installers (built by scripts/package/dmg.sh / make dmg)
-/dist
 
 # Defensive: secrets and signing material must never be committed
 syno_session*

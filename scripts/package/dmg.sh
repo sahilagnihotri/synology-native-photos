@@ -4,7 +4,7 @@
 #
 # This is the CLI entry point: it builds the Release .app with xcodebuild, then
 # hands off to dmg-from-app.sh (the shared packaging source of truth) to lay it
-# out and create dist/MySynologyPhotos-<version>.dmg. The Xcode "Installer"
+# out and create build/macos/dist/MySynologyPhotos-<version>.dmg. The Xcode "Installer"
 # aggregate target calls that same dmg-from-app.sh on the app Xcode builds, so
 # CLI and Xcode produce identical installers with no duplicated packaging logic.
 #
@@ -45,7 +45,7 @@ done
 APP_NAME="MySynologyPhotos"
 SCHEME="MySynologyPhotos"
 PROJECT="$ROOT/app/$APP_NAME.xcodeproj"
-BUILD_DD="$ROOT/build/dmg-derived-data"
+BUILD_DD="$ROOT/build/macos/dmg-derived-data"
 
 ensure_project() {
   if [ ! -d "$PROJECT" ]; then

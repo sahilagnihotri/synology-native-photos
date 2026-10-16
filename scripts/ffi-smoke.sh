@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh"
 
 ROOT="$(repo_root)"
-XCF="$ROOT/PhotosCore.xcframework"
+XCF="$ROOT/build/macos/PhotosCore.xcframework"
 HEADERS="$XCF/macos-arm64/Headers"
 LIBDIR="$XCF/macos-arm64"
 WORKDIR="$(mktemp -d -t photoscore-ffi-smoke)"

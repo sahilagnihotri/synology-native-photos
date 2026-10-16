@@ -15,7 +15,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-XCF="$ROOT/PhotosCore.xcframework"
+XCF="$ROOT/build/macos/PhotosCore.xcframework"
 LIB="$XCF/macos-arm64/libphotoscore.a"
 
 # Rebuild when the xcframework or bindings are missing, OR when any build
@@ -27,10 +27,12 @@ needs_build=0
 "$SCRIPT_DIR/xcframework-staleness.sh" "$ROOT" >/dev/null || needs_build=1
 
 if [ "$needs_build" -eq 0 ]; then
+  # Printed on purpose so a build log shows which xcframework was used.
+  echo "PhotosCore.xcframework is fresh at $XCF"
   exit 0
 fi
 
-echo "PhotosCore.xcframework missing or stale; rebuilding via 'make xcframework'..."
+echo "PhotosCore.xcframework at $XCF missing or stale; rebuilding via 'make xcframework'..."
 
 # shellcheck disable=SC1090
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env" || true

@@ -34,7 +34,7 @@ targets:
           "${SRCROOT}/../scripts/xcodegen/ensure-xcframework.sh"
         shell: /bin/bash
         outputFiles:
-          - "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/libphotoscore.a"
+          - "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
     settings:
       base:
         PRODUCT_NAME: PhotosCore
@@ -46,8 +46,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers"
-        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
+        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64"
         OTHER_LDFLAGS: ["-lphotoscore", "-lc++"]
   MySynologyPhotos:
     type: application
@@ -127,7 +127,7 @@ targets:
         # C modules to *resolve* wherever PhotosCore is imported, so this
         # search path is required at the Clang-module level even though
         # nothing here uses it directly.
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
   MySynologyPhotosTests:
     type: bundle.unit-test
     platform: macOS
@@ -141,7 +141,7 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
   MySynologyPhotosUITests:
     type: bundle.ui-testing
     platform: macOS
@@ -155,7 +155,7 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/../PhotosCore.xcframework/macos-arm64/Headers"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../build/macos/PhotosCore.xcframework/macos-arm64/Headers"
 aggregateTargets:
   # A no-product target that packages the app into a .dmg installer. It depends
   # on the app target, so building the "Installer" scheme first builds
@@ -185,7 +185,7 @@ schemes:
     test:
       targets:
         - MySynologyPhotosTests
-  # Select this scheme in Xcode and Build (Cmd-B) to produce the dmg in dist/.
+  # Select this scheme in Xcode and Build (Cmd-B) to produce the dmg in build/macos/dist/.
   # Defaults to Release so the packaged app is a release build.
   Installer:
     build:
