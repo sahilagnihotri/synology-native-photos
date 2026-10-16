@@ -93,20 +93,20 @@ fn build_filter_where(
     (clause, params)
 }
 
-/// The asset columns, in the exact order `row_to_asset` reads them. Both
-/// windowed reads (`fetch_assets`, `fetch_trash`) select this list verbatim so
-/// the positional row mapping stays valid and the two queries can never drift
-/// out of column order as the model grows.
+/// The asset columns, in the exact order `row_to_asset` reads them. The
+/// windowed reads select this list verbatim so the positional row mapping
+/// stays valid and the queries can never drift out of column order as the
+/// model grows.
 const ASSET_SELECT_COLUMNS: &str = "server_id, unit_id, cache_key, filename, media_kind, taken_at, \
      added_at, width, height, file_size, server_version, space, \
      rating, description, camera, aperture, exposure_time, focal_length, \
      iso, lens, duration, framerate, video_codec, container_type, latitude, longitude";
 
 /// Maps one row selected in `ASSET_SELECT_COLUMNS` order into an `Asset`.
-/// Shared by `fetch_assets` and `fetch_trash` so the (now 26-field) mapping
-/// lives in exactly one place. `in_trash`/`trashed_at` are intentionally not
-/// read back: they are storage-only bookkeeping that partitions the two
-/// queries, never surfaced on the `Asset` model.
+/// Shared by the windowed reads so the (now 26-field) mapping lives in
+/// exactly one place. `in_trash`/`trashed_at` are intentionally not read
+/// back: they are legacy storage-only bookkeeping, never surfaced on the
+/// `Asset` model.
 fn row_to_asset(r: &rusqlite::Row) -> rusqlite::Result<Asset> {
     Ok(Asset {
         id: r.get(0)?,
@@ -236,7 +236,7 @@ impl Store {
 
     /// Total number of NON-TRASHED assets stored for `space`. Items moved to
     /// the app trash (`in_trash = 1`) are excluded so the library-grid count
-    /// matches what `fetch_assets` returns; `trash_count` reports the trash.
+    /// matches what `fetch_assets` returns.
     pub fn asset_count(&self, space: Space) -> Result<u64, CoreError> {
         let n: i64 = self
             .conn
@@ -463,104 +463,6 @@ impl Store {
         Ok(out)
     }
 
-    /// Returns a window of TRASHED assets for `space` (`in_trash = 1`),
-    /// most-recently-trashed first (`trashed_at DESC`, `server_id DESC`
-    /// tiebreak, NULL `trashed_at` last). This is the mirror image of
-    /// `fetch_assets`, which excludes exactly these rows; together they
-    /// partition a space's assets into the library grid and the Recently
-    /// Deleted view.
-    pub fn fetch_trash(&self, space: Space, offset: u32, limit: u32) -> Result<Vec<Asset>, CoreError> {
-        let sql = format!(
-            "SELECT {ASSET_SELECT_COLUMNS}
-                 FROM assets
-                 WHERE space = ?1 AND in_trash = 1
-                 ORDER BY (trashed_at IS NULL) ASC, trashed_at DESC, server_id DESC
-                 LIMIT ?2 OFFSET ?3"
-        );
-        let mut stmt = self.conn.prepare(&sql).map_err(map_sql)?;
-        let rows = stmt
-            .query_map(params![space_to_int(space), limit as i64, offset as i64], row_to_asset)
-            .map_err(map_sql)?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row.map_err(map_sql)?);
-        }
-        Ok(out)
-    }
-
-    /// Number of trashed assets (`in_trash = 1`) for `space`.
-    pub fn trash_count(&self, space: Space) -> Result<u64, CoreError> {
-        let n: i64 = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM assets WHERE space = ?1 AND in_trash = 1",
-                params![space_to_int(space)],
-                |r| r.get(0),
-            )
-            .map_err(map_sql)?;
-        Ok(n as u64)
-    }
-
-    /// Sets the trash flag on every asset in `ids` for `space`, inside a
-    /// single transaction. `in_trash = true` moves items into the trash (the
-    /// caller supplies `trashed_at = Some(now)`); `in_trash = false` restores
-    /// them (`trashed_at = None`). Only rows whose `server_id` is in `ids` and
-    /// whose `space` matches are touched, so a Personal update never reaches a
-    /// Shared row. An empty `ids` slice is a no-op (no rows, no error).
-    ///
-    /// This only ever changes local flags; it never talks to the NAS. The
-    /// facade calls it ONLY after the server has confirmed the corresponding
-    /// album membership change, so a failed server write leaves these flags
-    /// untouched (fail closed).
-    pub fn set_trash_flag(
-        &self,
-        space: Space,
-        ids: &[i64],
-        in_trash: bool,
-        trashed_at: Option<i64>,
-    ) -> Result<(), CoreError> {
-        if ids.is_empty() {
-            return Ok(());
-        }
-        self.conn.execute_batch("BEGIN").map_err(map_sql)?;
-        let result = self.set_trash_flag_inner(space, ids, in_trash, trashed_at);
-        match result {
-            Ok(()) => {
-                self.conn.execute_batch("COMMIT").map_err(map_sql)?;
-                Ok(())
-            }
-            Err(e) => {
-                let _ = self.conn.execute_batch("ROLLBACK");
-                Err(e)
-            }
-        }
-    }
-
-    fn set_trash_flag_inner(
-        &self,
-        space: Space,
-        ids: &[i64],
-        in_trash: bool,
-        trashed_at: Option<i64>,
-    ) -> Result<(), CoreError> {
-        let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 4)).collect();
-        let sql = format!(
-            "UPDATE assets SET in_trash = ?1, trashed_at = ?2 WHERE space = ?3 AND server_id IN ({})",
-            placeholders.join(",")
-        );
-        let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(ids.len() + 3);
-        let in_trash_int: i64 = if in_trash { 1 } else { 0 };
-        let space_param = space_to_int(space);
-        params_vec.push(&in_trash_int);
-        params_vec.push(&trashed_at);
-        params_vec.push(&space_param);
-        for id in ids {
-            params_vec.push(id);
-        }
-        self.conn.execute(&sql, params_vec.as_slice()).map_err(map_sql)?;
-        Ok(())
-    }
-
     /// Removes the local rows for `ids` in `space` entirely, inside a single
     /// transaction. Used by permanent delete AFTER the NAS has confirmed the
     /// item is gone: unlike `delete_assets_not_in` (a reconciliation sweep),
@@ -594,46 +496,28 @@ impl Store {
         self.conn.execute_batch("COMMIT").map_err(map_sql)?;
         Ok(deleted as u64)
     }
-
-    /// Returns true iff EVERY id in `ids` currently exists in `space` with
-    /// `in_trash = 1`. Used by the facade's `permanently_delete` guard: the
-    /// raw NAS delete verb must be unreachable for any asset that has not
-    /// first gone through the trash step, so the facade calls this and refuses
-    /// (with no network call) unless it returns true. An empty `ids` slice
-    /// returns true vacuously (nothing to check); the facade short-circuits an
-    /// empty request before reaching here anyway.
-    ///
-    /// `ids` MUST be deduplicated by the caller: this compares a distinct
-    /// COUNT against `ids.len()`, so a duplicated id would make an otherwise
-    /// valid request fail closed (which is the safe direction, but the facade
-    /// dedups so a legitimate request is not rejected).
-    pub fn all_in_trash(&self, space: Space, ids: &[i64]) -> Result<bool, CoreError> {
-        if ids.is_empty() {
-            return Ok(true);
-        }
-        let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
-        let sql = format!(
-            "SELECT COUNT(*) FROM assets WHERE space = ?1 AND in_trash = 1 AND server_id IN ({})",
-            placeholders.join(",")
-        );
-        let space_param = space_to_int(space);
-        let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(ids.len() + 1);
-        params_vec.push(&space_param);
-        for id in ids {
-            params_vec.push(id);
-        }
-        let matched: i64 = self
-            .conn
-            .query_row(&sql, params_vec.as_slice(), |r| r.get(0))
-            .map_err(map_sql)?;
-        Ok(matched as usize == ids.len())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::Store;
     use models::{Asset, MediaKind, Space};
+
+    /// Test-only: flags a Personal row as trashed, the way an older build did.
+    /// No production code sets the flag any more.
+    fn flag_trashed(store: &Store, server_id: i64, trashed_at: i64) {
+        store
+            .conn
+            .execute(
+                "UPDATE assets SET in_trash = 1, trashed_at = ?1 WHERE space = 0 AND server_id = ?2",
+                rusqlite::params![trashed_at, server_id],
+            )
+            .unwrap();
+    }
+
+    fn trashed_count(store: &Store) -> i64 {
+        store.conn.query_row("SELECT COUNT(*) FROM assets WHERE in_trash = 1", [], |r| r.get(0)).unwrap()
+    }
 
     fn asset(space: Space, id: i64, taken: Option<i64>, ver: Option<i64>) -> Asset {
         Asset {
@@ -1059,7 +943,7 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         store.upsert_asset(&filtered_asset(Space::Personal, 1, Some(100), MediaKind::Video, 5)).unwrap();
         store.upsert_asset(&filtered_asset(Space::Personal, 2, Some(200), MediaKind::Video, 5)).unwrap();
-        store.set_trash_flag(Space::Personal, &[2], true, Some(5000)).unwrap();
+        flag_trashed(&store, 2, 5000);
 
         let got: Vec<i64> = store
             .filter_assets(Space::Personal, Some(MediaKind::Video), None, None, None, 0, 100)
@@ -1082,48 +966,7 @@ mod tests {
         store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 1);
         assert_eq!(store.fetch_assets(Space::Personal, 0, 10).unwrap().len(), 1);
-        assert_eq!(store.trash_count(Space::Personal).unwrap(), 0);
-        assert!(store.fetch_trash(Space::Personal, 0, 10).unwrap().is_empty());
-    }
-
-    /// Flagging an asset as trashed removes it from `fetch_assets`/
-    /// `asset_count` and moves it into `fetch_trash`/`trash_count`. Clearing
-    /// the flag reverses it exactly.
-    #[test]
-    fn set_trash_flag_moves_asset_between_library_and_trash() {
-        let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Personal, 2, Some(200), Some(1))).unwrap();
-
-        store.set_trash_flag(Space::Personal, &[1], true, Some(5000)).unwrap();
-
-        assert_eq!(store.asset_count(Space::Personal).unwrap(), 1);
-        let grid: Vec<i64> = store.fetch_assets(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
-        assert_eq!(grid, vec![2], "trashed asset must not appear in the library grid");
-        assert_eq!(store.trash_count(Space::Personal).unwrap(), 1);
-        let trash: Vec<i64> = store.fetch_trash(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
-        assert_eq!(trash, vec![1]);
-
-        // Restore: clear the flag.
-        store.set_trash_flag(Space::Personal, &[1], false, None).unwrap();
-        assert_eq!(store.asset_count(Space::Personal).unwrap(), 2);
-        assert_eq!(store.trash_count(Space::Personal).unwrap(), 0);
-        assert!(store.fetch_trash(Space::Personal, 0, 10).unwrap().is_empty());
-    }
-
-    /// The trash view is ordered most-recently-trashed first.
-    #[test]
-    fn fetch_trash_orders_by_trashed_at_desc() {
-        let store = Store::open_in_memory().unwrap();
-        for id in 1..=3 {
-            store.upsert_asset(&asset(Space::Personal, id, Some(id * 10), Some(1))).unwrap();
-        }
-        store.set_trash_flag(Space::Personal, &[1], true, Some(1000)).unwrap();
-        store.set_trash_flag(Space::Personal, &[2], true, Some(3000)).unwrap();
-        store.set_trash_flag(Space::Personal, &[3], true, Some(2000)).unwrap();
-
-        let order: Vec<i64> = store.fetch_trash(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
-        assert_eq!(order, vec![2, 3, 1], "newest trashed_at first");
+        assert_eq!(trashed_count(&store), 0);
     }
 
     /// CRITICAL invariant: a re-crawl (upsert on a conflicting (space,
@@ -1133,7 +976,7 @@ mod tests {
     fn upsert_preserves_trash_flag_on_conflict() {
         let store = Store::open_in_memory().unwrap();
         store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.set_trash_flag(Space::Personal, &[1], true, Some(9999)).unwrap();
+        flag_trashed(&store, 1, 9999);
 
         // A re-crawl reports the same item again with a new cache_key/version.
         let mut recrawled = asset(Space::Personal, 1, Some(100), Some(2));
@@ -1143,9 +986,12 @@ mod tests {
         // Still trashed: absent from the grid, present in the trash, with its
         // trashed_at intact.
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
-        let trash = store.fetch_trash(Space::Personal, 0, 10).unwrap();
-        assert_eq!(trash.len(), 1);
-        assert_eq!(trash[0].cache_key, "ck1-new", "the re-crawl still updated other fields");
+        assert_eq!(trashed_count(&store), 1);
+        let cache_key: String = store
+            .conn
+            .query_row("SELECT cache_key FROM assets WHERE server_id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cache_key, "ck1-new", "the re-crawl still updated other fields");
         let trashed_at: Option<i64> = store
             .conn
             .query_row("SELECT trashed_at FROM assets WHERE server_id = 1", [], |r| r.get(0))
@@ -1159,36 +1005,14 @@ mod tests {
     fn batch_upsert_preserves_trash_flag_on_conflict() {
         let store = Store::open_in_memory().unwrap();
         store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.set_trash_flag(Space::Personal, &[1], true, Some(8888)).unwrap();
+        flag_trashed(&store, 1, 8888);
 
         let mut recrawled = asset(Space::Personal, 1, Some(100), Some(2));
         recrawled.cache_key = "ck1-batch".into();
         store.upsert_assets(&[recrawled]).unwrap();
 
-        assert_eq!(store.trash_count(Space::Personal).unwrap(), 1);
+        assert_eq!(trashed_count(&store), 1);
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
-    }
-
-    #[test]
-    fn set_trash_flag_is_space_scoped() {
-        let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.upsert_asset(&asset(Space::Shared, 1, Some(100), Some(1))).unwrap();
-
-        // Trashing server_id 1 in Personal must not touch the Shared row that
-        // happens to share the same server_id.
-        store.set_trash_flag(Space::Personal, &[1], true, Some(5000)).unwrap();
-        assert_eq!(store.trash_count(Space::Personal).unwrap(), 1);
-        assert_eq!(store.trash_count(Space::Shared).unwrap(), 0);
-        assert_eq!(store.asset_count(Space::Shared).unwrap(), 1);
-    }
-
-    #[test]
-    fn set_trash_flag_empty_ids_is_a_no_op() {
-        let store = Store::open_in_memory().unwrap();
-        store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
-        store.set_trash_flag(Space::Personal, &[], true, Some(1)).unwrap();
-        assert_eq!(store.trash_count(Space::Personal).unwrap(), 0);
     }
 
     #[test]
@@ -1211,22 +1035,6 @@ mod tests {
         store.upsert_asset(&asset(Space::Personal, 1, Some(100), Some(1))).unwrap();
         assert_eq!(store.delete_assets(Space::Personal, &[]).unwrap(), 0);
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 1);
-    }
-
-    #[test]
-    fn all_in_trash_is_true_only_when_every_id_is_trashed() {
-        let store = Store::open_in_memory().unwrap();
-        for id in 1..=3 {
-            store.upsert_asset(&asset(Space::Personal, id, Some(id * 10), Some(1))).unwrap();
-        }
-        store.set_trash_flag(Space::Personal, &[1, 2], true, Some(5000)).unwrap();
-
-        assert!(store.all_in_trash(Space::Personal, &[1, 2]).unwrap(), "both trashed");
-        assert!(!store.all_in_trash(Space::Personal, &[1, 3]).unwrap(), "id 3 is not trashed");
-        // A non-existent id can never be in trash, so the guard fails closed.
-        assert!(!store.all_in_trash(Space::Personal, &[1, 999]).unwrap(), "missing id fails closed");
-        // Empty is vacuously true.
-        assert!(store.all_in_trash(Space::Personal, &[]).unwrap());
     }
 
     // --- date_histogram --------------------------------------------------
@@ -1274,7 +1082,7 @@ mod tests {
         store.upsert_asset(&asset(Space::Personal, 1, Some(base + 10), Some(1))).unwrap();
         store.upsert_asset(&asset(Space::Personal, 2, Some(base + 20), Some(1))).unwrap();
         store.upsert_asset(&asset(Space::Shared, 9, Some(base + 30), Some(1))).unwrap();
-        store.set_trash_flag(Space::Personal, &[2], true, Some(5000)).unwrap();
+        flag_trashed(&store, 2, 5000);
 
         let hist = store.date_histogram(Space::Personal).unwrap();
         let sum: u32 = hist.iter().map(|b| b.count).sum();
@@ -1518,7 +1326,7 @@ mod tests {
         a.rating = 2;
         a.description = "old caption".to_string();
         store.upsert_asset(&a).unwrap();
-        store.set_trash_flag(Space::Personal, &[1], true, Some(9999)).unwrap();
+        flag_trashed(&store, 1, 9999);
 
         // Re-crawl reports a higher rating and a new caption for the same item.
         let mut recrawled = asset(Space::Personal, 1, Some(100), Some(2));
@@ -1529,12 +1337,17 @@ mod tests {
 
         // Still trashed (not un-trashed by the re-crawl)...
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
-        let trash = store.fetch_trash(Space::Personal, 0, 10).unwrap();
-        assert_eq!(trash.len(), 1);
+        assert_eq!(trashed_count(&store), 1);
         // ...but the metadata reflects the re-crawl.
-        assert_eq!(trash[0].rating, 5, "re-crawl must refresh rating");
-        assert_eq!(trash[0].description, "new caption", "re-crawl must refresh description");
-        assert_eq!(trash[0].camera, "Apple iPhone 15");
+        let (rating, description, camera): (i64, String, String) = store
+            .conn
+            .query_row("SELECT rating, description, camera FROM assets WHERE server_id = 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(rating, 5, "re-crawl must refresh rating");
+        assert_eq!(description, "new caption", "re-crawl must refresh description");
+        assert_eq!(camera, "Apple iPhone 15");
         let trashed_at: Option<i64> = store
             .conn
             .query_row("SELECT trashed_at FROM assets WHERE server_id = 1", [], |r| r.get(0))

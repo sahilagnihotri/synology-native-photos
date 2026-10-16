@@ -148,9 +148,8 @@ const STEPS: &[MigrationStep] = &[
         // queries page against. NOT `requires_recrawl`: unlike unit_id, these
         // columns hold app-local state, not NAS-derived data. Their defaults
         // (0 / NULL = "not trashed") are the correct value for every existing
-        // row, so no re-crawl is needed to backfill them; `reconcile_trash`
-        // in the facade is what later reconciles them against the real NAS
-        // trash-album membership.
+        // row, so no re-crawl is needed to backfill them; (Later builds dropped the trash flow;
+        // step 5 clears any leftover flags.)
         version: 2,
         requires_recrawl: false,
         apply: add_trash_columns_if_missing,
@@ -185,7 +184,24 @@ const STEPS: &[MigrationStep] = &[
         requires_recrawl: true,
         apply: add_location_columns_if_missing,
     },
+    MigrationStep {
+        // The app no longer has a local "Recently Deleted" trash flag, but
+        // older builds set in_trash = 1 on rows, and the grid queries still
+        // filter on in_trash = 0 while crawl upserts never reset it. Those
+        // rows would stay hidden forever, so clear the flag once. Local index
+        // rows only: the columns and index stay, and nothing on the NAS is
+        // touched. NOT `requires_recrawl`: the rows are already present.
+        version: 5,
+        requires_recrawl: false,
+        apply: clear_legacy_trash_flags,
+    },
 ];
+
+/// Step 5: un-hides every row an older build flagged as trashed.
+fn clear_legacy_trash_flags(conn: &Connection) -> Result<(), CoreError> {
+    conn.execute("UPDATE assets SET in_trash = 0, trashed_at = NULL", []).map_err(map_sql)?;
+    Ok(())
+}
 
 /// Highest version among `STEPS`; also the schema version a freshly created
 /// database ends up at, since `BASE_DDL` already creates tables at their
@@ -623,7 +639,7 @@ mod tests {
 
     /// A v3 database must gain the `latitude`/`longitude` columns on upgrade to
     /// v4, default them to NULL (unlocated) for existing rows, bump
-    /// `user_version` and the `schema_meta` mirror to 4 (== `latest_version()`),
+    /// `user_version` and the `schema_meta` mirror to `latest_version()`,
     /// and stay a no-op (no duplicate-column error) on a second run.
     #[test]
     fn migration_v3_to_v4_adds_location_columns_defaulted_and_is_idempotent() {
@@ -646,12 +662,11 @@ mod tests {
             .expect("location columns readable");
         assert_eq!(latitude, None, "existing row defaults latitude to NULL (unlocated)");
         assert_eq!(longitude, None, "existing row defaults longitude to NULL (unlocated)");
-        assert_eq!(user_version(&conn).unwrap(), 4);
         assert_eq!(user_version(&conn).unwrap(), latest_version());
         let meta: String = conn
             .query_row("SELECT value FROM schema_meta WHERE key = 'schema_version'", [], |r| r.get(0))
             .expect("schema_meta mirror set");
-        assert_eq!(meta, "4");
+        assert_eq!(meta, latest_version().to_string());
 
         // Second run must not fail with a duplicate-column error and must stay
         // a no-op at the latest version.
@@ -741,7 +756,7 @@ mod tests {
         )
         .expect("trashed v2 row");
 
-        run_migrations(&conn).expect("v2 to v3 migration");
+        add_metadata_columns_if_missing(&conn).expect("v2 to v3 step");
 
         let (in_trash, trashed_at): (i64, Option<i64>) = conn
             .query_row("SELECT in_trash, trashed_at FROM assets WHERE server_id = 7", [], |r| {
@@ -751,8 +766,8 @@ mod tests {
         assert_eq!(in_trash, 1, "the migration must not un-trash an already-trashed row");
         assert_eq!(trashed_at, Some(9999), "trashed_at must survive the v3 migration");
 
-        // Re-run: still trashed, still v3.
-        run_migrations(&conn).expect("second run is a no-op");
+        // Re-run of the step: still trashed.
+        add_metadata_columns_if_missing(&conn).expect("second run is a no-op");
         let in_trash_after: i64 = conn
             .query_row("SELECT in_trash FROM assets WHERE server_id = 7", [], |r| r.get(0))
             .unwrap();
@@ -785,6 +800,41 @@ mod tests {
             .unwrap();
         assert_eq!(complete, 0, "a data-bearing migration must reset a completed crawl");
         assert_eq!(offset, 0, "the paging cursor must rewind so the crawl restarts and backfills metadata");
+    }
+
+    /// A v4 database holding a row an older build flagged as trashed must,
+    /// after the v5 step, show that row in a normal grid read again, with the
+    /// legacy columns still present but cleared.
+    #[test]
+    fn v4_to_v5_migration_unhides_legacy_trashed_rows() {
+        use models::Space;
+        let conn = Connection::open_in_memory().expect("open");
+        run_migrations(&conn).expect("build current-shape tables");
+        set_user_version(&conn, 4).expect("pin to v4");
+        conn.execute(
+            "INSERT INTO assets (space, server_id, unit_id, cache_key, filename, in_trash, trashed_at, updated_at)
+             VALUES (0, 7, 70, 'ck7', 'hidden.jpg', 1, 9999, 0)",
+            [],
+        )
+        .expect("legacy trashed row");
+        let store = crate::Store { conn };
+        assert!(
+            store.fetch_assets(Space::Personal, 0, 10).unwrap().is_empty(),
+            "precondition: the flagged row is hidden before the migration"
+        );
+
+        run_migrations(&store.conn).expect("v4 to v5 migration");
+
+        assert_eq!(user_version(&store.conn).unwrap(), 5);
+        let grid: Vec<i64> = store.fetch_assets(Space::Personal, 0, 10).unwrap().iter().map(|a| a.id).collect();
+        assert_eq!(grid, vec![7], "the legacy trashed row must be visible again");
+        let (in_trash, trashed_at): (i64, Option<i64>) = store
+            .conn
+            .query_row("SELECT in_trash, trashed_at FROM assets WHERE server_id = 7", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("legacy columns still exist");
+        assert_eq!((in_trash, trashed_at), (0, None));
     }
 
     /// A database on v1 must gain the `in_trash` / `trashed_at` columns
