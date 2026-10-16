@@ -115,7 +115,6 @@ Bigger bets:
 
 ## Phase 2: manage (own plan)
 
-- [ ] HIGH: recycle bin enabled check before delete (in progress, worker recycle-check). Probed 2026-10-16: `SYNO.Core.User.Home get` returns `enable_recycle_bin` (true on this NAS); it is an admin API, so a non-admin `photosclient` likely gets Unknown. `SYNO.Core.Share get homes` does not return the field.
 - [ ] Restore gives the photo a NEW Synology Photos id (measured 2026-10-16: 73610 came back as 74368). Anything keyed on the old id (album membership, favorite, rating, tags, people) is probably lost on restore, and the local index must treat the restored file as a new asset. Check what survives, and warn in the Recently Deleted UI if metadata is lost.
 - [ ] Recently Deleted shows an empty bin for ANY non auth error on the recycle root (`list_recycle_photos` depth 0), e.g. a network drop. Only 408 should mean empty; other errors should surface.
 - [ ] Albums (browse, create, add/remove); replace the sidebar Albums placeholder.

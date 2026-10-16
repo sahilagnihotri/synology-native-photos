@@ -2,6 +2,21 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-10-16: recycle bin check before every delete
+
+- Every everyday delete reads `SYNO.Core.User.Home` `enable_recycle_bin` first,
+  fresh per request. Off: a "Recycle Bin Is Off" notice with the DSM setting path,
+  and the core delete is never called. Unknown (e.g. a non admin account): the
+  confirm says the delete may be permanent. On: the old confirm. A failed check
+  stops the delete and shows an error (`b5a3d2b`, `191915d`, `4da7a7f`).
+- Delete and undo errors were never shown anywhere (`DeleteController.errorMessage`
+  had no UI); they now raise an alert (`4da7a7f`).
+- Falsified by the worker per test, and independently by the orchestrator:
+  removing the disabled guard fails `disabledRecycleBinRaisesNoConfirmAndNeverDeletes`
+  and `recycleBinStatusIsFetchedOnEveryRequest`.
+- Measured on the final tree: `cargo test --workspace` 364 passed, 0 failed,
+  1 ignored. Swift unit tests 498 passed, 0 failed, 0 skipped.
+
 ## Session 2026-10-16: real NAS delete and restore verification
 
 With Sahil's go ahead, on one real photo (`IMG_7517.PNG`, 900,892 bytes,
