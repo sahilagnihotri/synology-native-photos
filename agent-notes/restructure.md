@@ -41,3 +41,13 @@
 - New DerivedData folder (MySynologyPhotos-ekvskhdv...). Build log: "fresh at .../build/macos/PhotosCore.xcframework",
   "wrote GitVersion.shortSHA = 93177b3 -> .../build/macos/Generated/GitVersion.swift".
 - Gates: Rust 364/0/1, Swift 498/0/0.
+
+### Step 4: scripts split into shared, macos, windows
+- git mv: lib/common.sh -> shared/common.sh; xcodegen/ -> macos/xcodegen/; package/ -> macos/package/;
+  ffi-smoke.sh -> macos/ffi-smoke.sh; setup/macos.sh -> macos/setup.sh; setup/windows.ps1 -> windows/setup.ps1.
+  scripts/tests/ stays at the top (tests for the scripts themselves).
+- New: shared/test-core.sh (cargo test), macos/test-app.sh (xcodebuild unit tests, timeouts on,
+  ADHOC_SIGN and RESULT_BUNDLE env). test.sh is now a dispatcher: core | macos | windows | all, `app` aliases macos.
+- `scripts/test.sh core`: 364/0/1 exit 0. `scripts/test.sh windows`: warns no app, exit 0.
+- `ADHOC_SIGN=1 RESULT_BUNDLE=... scripts/test.sh app`: exit 0, alias warning printed, xcresult 498/0/0.
+- Gate xcodebuild command: 498/0/0, log "fresh at .../build/macos/PhotosCore.xcframework". Staleness test 8/8.

@@ -858,7 +858,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/../../scripts/xcodegen/generate-git-version.sh\" \"${SRCROOT}/../../build/macos/Generated/GitVersion.swift\"\n";
+			shellScript = "\"${SRCROOT}/../../scripts/macos/xcodegen/generate-git-version.sh\" \"${SRCROOT}/../../build/macos/Generated/GitVersion.swift\"\n";
 		};
 		60D7F9293B60F3E86B24D07E /* Package DMG */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -877,7 +877,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/../../scripts/package/dmg-from-app.sh\" \"${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app\"\n";
+			shellScript = "\"${SRCROOT}/../../scripts/macos/package/dmg-from-app.sh\" \"${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app\"\n";
 		};
 		F8D4C089D4C7CD779742E55F /* Ensure PhotosCore.xcframework */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -897,7 +897,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/../../scripts/xcodegen/ensure-xcframework.sh\"\n";
+			shellScript = "\"${SRCROOT}/../../scripts/macos/xcodegen/ensure-xcframework.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

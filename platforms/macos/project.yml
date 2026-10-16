@@ -31,7 +31,7 @@ targets:
     preBuildScripts:
       - name: "Ensure PhotosCore.xcframework"
         script: |
-          "${SRCROOT}/../../scripts/xcodegen/ensure-xcframework.sh"
+          "${SRCROOT}/../../scripts/macos/xcodegen/ensure-xcframework.sh"
         shell: /bin/bash
         outputFiles:
           - "$(SRCROOT)/../../build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
@@ -70,7 +70,7 @@ targets:
     preBuildScripts:
       - name: "Generate GitVersion.swift"
         script: |
-          "${SRCROOT}/../../scripts/xcodegen/generate-git-version.sh" "${SRCROOT}/../../build/macos/Generated/GitVersion.swift"
+          "${SRCROOT}/../../scripts/macos/xcodegen/generate-git-version.sh" "${SRCROOT}/../../build/macos/Generated/GitVersion.swift"
         shell: /bin/bash
         # outputFiles makes the new build system treat the compile of
         # GitVersion.swift as depending on this phase, so the phase runs
@@ -176,7 +176,7 @@ aggregateTargets:
     buildScripts:
       - name: "Package DMG"
         script: |
-          "${SRCROOT}/../../scripts/package/dmg-from-app.sh" "${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app"
+          "${SRCROOT}/../../scripts/macos/package/dmg-from-app.sh" "${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app"
         shell: /bin/bash
         # Always repackage: the dmg should reflect whatever was just built, and
         # declaring no outputs would otherwise make Xcode warn on every build.

@@ -57,7 +57,7 @@ repo_root() {
   if [ -n "$root" ]; then
     printf '%s\n' "$root"
   else
-    # Fallback: this lib lives at <root>/scripts/lib/common.sh
+    # Fallback: this lib lives at <root>/scripts/shared/common.sh
     ( cd "$here/../.." && pwd )
   fi
 }

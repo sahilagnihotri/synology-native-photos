@@ -5,8 +5,8 @@
 # does not exist yet and is intentionally out of scope.
 #
 # Usage:
-#   pwsh scripts/setup/windows.ps1            # install missing core toolchain
-#   pwsh scripts/setup/windows.ps1 -Verify    # check only, install nothing
+#   pwsh scripts/windows/setup.ps1            # install missing core toolchain
+#   pwsh scripts/windows/setup.ps1 -Verify    # check only, install nothing
 #
 # Version floor: Rust stable via rustup, target x86_64-pc-windows-msvc.
 

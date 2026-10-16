@@ -12,12 +12,12 @@
 # Self-healing: builds the bindings and xcframework via `make` first if missing.
 #
 # Usage:
-#   scripts/ffi-smoke.sh
+#   scripts/macos/ffi-smoke.sh
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/common.sh
-. "$SCRIPT_DIR/lib/common.sh"
+# shellcheck source=../shared/common.sh
+. "$SCRIPT_DIR/../shared/common.sh"
 
 ROOT="$(repo_root)"
 XCF="$ROOT/build/macos/PhotosCore.xcframework"

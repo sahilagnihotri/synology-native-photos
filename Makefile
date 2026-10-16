@@ -45,7 +45,7 @@ xcframework: bindings
 # Delegates to the packaging script, which rebuilds the xcframework first so
 # the app never links a stale core. Output: build/macos/dist/MySynologyPhotos-<version>.dmg.
 dmg:
-	scripts/package/dmg.sh
+	scripts/macos/package/dmg.sh
 
 clean:
 	cargo clean && rm -rf build

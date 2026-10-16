@@ -4,7 +4,7 @@
 # THE single source of truth for how the macOS installer is laid out, versioned,
 # and signing-checked. Both entry points call this on an app they have already
 # built, so the packaging logic never drifts into two copies:
-#   - scripts/package/dmg.sh  (CLI: builds the Release app, then calls this)
+#   - scripts/macos/package/dmg.sh  (CLI: builds the Release app, then calls this)
 #   - the Xcode "Installer" aggregate target (Xcode builds the app, then a build
 #     phase calls this on ${BUILT_PRODUCTS_DIR}/MySynologyPhotos.app)
 # Neither path re-invokes xcodebuild from here, so there is no nested-build hang.
@@ -18,8 +18,8 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/common.sh
-. "$SCRIPT_DIR/../lib/common.sh"
+# shellcheck source=../../shared/common.sh
+. "$SCRIPT_DIR/../../shared/common.sh"
 
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-5W67TF3579}"
 APP_NAME="MySynologyPhotos"

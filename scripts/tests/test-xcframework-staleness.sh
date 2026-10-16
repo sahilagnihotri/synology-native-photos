@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Tests scripts/xcodegen/xcframework-staleness.sh against fake trees under
+# Tests scripts/macos/xcodegen/xcframework-staleness.sh against fake trees under
 # $TMPDIR. Never builds anything and never touches the real repo.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHECK="$HERE/../xcodegen/xcframework-staleness.sh"
+CHECK="$HERE/../macos/xcodegen/xcframework-staleness.sh"
 BASE="$(mktemp -d "${TMPDIR:-/tmp}/xcf-stale.XXXXXX")"
 trap 'rm -rf "$BASE"' EXIT
 

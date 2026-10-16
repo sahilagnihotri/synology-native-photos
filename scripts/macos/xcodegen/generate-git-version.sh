@@ -26,14 +26,14 @@ set -uo pipefail
 OUT="${1:-}"
 if [ -z "$OUT" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
   OUT="$ROOT/build/macos/Generated/GitVersion.swift"
 fi
 
 SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
 [ -z "$SHA" ] && SHA="unknown"
 
-CONTENT="// Generated at build time by scripts/xcodegen/generate-git-version.sh.
+CONTENT="// Generated at build time by scripts/macos/xcodegen/generate-git-version.sh.
 // Do not edit and do not commit (see .gitignore). Holds the short git commit
 // SHA the running executable was built from, surfaced in the About window.
 enum GitVersion {

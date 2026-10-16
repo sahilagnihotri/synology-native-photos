@@ -5,13 +5,13 @@ Replicable dev environment and test entry points. One install script per platfor
 ## Setup
 
 ```bash
-scripts/setup/macos.sh            # install anything missing, then verify
-scripts/setup/macos.sh --verify   # doctor mode: check only, install nothing
+scripts/macos/setup.sh            # install anything missing, then verify
+scripts/macos/setup.sh --verify   # doctor mode: check only, install nothing
 ```
 
 ```powershell
-pwsh scripts/setup/windows.ps1            # core toolchain only (UI is a future phase)
-pwsh scripts/setup/windows.ps1 -Verify    # doctor mode
+pwsh scripts/windows/setup.ps1            # core toolchain only (UI is a future phase)
+pwsh scripts/windows/setup.ps1 -Verify    # doctor mode
 ```
 
 What macOS setup covers (idempotent, safe to re-run):
@@ -25,21 +25,28 @@ What macOS setup covers (idempotent, safe to re-run):
 ## Test
 
 ```bash
-scripts/test.sh                        # run everything present (core + app)
-scripts/test.sh core                   # Rust core tests only
-scripts/test.sh app                    # Swift/macOS app tests only
-scripts/test.sh --include-integration  # also run real-NAS tests (needs SYNO_* env vars)
+scripts/test.sh                        # everything that applies on this host
+scripts/test.sh core                   # Rust core tests only (any platform)
+scripts/test.sh macos                  # macOS app unit tests only
+scripts/test.sh windows                # Windows app tests (no app yet, a no-op)
+scripts/test.sh app                    # old name for macos, kept as an alias
+scripts/test.sh --include-integration  # also run real NAS tests (needs SYNO_* env vars)
 ```
 
-Self-healing: if the Rust toolchain is missing, `test.sh` runs setup first. Before the
-scaffold tasks create `core/` and `app/`, the test script skips cleanly with a warning.
+Self-healing: if the Rust toolchain is missing on a Mac, the core tests run setup first.
 
 ## Layout
 
 ```
 scripts/
-  lib/common.sh        shared bash helpers (colored output, version checks, verify accumulator)
-  setup/macos.sh       macOS dev setup + doctor mode
-  setup/windows.ps1    Windows core-toolchain setup (UI deferred)
-  test.sh              run the full test suite, one command
+  shared/common.sh           shared bash helpers (colored output, version checks, verify accumulator)
+  shared/test-core.sh        cargo test for the Rust core (any platform)
+  macos/setup.sh             macOS dev setup + doctor mode
+  macos/test-app.sh          xcodebuild unit tests for the macOS app
+  macos/ffi-smoke.sh         Swift to Rust FFI smoke test against the built xcframework
+  macos/xcodegen/            Xcode build phase helpers (xcframework self heal, GitVersion)
+  macos/package/             dmg installer packaging
+  windows/setup.ps1          Windows core toolchain setup (UI deferred)
+  tests/                     tests for the scripts themselves
+  test.sh                    top level dispatcher: core | macos | windows | all
 ```

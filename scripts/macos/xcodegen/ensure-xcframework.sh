@@ -14,7 +14,7 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 XCF="$ROOT/build/macos/PhotosCore.xcframework"
 LIB="$XCF/macos-arm64/libphotoscore.a"
 

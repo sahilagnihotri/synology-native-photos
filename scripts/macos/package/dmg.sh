@@ -13,8 +13,8 @@
 # stale core, and regenerates the Xcode project if it is missing.
 #
 # Usage:
-#   scripts/package/dmg.sh            # build the dmg
-#   scripts/package/dmg.sh --open     # build, then reveal the dmg in Finder
+#   scripts/macos/package/dmg.sh            # build the dmg
+#   scripts/macos/package/dmg.sh --open     # build, then reveal the dmg in Finder
 #
 # Signing: builds with the project's Release signing. The team is pinned to the
 # Agnihotri AS account (5W67TF3579) and verified by dmg-from-app.sh, never the
@@ -25,8 +25,8 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/common.sh
-. "$SCRIPT_DIR/../lib/common.sh"
+# shellcheck source=../../shared/common.sh
+. "$SCRIPT_DIR/../../shared/common.sh"
 
 ROOT="$(repo_root)"
 
@@ -51,7 +51,7 @@ ensure_project() {
   if [ ! -d "$PROJECT" ]; then
     step "Xcode project missing; generating with xcodegen"
     if ! have xcodegen; then
-      err "xcodegen not found. Install it (brew install xcodegen) or run scripts/setup/macos.sh."
+      err "xcodegen not found. Install it (brew install xcodegen) or run scripts/macos/setup.sh."
       exit 1
     fi
     ( cd "$ROOT/platforms/macos" && xcodegen generate )

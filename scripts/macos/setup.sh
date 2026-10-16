@@ -4,16 +4,16 @@
 # project-driven UniFFI bindgen prerequisites, and checks Xcode/Swift.
 #
 # Usage:
-#   scripts/setup/macos.sh            # install anything missing, then verify
-#   scripts/setup/macos.sh --verify   # doctor mode: check only, install nothing
+#   scripts/macos/setup.sh            # install anything missing, then verify
+#   scripts/macos/setup.sh --verify   # doctor mode: check only, install nothing
 #
 # Version floors (from the design's Global Constraints):
 #   Xcode 26+, Swift 6.3+, Rust stable via rustup, target aarch64-apple-darwin.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/common.sh
-. "$SCRIPT_DIR/../lib/common.sh"
+# shellcheck source=../shared/common.sh
+. "$SCRIPT_DIR/../shared/common.sh"
 
 VERIFY_ONLY=0
 [ "${1:-}" = "--verify" ] && VERIFY_ONLY=1
@@ -24,7 +24,7 @@ RUST_TARGET="aarch64-apple-darwin"
 
 # --- platform guard --------------------------------------------------------
 if [ "$(uname -s)" != "Darwin" ]; then
-  err "This script is for macOS. On Windows use scripts/setup/windows.ps1."
+  err "This script is for macOS. On Windows use scripts/windows/setup.ps1."
   exit 1
 fi
 
@@ -68,7 +68,7 @@ ensure_rust() {
   if have rustc && have cargo; then
     check_pass "rustc $(rustc --version | awk '{print $2}'), cargo present"
   elif [ "$VERIFY_ONLY" -eq 1 ]; then
-    check_fail "Rust not installed. Run scripts/setup/macos.sh (without --verify) to install."
+    check_fail "Rust not installed. Run scripts/macos/setup.sh (without --verify) to install."
     return
   elif have brew; then
     info "Installing rustup via Homebrew..."
