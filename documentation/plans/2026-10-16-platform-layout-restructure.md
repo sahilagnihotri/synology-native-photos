@@ -62,8 +62,29 @@ documentation/
 3. Move `app/` to `platforms/macos/` (project.yml, scripts, test.sh).
 4. Split `scripts/` into shared, macos, windows, keeping test.sh as the entry point.
 5. Docs: architecture.md, platform pages, README, HANDOVER, CLAUDE.md paths.
-6. Manual only CI workflow for core tests on macOS and Windows, `stable` branch only,
-   plus the local Windows cross check script.
+6. Local CI scripts, the real source of truth (GitHub only ever calls these):
+   - `scripts/ci/ci.sh` (macOS, and Linux for the core): `cargo fmt --check`,
+     `cargo clippy --workspace --all-targets -- -D warnings`,
+     `cargo test --workspace`, the shell script tests under `scripts/tests/`, and on
+     macOS the Swift unit tests (ad hoc signed, test timeouts on) with pass, fail
+     and skip counts read from the xcresult. Exit code is the gate; each stage
+     prints PASS or FAIL and a summary table at the end. Stages selectable:
+     `ci.sh core|macos|all`.
+   - `scripts/ci/ci.ps1` (Windows, PowerShell): the same core stages, plus the
+     Windows app stage once that app exists. Written now for the core so the
+     Windows machine has a working gate on day one.
+   - `scripts/windows/check-core.sh` (macOS): cross `cargo check` of the core for
+     `x86_64-pc-windows-msvc` via cargo-xwin, so Windows breakage in the core is
+     caught on the Mac. If cargo-xwin is missing it says how to install it.
+7. Manual only GitHub workflow (`workflow_dispatch`, `stable` branch guard) that
+   just runs `scripts/ci/ci.sh` on `macos-latest` and `scripts/ci/ci.ps1` on
+   `windows-latest`.
+8. Windows handover: `documentation/platforms/windows-handover.md`, a prompt to
+   paste into Claude Code on the Windows machine once the Mac work is done. It
+   states what exists, the layout, how to clone and set up (rustup, MSVC build
+   tools), how to run `ci.ps1`, the NAS connection facts and OTP and device token
+   approach from `CLAUDE.md`, the safety invariants, the open UI technology
+   decision with the trade offs, and the first milestone (read only browse).
 
 ## Open decision (Sahil)
 
