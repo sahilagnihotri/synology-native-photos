@@ -81,6 +81,6 @@ noted in the table.
    fails closed with `CapabilityUnavailable` when an API disappears from the
    advertised set entirely, which surfaces the break rather than silently
    sending a request to an endpoint that no longer exists.
-4. Keep the small API list in `app/SynologyPhotos/About/AboutInfo.swift`
+4. Keep the small API list in `platforms/macos/MySynologyPhotos/About/AboutInfo.swift`
    (`knownApiVersions`) in sync with the "Version the app sends" column, so
    the About window and this doc never disagree.

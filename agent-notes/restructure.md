@@ -51,3 +51,17 @@
 - `scripts/test.sh core`: 364/0/1 exit 0. `scripts/test.sh windows`: warns no app, exit 0.
 - `ADHOC_SIGN=1 RESULT_BUNDLE=... scripts/test.sh app`: exit 0, alias warning printed, xcresult 498/0/0.
 - Gate xcodebuild command: 498/0/0, log "fresh at .../build/macos/PhotosCore.xcframework". Staleness test 8/8.
+
+### Step 5: docs
+- New: README.md (root had none), documentation/architecture.md, documentation/platforms/{macos,windows}.md,
+  platforms/windows/README.md placeholder. CLAUDE.md gains a Repo layout section.
+- Path fixes: HANDOVER.md (app path, test.sh macos, self heal note now accurate), synology-api-versions.md
+  (AboutInfo.swift path), Fixed.md (6 path fixes only).
+- Left on purpose: documentation/plans/*.md that are historical (phase0/phase1, interface contract, phase2)
+  and documentation/reviews/2026-07-26-ux-adversarial-review.md: dated records of the old layout. The
+  restructure plan itself names the old paths by design. documentation/platforms/windows-handover.md is the
+  orchestrator's (fe121f2), not touched.
+- Gates: Rust 364/0/1, Swift 498/0/0, log "fresh at .../build/macos/PhotosCore.xcframework".
+- FOUND (pre-existing, not from the move): scripts/macos/ffi-smoke.sh fails to compile its main.swift:
+  Connection(...) is missing the allowUntrustedTls argument; the script's `|| true` hides the compile error
+  and it then fails on the missing binary. Paths resolve fine (it compiles the moved bindings).

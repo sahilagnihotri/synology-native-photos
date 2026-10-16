@@ -33,6 +33,15 @@ A native macOS app (Apple Photos-like: browse, view, edit, delete, albums, searc
 - **Connectivity:** LAN + Tailscale first (direct IP works for both). QuickConnect/DDNS is on the TODO for later.
 - **Secrets:** DSM session/token in the macOS Keychain, never in UserDefaults.
 
+## Repo layout
+
+- `core/`: shared Rust core (Cargo workspace manifest at the repo root), exposed through UniFFI.
+- `platforms/macos/`: the macOS app. Edit `project.yml`, then `xcodegen generate` (outside the sandbox) and commit both. Generated Swift bindings live in `platforms/macos/Generated/` and are tracked.
+- `platforms/windows/`: placeholder until the Windows UI technology is chosen.
+- `build/`: every build output (xcframework, GitVersion.swift, dmg), gitignored.
+- `scripts/shared`, `scripts/macos`, `scripts/windows`; `scripts/test.sh core|macos|windows|all`; `scripts/ci/ci.sh` is the local CI gate.
+- `documentation/architecture.md` has the one page overview.
+
 ## Deferred / TODO (not in current scope)
 
 - QuickConnect / DDNS remote-access support.

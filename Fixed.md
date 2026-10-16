@@ -98,7 +98,7 @@ With Sahil's go ahead, on one real photo (`IMG_7517.PNG`, 900,892 bytes,
     untouched (`82b9995`).
   - Detail viewer performance: two tier `OriginalImageCache`, downsampled decode,
     thumbnail first (`996b061`, `048d6d5`, `c9fc8b3`).
-  - xcframework self-heal: `scripts/xcodegen/ensure-xcframework.sh` rebuilds when
+  - xcframework self-heal: `scripts/macos/xcodegen/ensure-xcframework.sh` rebuilds when
     `core/**/*.rs` is newer (`67c1e89`).
   - Real delete UI: grid key, context menu, toolbar, viewer, confirm alert, Cmd-Z,
     Recently Deleted restore and confirmed permanent delete.
@@ -109,7 +109,7 @@ With Sahil's go ahead, on one real photo (`IMG_7517.PNG`, 900,892 bytes,
 - Full rename of the APP (not the core) to avoid using Synology's exact product
   name as our app name. Display name "MySynology Photos" (via
   `INFOPLIST_KEY_CFBundleDisplayName`); product/module/target `MySynologyPhotos`;
-  bundle id `se.agnihotri.mysynologyphotos`; source dirs `app/MySynologyPhotos*`;
+  bundle id `se.agnihotri.mysynologyphotos`; source dirs `platforms/macos/MySynologyPhotos*`;
   project + schemes `MySynologyPhotos`; Keychain/UserDefaults/queue keys under
   `se.agnihotri.mysynologyphotos.*`; dmg/scripts updated. The changed bundle id
   orphans the old Keychain session, so a one-time re-login to the NAS is
@@ -123,21 +123,21 @@ With Sahil's go ahead, on one real photo (`IMG_7517.PNG`, 900,892 bytes,
 
 ## Session 2026-07-26 (cont.): DMG installer
 
-- Two ways to build a distributable `dist/SynologyPhotos-<version>.dmg` (Release
+- Two ways to build a distributable `build/macos/dist/SynologyPhotos-<version>.dmg` (Release
   `.app` next to an `/Applications` alias, the standard drag-to-install layout),
   both sharing ONE packaging source of truth so they never drift:
-  - CLI: `make dmg` / `scripts/package/dmg.sh` (builds the Release app with
+  - CLI: `make dmg` / `scripts/macos/package/dmg.sh` (builds the Release app with
     xcodebuild, then packages).
   - Xcode: an **`Installer` aggregate target + scheme** (`aggregateTargets` in
     `project.yml`). Select the Installer scheme and Build; it depends on the app
     target so Xcode builds the app with its OWN build (no nested xcodebuild
     hang), then a build phase packages it. Defaults to Release.
-  - Shared helper `scripts/package/dmg-from-app.sh` does the staging,
+  - Shared helper `scripts/macos/package/dmg-from-app.sh` does the staging,
     `/Applications` alias, signing-team gate, and `hdiutil create`; both entry
     points call it on an app they already built.
 - Zero extra tooling (uses `hdiutil`); `dmg.sh` is self-healing (rebuilds the
   xcframework first, regenerates the Xcode project if missing); version derived
-  from the latest git tag. `dist/` is gitignored.
+  from the latest git tag. `build/` is gitignored.
 - Signing pinned to the Agnihotri AS team (`5W67TF3579`) explicitly in the
   script, NOT the Hexagon work identity that is also installed on this machine
   (it belongs to a different team, so it is never eligible once this team is

@@ -7,7 +7,7 @@ chat: `CLAUDE.md` (rules), `TODO.md` (pending), `Fixed.md` (done, with hashes) a
 
 ---
 
-You are continuing work on **synology-native-photos**, a native macOS Apple Photos style client for a Synology NAS over its Web API. Rust core in `core/` (exposed to Swift via UniFFI), SwiftUI/AppKit app in `app/`. Read `CLAUDE.md` first; it is authoritative. Then read `TODO.md` and `Fixed.md`.
+You are continuing work on **synology-native-photos**, a native macOS Apple Photos style client for a Synology NAS over its Web API. Rust core in `core/` (exposed to Swift via UniFFI), SwiftUI/AppKit app in `platforms/macos/`, a Windows app planned in `platforms/windows/`. `documentation/architecture.md` shows the layout. Read `CLAUDE.md` first; it is authoritative. Then read `TODO.md` and `Fixed.md`.
 
 ## Current state
 
@@ -35,9 +35,9 @@ Open risk: nothing checks that the DSM recycle bin is enabled for the homes shar
 
 - Rust: `cargo test --workspace` from the repo root. 385 passed, 0 failed, 1 ignored (the real NAS test).
 - Swift unit tests: 470 passed, 0 failed, 0 skipped. Run with
-  `xcodebuild test -project app/MySynologyPhotos.xcodeproj -scheme MySynologyPhotos -destination 'platform=macOS' -only-testing:MySynologyPhotosTests`
-  or `scripts/test.sh app`. Use `ADHOC_SIGN=1 scripts/test.sh app` in a shell that cannot see the login keychain (for example a sandboxed agent). Run unit tests only: the UI test target triggers a System Events automation prompt.
-- After any core change run `make xcframework` if the build complains about missing `uniffi_..._checksum` (the self-heal watches `core/**/*.rs` only, not `Cargo.toml` or the UDL).
+  `xcodebuild test -project platforms/macos/MySynologyPhotos.xcodeproj -scheme MySynologyPhotos -destination 'platform=macOS' -only-testing:MySynologyPhotosTests`
+  or `scripts/test.sh macos`. Use `ADHOC_SIGN=1 scripts/test.sh macos` in a shell that cannot see the login keychain (for example a sandboxed agent). Run unit tests only: the UI test target triggers a System Events automation prompt.
+- The xcframework self heal runs on every Xcode build and rebuilds `build/macos/PhotosCore.xcframework` when any Rust source, `Cargo.toml`, `Cargo.lock` or `.udl` is newer than the lib. `make xcframework` forces it.
 - Falsify new tests: revert the fix, watch the test fail, restore.
 
 ## Real NAS probing workflow
