@@ -96,12 +96,28 @@ pub struct Connection {
     pub allow_untrusted_tls: bool,
 }
 
-#[derive(uniffi::Record, Clone, Debug)]
+#[derive(uniffi::Record, Clone)]
 pub struct Session {
     pub sid: String,
     pub syno_token: Option<String>,
     pub username: String,
     pub device_did: Option<String>,
+}
+
+/// Manual Debug so a stray `{:?}` can never leak the session id, SynoToken or
+/// device token into a log. Only the username is shown in the clear.
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn mask(o: &Option<String>) -> &'static str {
+            if o.is_some() { "Some(<redacted>)" } else { "None" }
+        }
+        f.debug_struct("Session")
+            .field("sid", &format_args!("<redacted>"))
+            .field("syno_token", &format_args!("{}", mask(&self.syno_token)))
+            .field("username", &self.username)
+            .field("device_did", &format_args!("{}", mask(&self.device_did)))
+            .finish()
+    }
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -551,6 +567,25 @@ mod tests {
         };
         assert_eq!(s.username, "photobot");
         assert_eq!(s.syno_token.as_deref(), Some("tok"));
+    }
+
+    #[test]
+    fn session_debug_redacts_secrets() {
+        let s = Session {
+            sid: "SID_SECRET_9f3a".to_string(),
+            syno_token: Some("SYNOTOKEN_SECRET_77b1".to_string()),
+            username: "photobot".to_string(),
+            device_did: Some("DEVICE_SECRET_c4d2".to_string()),
+        };
+        for out in [format!("{:?}", s), format!("{:#?}", s)] {
+            for secret in ["SID_SECRET_9f3a", "SYNOTOKEN_SECRET_77b1", "DEVICE_SECRET_c4d2"] {
+                assert!(!out.contains(secret), "Debug leaked {secret}: {out}");
+            }
+            assert!(out.contains("photobot"), "non-secret field missing: {out}");
+            assert!(out.contains("<redacted>"));
+        }
+        let none = Session { sid: "x".into(), syno_token: None, username: "u".into(), device_did: None };
+        assert!(format!("{:?}", none).contains("None"));
     }
 
     #[test]
