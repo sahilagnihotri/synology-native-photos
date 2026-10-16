@@ -301,6 +301,107 @@ fn json_path_array(path: &str) -> Result<String, CoreError> {
     })
 }
 
+/// File Station's "no such file or directory" error code. Taken from the
+/// official File Station API guide, NOT yet observed on the real NAS: a
+/// different code only makes a vanished folder look like "still pending"
+/// (a false failure after the timeout), never a false success.
+const FS_NO_SUCH_FILE: i64 = 408;
+
+/// How long a restore or permanent delete waits for File Station to finish
+/// its background task. `CopyMove`/`Delete` `start` only QUEUE a task, so a
+/// success envelope from `start` says nothing about the outcome. Completion is
+/// confirmed by listing the recycle folder until the file has left it, using
+/// only the `List` call already verified against the real NAS.
+#[derive(Debug, Clone, Copy)]
+pub struct TaskPolling {
+    pub attempts: u32,
+    pub interval: std::time::Duration,
+}
+
+impl Default for TaskPolling {
+    /// About 20 seconds. Recycle and library share a volume, so a move is a
+    /// rename and normally finishes within the first poll.
+    fn default() -> Self {
+        Self { attempts: 80, interval: std::time::Duration::from_millis(250) }
+    }
+}
+
+/// Split a path into (parent folder, file name).
+fn split_parent(path: &str) -> Result<(&str, &str), CoreError> {
+    match path.rsplit_once('/') {
+        Some((parent, name)) if !parent.is_empty() && !name.is_empty() => Ok((parent, name)),
+        _ => Err(CoreError::UnexpectedResponse { message: format!("path has no parent folder: {path}") }),
+    }
+}
+
+/// Whether `folder` holds an entry called `name`. `Ok(None)` means the folder
+/// itself does not exist (File Station error 408). Every other error,
+/// including auth, is returned as is.
+async fn folder_contains(
+    transport: &Transport,
+    sid: &str,
+    syno_token: Option<&str>,
+    folder: &str,
+    name: &str,
+) -> Result<Option<bool>, CoreError> {
+    let mut offset = 0u32;
+    loop {
+        let query: Vec<(&str, String)> = vec![
+            ("api", "SYNO.FileStation.List".to_string()),
+            ("version", "2".to_string()),
+            ("method", "list".to_string()),
+            ("folder_path", folder.to_string()),
+            ("offset", offset.to_string()),
+            ("limit", LIST_PAGE_LIMIT.to_string()),
+            ("_sid", sid.to_string()),
+        ];
+        let body = fs_get_body(transport, &query, syno_token).await?;
+        if let Ok(raw) = serde_json::from_str::<crate::envelope::SynoResponse<serde_json::Value>>(&body) {
+            if !raw.success && raw.error.as_ref().map(|e| e.code) == Some(FS_NO_SUCH_FILE) {
+                return Ok(None);
+            }
+        }
+        let data: FsListData = decode_envelope(&body)?;
+        let n = data.files.len() as u32;
+        if data.files.iter().filter_map(decode_fs_entry).any(|e| e.name == name) {
+            return Ok(Some(true));
+        }
+        if n < LIST_PAGE_LIMIT {
+            return Ok(Some(false));
+        }
+        offset += LIST_PAGE_LIMIT;
+    }
+}
+
+/// Poll until `recycle_path` is no longer in its recycle folder. Fails with
+/// `UnexpectedResponse` naming `what` if it is still there after `polling`.
+/// Auth errors abort at once; any other listing error counts as "not
+/// confirmed yet" and is retried, so a transient blip never reads as success.
+async fn wait_until_gone_from_recycle(
+    transport: &Transport,
+    sid: &str,
+    syno_token: Option<&str>,
+    recycle_path: &str,
+    what: &str,
+    polling: TaskPolling,
+) -> Result<(), CoreError> {
+    let (folder, name) = split_parent(recycle_path)?;
+    for attempt in 0..polling.attempts.max(1) {
+        if attempt > 0 {
+            tokio::time::sleep(polling.interval).await;
+        }
+        match folder_contains(transport, sid, syno_token, folder, name).await {
+            Ok(Some(false)) | Ok(None) => return Ok(()),
+            Ok(Some(true)) => {}
+            Err(e @ (CoreError::Auth { .. } | CoreError::OtpRequired)) => return Err(e),
+            Err(_) => {}
+        }
+    }
+    Err(CoreError::UnexpectedResponse {
+        message: format!("{what} did not complete: {name} is still in the recycle bin"),
+    })
+}
+
 /// Restore one recycled file to its original library location by MOVING it out
 /// of `#recycle` with `SYNO.FileStation.CopyMove` (`method=start`,
 /// `overwrite=false`). The destination is derived by `original_parent_folder`.
@@ -309,16 +410,42 @@ fn json_path_array(path: &str) -> Result<String, CoreError> {
 /// defaults to a copy, which leaves the file duplicated in `#recycle` after a
 /// restore (so a restored item keeps showing in Recently Deleted).
 /// `remove_src=true` makes it a true move, deleting the source once the copy
-/// lands. Fails closed on a non-success envelope. `CopyMove start` returns a
-/// `taskid`; a success envelope is treated as OK (no status poll).
+/// lands.
+///
+/// Fails closed at every step:
+/// - a file with the same name already in the destination refuses the restore
+///   BEFORE any move, since `overwrite=false` would otherwise skip it silently;
+/// - a non-success `start` envelope is an error;
+/// - `start` only queues a task, so success is reported only once the file has
+///   actually left the recycle folder (see `TaskPolling`).
 pub async fn restore_recycle_item(
     transport: &Transport,
     sid: &str,
     syno_token: Option<&str>,
     recycle_path: &str,
 ) -> Result<(), CoreError> {
+    restore_recycle_item_with_polling(transport, sid, syno_token, recycle_path, TaskPolling::default()).await
+}
+
+/// `restore_recycle_item` with explicit completion polling (tests use a short
+/// interval).
+pub async fn restore_recycle_item_with_polling(
+    transport: &Transport,
+    sid: &str,
+    syno_token: Option<&str>,
+    recycle_path: &str,
+    polling: TaskPolling,
+) -> Result<(), CoreError> {
     ensure_recycle_photos_path(recycle_path)?;
     let dest = original_parent_folder(recycle_path)?;
+    let (_, name) = split_parent(recycle_path)?;
+    // A missing destination folder (Ok(None)) cannot collide; let the move
+    // report whatever File Station makes of it.
+    if folder_contains(transport, sid, syno_token, &dest, name).await? == Some(true) {
+        return Err(CoreError::UnexpectedResponse {
+            message: format!("cannot restore {name}: a file with that name already exists in {dest}"),
+        });
+    }
     let path_array = json_path_array(recycle_path)?;
     let form: Vec<(&str, &str)> = vec![
         ("api", "SYNO.FileStation.CopyMove"),
@@ -331,7 +458,8 @@ pub async fn restore_recycle_item(
         ("_sid", sid),
     ];
     let body = transport.post_form_text(&form, syno_token).await?;
-    decode_write_success(&body)
+    decode_write_success(&body)?;
+    wait_until_gone_from_recycle(transport, sid, syno_token, recycle_path, "restore", polling).await
 }
 
 /// PERMANENTLY delete one recycled file with `SYNO.FileStation.Delete`
@@ -344,6 +472,19 @@ pub async fn delete_recycle_item(
     syno_token: Option<&str>,
     recycle_path: &str,
 ) -> Result<(), CoreError> {
+    delete_recycle_item_with_polling(transport, sid, syno_token, recycle_path, TaskPolling::default()).await
+}
+
+/// `delete_recycle_item` with explicit completion polling. Like restore,
+/// `Delete start` only queues a task, so success is reported only once the
+/// file has actually left the recycle folder.
+pub async fn delete_recycle_item_with_polling(
+    transport: &Transport,
+    sid: &str,
+    syno_token: Option<&str>,
+    recycle_path: &str,
+    polling: TaskPolling,
+) -> Result<(), CoreError> {
     ensure_recycle_photos_path(recycle_path)?;
     let path_array = json_path_array(recycle_path)?;
     let form: Vec<(&str, &str)> = vec![
@@ -354,7 +495,8 @@ pub async fn delete_recycle_item(
         ("_sid", sid),
     ];
     let body = transport.post_form_text(&form, syno_token).await?;
-    decode_write_success(&body)
+    decode_write_success(&body)?;
+    wait_until_gone_from_recycle(transport, sid, syno_token, recycle_path, "permanent delete", polling).await
 }
 
 /// Render a thumbnail for a recycled file via `SYNO.FileStation.Thumb`

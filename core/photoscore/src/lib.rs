@@ -2568,6 +2568,23 @@ mod core_tests {
     /// Logs a core in against `server` with a trivial capability probe so
     /// `discovery_call_context` has a `Live` to read. Shared by every
     /// discovery-facade test below.
+    /// Mock an EMPTY File Station listing of `folder`: no name clash before a
+    /// restore, and "the file has left the recycle bin" after a restore or
+    /// permanent delete.
+    async fn mock_empty_fs_folder(server: &mut mockito::ServerGuard, folder: &str) -> mockito::Mock {
+        server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+                mockito::Matcher::UrlEncoded("folder_path".into(), folder.into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true,"data":{"files":[]}}"#)
+            .create_async()
+            .await
+    }
+
     async fn logged_in_core(label: &str, server: &mockito::ServerGuard) -> Arc<PhotosCore> {
         let core = core_at(label);
         let conn = Connection { host: server.url(), verify_tls: true, pinned_cert_der: None, allow_untrusted_tls: false };
@@ -3556,6 +3573,8 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
             .create_async()
             .await;
+        let _dest = mock_empty_fs_folder(&mut server, "/home/Photos/iPhone/2016/09").await;
+        let _src = mock_empty_fs_folder(&mut server, "/home/#recycle/Photos/iPhone/2016/09").await;
         let _move = server
             .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::AllOf(vec![
@@ -3600,6 +3619,7 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
             .create_async()
             .await;
+        let _dest = mock_empty_fs_folder(&mut server, "/home/Photos").await;
         let _move = server
             .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::Regex("SYNO.FileStation.CopyMove".into()))
@@ -3636,6 +3656,7 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
             .create_async()
             .await;
+        let _src = mock_empty_fs_folder(&mut server, "/home/#recycle/Photos").await;
         let _del = server
             .mock("POST", "/webapi/entry.cgi")
             .match_body(mockito::Matcher::AllOf(vec![

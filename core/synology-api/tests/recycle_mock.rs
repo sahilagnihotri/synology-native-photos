@@ -1,7 +1,8 @@
 use mockito::Matcher;
 use models::CoreError;
 use synology_api::recycle::{
-    delete_recycle_item, list_recycle_photos, recycle_thumbnail, restore_recycle_item, trigger_reindex,
+    delete_recycle_item, delete_recycle_item_with_polling, list_recycle_photos, recycle_thumbnail,
+    restore_recycle_item, restore_recycle_item_with_polling, trigger_reindex, TaskPolling,
 };
 use synology_api::transport::Transport;
 
@@ -130,9 +131,37 @@ async fn list_recycle_photos_propagates_an_auth_error() {
 
 // --- restore_recycle_item -----------------------------------------------
 
+/// Fast completion polling so the "never finishes" cases fail in milliseconds.
+fn fast_polling() -> TaskPolling {
+    TaskPolling { attempts: 3, interval: std::time::Duration::from_millis(1) }
+}
+
+/// Mock a `SYNO.FileStation.List` of `folder` holding files named `names`.
+async fn mock_folder_files(server: &mut mockito::ServerGuard, folder: &str, names: &[&str]) -> mockito::Mock {
+    let files: Vec<String> = names
+        .iter()
+        .map(|n| format!(r#"{{"isdir":false,"name":"{n}","path":"{folder}/{n}"}}"#))
+        .collect();
+    server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+            Matcher::UrlEncoded("folder_path".into(), folder.into()),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(format!(r#"{{"success":true,"data":{{"files":[{}]}}}}"#, files.join(",")))
+        .create_async()
+        .await
+}
+
 #[tokio::test]
 async fn restore_recycle_item_moves_file_to_its_original_parent() {
     let mut server = mockito::Server::new_async().await;
+    // Destination has no clash; after the move the recycle folder no longer
+    // holds the file, which is what confirms the background task finished.
+    let _dest = mock_folder_files(&mut server, "/home/Photos/iPhone/2016/09", &["OTHER.JPG"]).await;
+    let _src = mock_folder_files(&mut server, "/home/#recycle/Photos/iPhone/2016/09", &[]).await;
     let _move = server
         .mock("POST", "/webapi/entry.cgi")
         .match_header("X-SYNO-TOKEN", "TOK")
@@ -162,8 +191,75 @@ async fn restore_recycle_item_moves_file_to_its_original_parent() {
 }
 
 #[tokio::test]
+async fn restore_recycle_item_refuses_when_the_destination_already_has_that_name() {
+    let mut server = mockito::Server::new_async().await;
+    let _dest = mock_folder_files(&mut server, "/home/Photos/iPhone", &["IMG_1.JPG"]).await;
+    // overwrite=false would skip the file silently, so no move may be sent.
+    let _move_trap = server
+        .mock("POST", "/webapi/entry.cgi")
+        .expect(0)
+        .with_status(200)
+        .with_body(r#"{"success":true}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let err = restore_recycle_item_with_polling(&t, "SID", None, "/home/#recycle/Photos/iPhone/IMG_1.JPG", fast_polling())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("already exists"), "got {err:?}");
+    _move_trap.assert_async().await;
+}
+
+#[tokio::test]
+async fn restore_recycle_item_reports_failure_when_the_file_never_leaves_the_recycle_bin() {
+    let mut server = mockito::Server::new_async().await;
+    let _dest = mock_folder_files(&mut server, "/home/Photos/iPhone", &[]).await;
+    // The move is accepted, but the background task never moves the file.
+    let _src = mock_folder_files(&mut server, "/home/#recycle/Photos/iPhone", &["IMG_1.JPG"]).await;
+    let _move = server
+        .mock("POST", "/webapi/entry.cgi")
+        .match_body(Matcher::Regex("SYNO.FileStation.CopyMove".into()))
+        .with_status(200)
+        .with_body(r#"{"success":true,"data":{"taskid":"t"}}"#)
+        .expect(1)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let err = restore_recycle_item_with_polling(&t, "SID", None, "/home/#recycle/Photos/iPhone/IMG_1.JPG", fast_polling())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("still in the recycle bin"), "got {err:?}");
+    _move.assert_async().await;
+}
+
+#[tokio::test]
+async fn restore_recycle_item_treats_a_vanished_recycle_folder_as_done() {
+    let mut server = mockito::Server::new_async().await;
+    let _dest = mock_folder_files(&mut server, "/home/Photos/iPhone", &[]).await;
+    let _src = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::UrlEncoded("folder_path".into(), "/home/#recycle/Photos/iPhone".into()))
+        .with_status(200)
+        .with_body(r#"{"success":false,"error":{"code":408}}"#)
+        .create_async()
+        .await;
+    let _move = server
+        .mock("POST", "/webapi/entry.cgi")
+        .match_body(Matcher::Regex("SYNO.FileStation.CopyMove".into()))
+        .with_status(200)
+        .with_body(r#"{"success":true,"data":{"taskid":"t"}}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    restore_recycle_item_with_polling(&t, "SID", None, "/home/#recycle/Photos/iPhone/IMG_1.JPG", fast_polling())
+        .await
+        .expect("restore ok");
+}
+
+#[tokio::test]
 async fn restore_recycle_item_fails_closed_on_a_server_error() {
     let mut server = mockito::Server::new_async().await;
+    let _dest = mock_folder_files(&mut server, "/home/Photos", &[]).await;
     let _move = server
         .mock("POST", "/webapi/entry.cgi")
         .match_body(Matcher::Regex("method=start".into()))
@@ -198,6 +294,7 @@ async fn restore_recycle_item_refuses_a_non_recycle_path_without_any_network_cal
 #[tokio::test]
 async fn delete_recycle_item_sends_filestation_delete() {
     let mut server = mockito::Server::new_async().await;
+    let _src = mock_folder_files(&mut server, "/home/#recycle/Photos", &["b.jpg"]).await;
     let _del = server
         .mock("POST", "/webapi/entry.cgi")
         .match_header("X-SYNO-TOKEN", "TOK")
@@ -217,6 +314,24 @@ async fn delete_recycle_item_sends_filestation_delete() {
     let t = transport_for(&server);
     delete_recycle_item(&t, "SID", Some("TOK"), "/home/#recycle/Photos/a.jpg").await.expect("delete ok");
     _del.assert_async().await;
+}
+
+#[tokio::test]
+async fn delete_recycle_item_reports_failure_when_the_file_is_still_there() {
+    let mut server = mockito::Server::new_async().await;
+    let _src = mock_folder_files(&mut server, "/home/#recycle/Photos", &["a.jpg"]).await;
+    let _del = server
+        .mock("POST", "/webapi/entry.cgi")
+        .match_body(Matcher::Regex("SYNO.FileStation.Delete".into()))
+        .with_status(200)
+        .with_body(r#"{"success":true,"data":{"taskid":"t"}}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let err = delete_recycle_item_with_polling(&t, "SID", None, "/home/#recycle/Photos/a.jpg", fast_polling())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("still in the recycle bin"), "got {err:?}");
 }
 
 #[tokio::test]
