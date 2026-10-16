@@ -155,6 +155,14 @@ final class RecentlyDeletedModel {
         }
     }
 
+    /// Permanent-delete confirm wording, kept here so a test can pin that it
+    /// says the delete cannot be undone.
+    static func emptyConfirmMessage(count: Int) -> String {
+        count == 1
+            ? "This permanently deletes 1 item. This cannot be undone."
+            : "This permanently deletes \(count) items. This cannot be undone."
+    }
+
     /// The user dismissed the permanent-delete confirm. Clears state; never
     /// calls the core.
     func cancelEmpty() {

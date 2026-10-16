@@ -94,6 +94,18 @@ final class DeleteController {
         }
     }
 
+    /// Confirm dialog wording, kept here (not inline in the view) so a test can
+    /// pin that the everyday delete says the items are recoverable.
+    static func confirmTitle(count: Int) -> String {
+        count == 1 ? "Delete Photo" : "Delete Photos"
+    }
+
+    static func confirmMessage(count: Int) -> String {
+        count == 1
+            ? "Delete 1 item? It moves to your Synology recycle bin and can be restored."
+            : "Delete \(count) items? They move to your Synology recycle bin and can be restored."
+    }
+
     /// The user dismissed the confirm. Clears state; never calls the core.
     func cancelDelete() {
         isShowingDeleteConfirm = false
@@ -173,7 +185,7 @@ struct DeleteConfirmModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.alert(
-            controller.pendingDeleteCount == 1 ? "Delete Photo" : "Delete Photos",
+            DeleteController.confirmTitle(count: controller.pendingDeleteCount),
             isPresented: $controller.isShowingDeleteConfirm
         ) {
             // Delete is the alert's default action so pressing Return/Enter
@@ -188,9 +200,7 @@ struct DeleteConfirmModifier: ViewModifier {
             Button("Cancel", role: .cancel) { controller.cancelDelete() }
                 .accessibilityIdentifier("delete.cancel")
         } message: {
-            Text(controller.pendingDeleteCount == 1
-                 ? "Delete 1 item? It moves to your Synology recycle bin and can be restored."
-                 : "Delete \(controller.pendingDeleteCount) items? They move to your Synology recycle bin and can be restored.")
+            Text(DeleteController.confirmMessage(count: controller.pendingDeleteCount))
         }
     }
 }

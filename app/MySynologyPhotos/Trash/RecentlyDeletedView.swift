@@ -245,9 +245,7 @@ struct EmptyRecycleBinConfirmModifier: ViewModifier {
             Button("Cancel", role: .cancel) { model.cancelEmpty() }
                 .accessibilityIdentifier("recentlydeleted.empty.cancel")
         } message: {
-            Text(model.pendingEmptyCount == 1
-                 ? "This permanently deletes 1 item. This cannot be undone."
-                 : "This permanently deletes \(model.pendingEmptyCount) items. This cannot be undone.")
+            Text(RecentlyDeletedModel.emptyConfirmMessage(count: model.pendingEmptyCount))
         }
     }
 }
