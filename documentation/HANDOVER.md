@@ -1,7 +1,8 @@
 # Handover: synology-native-photos
 
-Paste everything below the line into a fresh Claude Code session in this repo
-(`/Users/sahil/code/github/synology-native-photos`). Nothing critical lives only in
+On a new Mac, clone the repo, open Claude Code in it and say:
+**"Read documentation/HANDOVER.md and carry on."** (On Windows use
+`documentation/platforms/windows-handover.md` instead.) Nothing critical lives only in
 chat: `CLAUDE.md` (rules), `TODO.md` (pending), `Fixed.md` (done, with hashes) and
 `documentation/` hold the rest. Last refreshed 2026-10-16.
 
@@ -17,24 +18,26 @@ Shipped:
 - Login (2FA plus device token), TLS leaf-cert pinning, crawl into a local SQLite index, fast NSCollectionView thumbnail grid with date-section headers and a date scrubber, zoom slider, multi-select and keyboard model, native menu bar, context menus, native toolbar.
 - Detail viewer: zoom and pan, info panel with EXIF/rating/video metadata, arrow paging, inline video and Live Photo playback, drag-out export, two tier original cache with downsampled decode and thumbnail-first display.
 - Browse: People, Places, Tags, Favorites (read only), Map view with clustering that opens clusters in the real grid, keyword search plus date range, Quick Filter (file type, date, rating, People, Geolocation).
+- Recycle bin check before every delete: off means delete is refused with the DSM setting path, unknown means the confirm warns it may be permanent.
 - Real delete: the Foto delete moves the file to the DSM recycle bin. Delete from the grid, context menu, toolbar and viewer, with a confirm alert and Cmd-Z. Recently Deleted (File Station backed) supports restore and a confirmed permanent delete. Restore and permanent delete refuse paths outside `/home/#recycle/Photos`, refuse a name clash, and wait until the file has left the recycle folder.
 - Non-destructive crop and rotate: saves a NEW asset into `/home/Photos/Edited`, the original is untouched.
 - DMG installer (`make dmg` or the Xcode `Installer` scheme), Apple Development signed.
 
 Not shipped yet:
-- Albums create, add and remove (the Albums browser is read only).
+- Albums create, add and remove in the app. The `synology-api` calls exist (`create_album`, `add_items`, `remove_items`, `list_album_items`); `PhotosCore` FFI and the UI do not.
 - Favorite toggle, person naming, tag editing.
 - Share links (create call shape undocumented, see TODO).
 - Import and upload UI.
 - Notarization (needs a Developer ID cert).
 - QuickConnect or DDNS, Windows UI.
 
-Open risk: nothing checks that the DSM recycle bin is enabled for the homes share. If it is off, delete is permanent while the UI says it can be restored. See TODO.
+Open risk: a restored photo gets a NEW Photos id, so album, favorite and tag links are probably lost (see TODO).
 
 ## Tests (measured 2026-10-16)
 
+- Whole gate: `scripts/ci/ci.sh all` (fmt, clippy, Rust tests, script tests, Swift tests, PASS or FAIL per stage). Run it before pushing.
 - Rust: `cargo test --workspace` from the repo root. 385 passed, 0 failed, 1 ignored (the real NAS test).
-- Swift unit tests: 470 passed, 0 failed, 0 skipped. Run with
+- Swift unit tests: 498 passed, 0 failed, 0 skipped. Run with
   `xcodebuild test -project platforms/macos/MySynologyPhotos.xcodeproj -scheme MySynologyPhotos -destination 'platform=macOS' -only-testing:MySynologyPhotosTests`
   or `scripts/test.sh macos`. Use `ADHOC_SIGN=1 scripts/test.sh macos` in a shell that cannot see the login keychain (for example a sandboxed agent). Run unit tests only: the UI test target triggers a System Events automation prompt.
 - The xcframework self heal runs on every Xcode build and rebuilds `build/macos/PhotosCore.xcframework` when any Rust source, `Cargo.toml`, `Cargo.lock` or `.udl` is newer than the lib. `make xcframework` forces it.
@@ -52,9 +55,9 @@ Host `fafnir.ladon-pirate.ts.net`, port `5001`, Personal space only (`SYNO.Foto.
 
 ## Prioritized next list
 
-1. Recycle bin enabled probe (HIGH): read the recycle setting for the homes share via `SYNO.Core.Share` / `SYNO.Core.RecycleBin`, then warn or block delete when it is off. Also confirm File Station error 408 for a missing folder and the completion polling on the real NAS.
-2. Remove the dead trash-album core methods and their FFI exports.
-3. Albums: create, add and remove, replacing the sidebar placeholder. Probe each method read-first, with bogus-value controls.
+1. Albums: expose the album calls on `PhotosCore`, then the Mac Albums UI replacing the sidebar placeholder, and drag to album. The NAS account has zero albums, so ask Sahil before creating a test album to verify a non empty album's item list.
+2. Restore new id: check what metadata survives a restore and warn in Recently Deleted if it is lost.
+3. Fix `scripts/macos/ffi-smoke.sh` (a `|| true` hides a compile error).
 4. Import and upload UI for migrating off iCloud (File Station upload is already in the API client).
 5. Notarization: Developer ID cert, then `notarytool submit` and `stapler staple` on the dmg.
 6. Smaller items listed in `TODO.md` (editor cache bypass, delete dialog UI tests, clippy and Swift 6 warnings).
