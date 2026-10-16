@@ -3,6 +3,11 @@ LIB = target/aarch64-apple-darwin/release/libphotoscore.a
 BINDINGS_DIR = bindings
 XCF = PhotosCore.xcframework
 
+# Build the core for the app's deployment target (app/project.yml), not the
+# host OS. Without this, rustc and the cc crate target the running macOS, and
+# the linker warns that every object "was built for newer macOS" than the app.
+export MACOSX_DEPLOYMENT_TARGET ?= 26.0
+
 .PHONY: test-rust bindings xcframework dmg clean
 
 test-rust:

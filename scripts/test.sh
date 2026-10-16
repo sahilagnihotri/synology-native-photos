@@ -6,7 +6,8 @@
 # Usage:
 #   scripts/test.sh              # run everything present (core + app)
 #   scripts/test.sh core         # Rust core tests only
-#   scripts/test.sh app          # Swift/macOS app tests only
+#   scripts/test.sh app          # Swift/macOS app unit tests only
+#   ADHOC_SIGN=1 scripts/test.sh app   # same, signed ad hoc (no keychain access)
 #   scripts/test.sh --include-integration   # also run #[ignore]'d real-NAS tests
 #                                            # (needs SYNO_* env vars set)
 
@@ -55,10 +56,20 @@ run_app_tests() {
     local proj scheme
     proj="$(ls -d "$ROOT/app"/*.xcodeproj | head -n1)"
     scheme="$(basename "$proj" .xcodeproj)"
+    # Unit tests only: the UI test target drives the app through System
+    # Events, which raises an automation permission prompt on every run.
+    # ADHOC_SIGN=1 signs ad hoc instead of with the team certificate, for
+    # shells (such as a sandboxed agent) that cannot see the login keychain.
+    local sign_args=()
+    if [ "${ADHOC_SIGN:-0}" = "1" ]; then
+      sign_args=(CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=)
+    fi
     xcodebuild test \
       -project "$proj" \
       -scheme "$scheme" \
       -destination 'platform=macOS' \
+      -only-testing:"${scheme}Tests" \
+      ${sign_args[@]+"${sign_args[@]}"} \
       | { have xcpretty && xcpretty || cat; }
     ok "app tests done"
   elif [ -f "$ROOT/app/Package.swift" ]; then
