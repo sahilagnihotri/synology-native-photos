@@ -425,6 +425,7 @@ struct LibraryView: View {
                 space: env.dataSource.space,
                 client: env.client,
                 cache: env.tempCache,
+                originalCache: env.originalCache,
                 onClose: { editorTarget = nil },
                 onSaved: { await reconcileAndReloadGrid() })
         }
