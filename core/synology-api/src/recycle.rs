@@ -232,7 +232,7 @@ pub async fn list_recycle_photos(
     }
 
     // Newest deletion first (mtime DESC), stable so equal mtimes keep order.
-    items.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+    items.sort_by_key(|item| std::cmp::Reverse(item.deleted_at));
 
     let start = (offset as usize).min(items.len());
     let end = start.saturating_add(limit as usize).min(items.len());

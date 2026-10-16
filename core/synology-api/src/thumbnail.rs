@@ -60,6 +60,7 @@ pub fn size_param(size: ThumbnailSize) -> &'static str {
 /// `X-SYNO-TOKEN` header when present (DSM's CSRF check on top of `_sid`;
 /// without it a token-auth session gets rejected with synology error 119).
 /// Pass `None` to omit the header entirely.
+#[allow(clippy::too_many_arguments)] // mirrors the flat DSM request params; the public signature is used by the FFI facade
 pub async fn fetch_thumbnail(
     transport: &Transport,
     sid: &str,

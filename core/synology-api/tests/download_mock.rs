@@ -43,7 +43,7 @@ async fn download_shared_uses_fototeam_namespace() {
         .match_query(Matcher::UrlEncoded("api".into(), "SYNO.FotoTeam.Download".into()))
         .with_status(200)
         .with_header("content-type", "application/octet-stream")
-        .with_body(b"X".to_vec())
+        .with_body(b"X")
         .create_async()
         .await;
     let t = transport_for(&server);
@@ -84,7 +84,7 @@ async fn download_sends_unit_id_and_cache_key_params() {
         ]))
         .with_status(200)
         .with_header("content-type", "application/octet-stream")
-        .with_body(b"BYTES".to_vec())
+        .with_body(b"BYTES")
         .create_async()
         .await;
     let t = transport_for(&server);
@@ -103,7 +103,7 @@ async fn download_sends_syno_token_header_when_present() {
         .match_query(Matcher::Any)
         .with_status(200)
         .with_header("content-type", "application/octet-stream")
-        .with_body(b"BYTES".to_vec())
+        .with_body(b"BYTES")
         .create_async()
         .await;
     let t = transport_for(&server);
@@ -123,7 +123,7 @@ async fn download_omits_syno_token_header_when_absent() {
         .match_query(Matcher::Any)
         .with_status(200)
         .with_header("content-type", "application/octet-stream")
-        .with_body(b"BYTES".to_vec())
+        .with_body(b"BYTES")
         .create_async()
         .await;
     let t = transport_for(&server);

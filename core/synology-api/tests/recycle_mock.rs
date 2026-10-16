@@ -34,7 +34,7 @@ fn mock_list_folder(server: &mut mockito::ServerGuard, folder_path: &str, body: 
         ]))
         .with_status(200)
         .with_header("content-type", "application/json")
-        .with_body(body.to_string())
+        .with_body(body)
         .create()
 }
 

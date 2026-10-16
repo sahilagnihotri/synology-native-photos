@@ -488,6 +488,7 @@ pub async fn list_items_filtered(
     list_items_inner(transport, sid, Space::Personal, offset, limit, version, syno_token, Some(filter)).await
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the flat DSM request params; the public signature is used by the FFI facade
 async fn list_items_inner(
     transport: &Transport,
     sid: &str,
@@ -539,6 +540,7 @@ async fn list_items_inner(
 ///
 /// Same decode discipline, `ITEM_ADDITIONAL` key set, and `X-SYNO-TOKEN`
 /// handling as `list_items` (it shares the same per-element tolerant decoder).
+#[allow(clippy::too_many_arguments)] // mirrors the flat DSM request params; the public signature is used by the FFI facade
 pub async fn filter_items(
     transport: &Transport,
     sid: &str,
@@ -732,6 +734,7 @@ pub async fn search(
 /// entirely, never sent as an empty string) are added to the request, so a
 /// default `SearchFilters` produces the exact same query `search` always
 /// sent.
+#[allow(clippy::too_many_arguments)] // mirrors the flat DSM request params; the public signature is used by the FFI facade
 pub async fn search_filtered(
     transport: &Transport,
     sid: &str,

@@ -14,6 +14,7 @@ pub struct AssetPage {
 
 /// Abstraction over the network list call so sync logic is testable without HTTP.
 /// Group A's facade implements this over synology-api; sync-engine only knows the trait.
+#[allow(clippy::double_must_use)] // async_trait adds must_use to the boxed future; not ours
 #[async_trait::async_trait]
 pub trait PageSource: Send + Sync {
     async fn list_items(&self, space: Space, offset: u32, limit: u32) -> Result<AssetPage, CoreError>;
