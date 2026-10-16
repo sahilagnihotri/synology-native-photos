@@ -1,6 +1,8 @@
 import Testing
 import CoreGraphics
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import PhotosCore
 @testable import MySynologyPhotos
 
@@ -125,5 +127,57 @@ struct PhotoEditorModelTests {
         // An empty original name falls back to a safe placeholder base.
         let fallback = PhotoEditorModel.editedFilename(originalFilename: "", date: Date(timeIntervalSince1970: 0))
         #expect(fallback.hasPrefix("photo-edited-"))
+    }
+}
+
+/// The editor must read its source through the shared `OriginalImageCache`, so a
+/// second editor open for the same asset never downloads again, and it must
+/// never alter the cached original (edits are non destructive).
+struct PhotoEditorSourceLoadTests {
+    private final class Counter: @unchecked Sendable { var count = 0 }
+
+    private func writePNG() throws -> String {
+        let ctx = CGContext(
+            data: nil, width: 16, height: 12, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 12))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("editor-src-\(UUID()).png")
+        let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, ctx.makeImage()!, nil)
+        CGImageDestinationFinalize(dest)
+        return url.path
+    }
+
+    private func asset() -> Asset {
+        Asset(
+            id: 1, unitId: 10, cacheKey: "CK-editor", filename: "sunset.png", mediaKind: .photo,
+            takenAt: nil, addedAt: nil, width: 16, height: 12, fileSize: nil,
+            space: .personal, serverVersion: nil)
+    }
+
+    @Test func secondEditorOpenForSameAssetDoesNotDownloadAgain() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("editor-cache-\(UUID().uuidString)", isDirectory: true)
+        let src = try writePNG()
+        defer {
+            try? FileManager.default.removeItem(at: dir)
+            try? FileManager.default.removeItem(atPath: src)
+        }
+        let cache = OriginalImageCache(cacheDir: dir, ramLimitBytes: 100_000_000, diskLimitBytes: 100_000_000)
+        let downloads = Counter()
+        let a = asset()
+        let download: () async throws -> String = { downloads.count += 1; return src }
+
+        let first = try await PhotoEditorView.loadSource(asset: a, originalCache: cache, download: download)
+        let second = try await PhotoEditorView.loadSource(asset: a, originalCache: cache, download: download)
+        // The second open is served from the cache: exactly one download total.
+        #expect(downloads.count == 1)
+
+        #expect(first?.width == 16 && first?.height == 12)
+        #expect(second?.width == 16)
+        // Loading never rewrites or alters the cached original.
+        let cachedURL = try #require(await cache.cachedFileURL(cacheKey: a.cacheKey, preferredFilename: "sunset.png"))
+        #expect(try Data(contentsOf: cachedURL) == Data(contentsOf: URL(fileURLWithPath: src)))
     }
 }

@@ -17,6 +17,11 @@ struct PhotoEditorView: View {
     let space: Space
     let client: PhotosCoreClient
     let cache: TempFileCache
+    /// The shared two tier original cache the detail viewer reads through. When
+    /// present the editor loads its source from here (so re-opening the editor
+    /// for a photo already viewed or edited never downloads again); `nil` falls
+    /// back to a direct download into `cache`.
+    let originalCache: OriginalImageCache?
     /// Dismisses the editor sheet.
     let onClose: () -> Void
     /// Refreshes the library after a successful save so the new photo shows up
@@ -33,12 +38,14 @@ struct PhotoEditorView: View {
         space: Space,
         client: PhotosCoreClient,
         cache: TempFileCache,
+        originalCache: OriginalImageCache? = nil,
         onClose: @escaping () -> Void,
         onSaved: @escaping () async -> Void
     ) {
         self.space = space
         self.client = client
         self.cache = cache
+        self.originalCache = originalCache
         self.onClose = onClose
         self.onSaved = onSaved
         _model = State(initialValue: PhotoEditorModel(asset: asset, space: space, client: client))
@@ -212,21 +219,49 @@ struct PhotoEditorView: View {
     private func loadOriginal() async {
         do {
             let asset = model.asset
-            let path = try await client.downloadOriginal(space: space, unitId: asset.unitId, cacheKey: asset.cacheKey)
-            let filename = QuickLookFilename.derive(for: asset)
-            let url = await cache.store(path: path, preferredFilename: filename)
-            // Decode off-main. A large maxPixel keeps full resolution for
-            // typical photos while capping absurdly large images; the thumbnail
-            // transform applies EXIF orientation so the pixels match what the
-            // viewer showed.
-            let decoded = await Task.detached(priority: .userInitiated) {
-                ImageDownsample.downsample(fileURL: url, maxPixel: 8192)
-            }.value
+            let decoded: CGImage?
+            if let originalCache {
+                decoded = try await Self.loadSource(
+                    asset: asset, originalCache: originalCache,
+                    download: { [client, space] in
+                        try await client.downloadOriginal(space: space, unitId: asset.unitId, cacheKey: asset.cacheKey)
+                    })
+            } else {
+                let path = try await client.downloadOriginal(space: space, unitId: asset.unitId, cacheKey: asset.cacheKey)
+                let filename = QuickLookFilename.derive(for: asset)
+                let url = await cache.store(path: path, preferredFilename: filename)
+                // Decode off-main. A large maxPixel keeps full resolution for
+                // typical photos while capping absurdly large images; the
+                // thumbnail transform applies EXIF orientation so the pixels
+                // match what the viewer showed.
+                decoded = await Task.detached(priority: .userInitiated) {
+                    ImageDownsample.downsample(fileURL: url, maxPixel: 8192)
+                }.value
+            }
             model.setSourceImage(decoded)
             await updatePreview()
         } catch {
             model.setSourceImage(nil)
         }
+    }
+
+    /// Resolves the editor's working pixels through the shared `OriginalImageCache`
+    /// (RAM decode, then disk original, then a single `download` on a full miss),
+    /// at the same 8192 cap the detail viewer's zoomed decode uses so the two
+    /// share one RAM entry. READ-ONLY with respect to the cache: this only reads
+    /// and, on a miss, lets the cache ingest a COPY of the downloaded file. The
+    /// decoded image is a fresh bitmap; edits happen on it and are saved as a new
+    /// asset, so the cached original is never written to or altered.
+    static func loadSource(
+        asset: Asset,
+        originalCache: OriginalImageCache,
+        download: () async throws -> String
+    ) async throws -> CGImage? {
+        let image = try await originalCache.fullImage(
+            cacheKey: asset.cacheKey,
+            preferredFilename: QuickLookFilename.derive(for: asset),
+            download: download)
+        return image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
     }
 
     /// Recomputes `previewImage` from the source rotated by the current steps,
