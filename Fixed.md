@@ -173,7 +173,7 @@ Completed work with commit hashes. Newest at top.
 ## Session 2026-07-25: detail viewer rework (Apple Photos parity)
 
 Fixed the black box and reworked the detail viewer to Apple's full-pane model.
-Plan: `documentation/plans/2026-07-25-detail-viewer-rework.md` (DONE).
+Plan: `documentation/plans/done/2026-07-25-detail-viewer-rework.md` (DONE).
 
 - Root cause was NOT the inline video work: the library is all `photo`/`live`
   (zero `video` items), so everything took the QuickLook branch, which showed

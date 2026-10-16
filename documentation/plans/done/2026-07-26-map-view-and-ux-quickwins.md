@@ -1,5 +1,7 @@
 # Map view + Apple Photos UX quick wins (2026-07-26)
 
+> **Status:** DONE
+
 Batch requested after the People/Geolocation filter landed and the adversarial
 UX review came in (`documentation/reviews/2026-07-26-ux-adversarial-review.md`).
 User wants the Apple Photos map ("makes it easier to see where more pics were

@@ -1,5 +1,7 @@
 # Phase 2 — Manage (Safe Delete, Albums, Favorites, Search) Implementation Plan
 
+> **Status note (2026-10-16):** The app-controlled trash-album design in this plan was superseded by real delete via the Foto delete plus the File Station recycle bin (see `Fixed.md`, session 2026-07-25 cont.). Sections on the trash album are historical.
+
 > Date: 2026-07-25
 > Status: DRAFT, awaiting review. Builds on the Phase 0/1 interface contract
 > (`documentation/plans/2026-07-24-phase0-phase1-interface-contract.md`) and the

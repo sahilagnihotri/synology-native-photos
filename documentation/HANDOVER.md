@@ -1,43 +1,67 @@
-# Handover prompt — synology-native-photos
+# Handover: synology-native-photos
 
 Paste everything below the line into a fresh Claude Code session in this repo
-(`/Users/sahil/code/github/synology-native-photos`). It carries all state
-needed to continue. Nothing critical lives only in the prior chat: work is
-pushed to `origin/main`, and TODO.md / Fixed.md / documentation/ hold the rest.
+(`/Users/sahil/code/github/synology-native-photos`). Nothing critical lives only in
+chat: `CLAUDE.md` (rules), `TODO.md` (pending), `Fixed.md` (done, with hashes) and
+`documentation/` hold the rest. Last refreshed 2026-10-16.
 
 ---
 
-You are continuing work on **synology-native-photos**, a native macOS Apple-Photos-style client for a Synology NAS over its Web API, Rust core (`core/`, exposed to Swift via UniFFI) + SwiftUI/AppKit app (`app/`). Read `CLAUDE.md` (project rules) first; it is authoritative. Also read `TODO.md`, `Fixed.md`, `documentation/design/2026-07-25-detail-viewer-spec.md`, and the plans in `documentation/plans/`.
+You are continuing work on **synology-native-photos**, a native macOS Apple Photos style client for a Synology NAS over its Web API. Rust core in `core/` (exposed to Swift via UniFFI), SwiftUI/AppKit app in `app/`. Read `CLAUDE.md` first; it is authoritative. Then read `TODO.md` and `Fixed.md`.
 
-## Where things stand (all pushed to origin/main, ~290 unit tests + ~237 cargo tests green)
-The full READ-ONLY Apple-Photos-parity surface is DONE and shipped:
-- Login (2FA + device token), TLS leaf-cert pinning over Tailscale, crawl -> local SQLite index, thumbnail grid (fast NSCollectionView), QuickLook/detail viewer.
-- Keyboard model: arrows navigate the grid (do NOT open), double-click/Return open detail, Space QuickLook, Shift+arrow extends selection, Cmd-A, Delete -> honest "coming soon" affordance (NOT wired to real delete yet).
-- Detail viewer: zoom+pan on the image, info panel (date/filename/dimensions/size; EXIF/location deferred, Asset model has no such fields), arrow paging, drag-a-photo/video-out-to-Finder export (copies the original, read-only).
-- Discovery sidebar: People, Places, Tags, Favorites (all browse + drill into photos). Subjects/Concept tiles list but have no working photo-filter param on this NAS (deferred, not faked).
-- Albums: real Browse.Album browser (+ smart/condition). Account currently has ZERO albums, so it shows empty.
-- Search: Synology's real server search (SYNO.Foto.Search.Search, method `list_item`, param `keyword`) + DATE-RANGE filter (start_time/end_time unix secs). All other facets (camera/aperture/geocoding/media_type) are SILENTLY IGNORED by the API (proven with bogus-value controls) so they are shown for browsing only, never selectable, NOT faked.
-- Video playback: download-then-play-local via AVPlayerView (SYNO.Foto.Streaming is advertised but every method returns err103, unusable). NAS has no true video items yet (only a Live-Photo JPEG), so it is built+correct but untested against real video.
-- Signing: Apple Developer team "Agnihotri AS" (5W67TF3579), CODE_SIGN_STYLE Automatic, project-wide in app/project.yml. Bundle id + all keychain/defaults namespaces are `se.agnihotri.synologyphotos.*`. Cert-pin lives in Application Support (not Keychain) -> no repeat keychain prompt. UI tests removed from the default test action (they triggered a System Events automation prompt); run unit tests ONLY: `xcodebuild test ... -only-testing:SynologyPhotosTests`.
+## Current state
 
-## The three authorized next tasks (in priority order, all cross the safety line so read the invariants in CLAUDE.md)
+Bundle id `se.agnihotri.mysynologyphotos`, display name "MySynology Photos". Unit test target `MySynologyPhotosTests`.
 
-### 1. Recoverable DELETE (user AUTHORIZED the destructive verify)
-Design (agreed): Synology Photos delete auto-routes to the DSM per-user recycle bin. `SYNO.Core.RecycleBin` + `SYNO.Core.RecycleBin.User` exist (the Foto API has NO recycle namespace: SYNO.Foto.*RecycleBin = err102). So: real delete = `SYNO.Foto.Browse.Item` method `delete`, id list (err120 if id missing = the method is real). Then list `SYNO.Core.RecycleBin` for a "Recently Deleted" view; restore + permanent-delete (empty from bin) via Core.RecycleBin. Cmd-Z = restore the just-deleted item.
-FIRST STEP: a ONE-photo destructive verify the user authorized. Victim already chosen + BACKED UP: `id=73412 unit_id=55758 filename=IMG_8550.JPG`, backup at `$CLAUDE_JOB_DIR/tmp/victim_73412_IMG_8550.JPG` (2588804 bytes) BUT NOTE: that job-tmp dir is per-job and is GONE in a fresh session, so re-back-up the victim (download its original) BEFORE deleting. The harness auto-mode classifier BLOCKS destructive network calls; the user must run the delete themselves via a `! cargo run ...` line, or approve it. Steps: back up victim -> delete via Browse.Item delete -> confirm it appears in SYNO.Core.RecycleBin -> RESTORE it via Core.RecycleBin -> confirm it is back in the library. Prove the delete->recyclebin->restore loop end to end, THEN build the delete UI (route the stubbed Delete key + a Recently Deleted sidebar section + restore + gated permanent-delete with confirm). NEVER permanently delete without explicit confirm + retention.
+Shipped:
+- Login (2FA plus device token), TLS leaf-cert pinning, crawl into a local SQLite index, fast NSCollectionView thumbnail grid with date-section headers and a date scrubber, zoom slider, multi-select and keyboard model, native menu bar, context menus, native toolbar.
+- Detail viewer: zoom and pan, info panel with EXIF/rating/video metadata, arrow paging, inline video and Live Photo playback, drag-out export, two tier original cache with downsampled decode and thumbnail-first display.
+- Browse: People, Places, Tags, Favorites (read only), Map view with clustering that opens clusters in the real grid, keyword search plus date range, Quick Filter (file type, date, rating, People, Geolocation).
+- Real delete: the Foto delete moves the file to the DSM recycle bin. Delete from the grid, context menu, toolbar and viewer, with a confirm alert and Cmd-Z. Recently Deleted (File Station backed) supports restore and a confirmed permanent delete. Restore and permanent delete refuse paths outside `/home/#recycle/Photos`, refuse a name clash, and wait until the file has left the recycle folder.
+- Non-destructive crop and rotate: saves a NEW asset into `/home/Photos/Edited`, the original is untouched.
+- DMG installer (`make dmg` or the Xcode `Installer` scheme), Apple Development signed.
 
-### 2. Phase 3 EDITING / ROTATE (non-destructive)
-Safety invariant #1: never modify an original. Rotate/edit MUST upload the result as a NEW asset (SYNO.Foto.Upload.Item is in the catalog) or a sidecar; the original NAS file is immutable. The Rotate/Edit buttons currently show coming-soon affordances. Design this carefully (bigger task): probe Upload.Item read-first, build an edit pipeline that reads original -> edits locally -> uploads as new -> original untouched.
+Not shipped yet:
+- Albums create, add and remove (the Albums browser is read only).
+- Favorite toggle, person naming, tag editing.
+- Share links (create call shape undocumented, see TODO).
+- Import and upload UI.
+- Notarization (needs a Developer ID cert).
+- QuickConnect or DDNS, Windows UI.
 
-### 3. MUTATIONS (each modifies NAS state, gate + confirm as appropriate)
-Create album, add/remove photos to/from album, name/rename a person (Browse.Person likely has a set-name method), toggle favorite (SYNO.Foto.Favorite). These are additive/reversible mutations but still writes; probe each method read-first, confirm params with bogus controls, and wire with clear UI. Album creation would also make the (currently empty) Albums view useful.
+Open risk: nothing checks that the DSM recycle bin is enabled for the homes share. If it is off, delete is permanent while the UI says it can be restored. See TODO.
 
-## How to work here (from CLAUDE.md + this session's proven workflow)
-- Use SUBAGENTS aggressively for each task (fresh implementer per feature), keep main context clean. Parallelize only across DISJOINT file sets (agents editing the same files collide; the app's RootView/Grid/Detail are hot files). Give an agent an isolated git worktree if it must build while another agent edits shared files.
-- Each feature: write a brief to `.superpowers/sdd/<name>-brief.md`, dispatch a general-purpose subagent, then VERIFY yourself (build + unit tests) and REVIEW risky ones (esp. delete/edit) before pushing. Commit in small logical commits; human/imperative messages; NO AI/Claude mention anywhere; NO dashes as dashes in prose/comments (grep before commit). Commit straight to `main`, no feature branches. Push after verifying.
-- Real-NAS debugging (see CLAUDE.md "Debugging against the real NAS"): host `fafnir.ladon-pirate.ts.net:5001`, Personal space only (Shared = err801). Capture the device token ONCE with a fresh OTP, save session to `$CLAUDE_JOB_DIR/tmp/syno_session.txt`, reuse it (no more OTPs that session). API gotchas: state-reading calls need the `X-SYNO-TOKEN` header (else err119); thumbnails/downloads key on `unit_id` (from additional.thumbnail.unit_id), NOT the item id; prefer reproducing bugs through the real PhotosCore path in a throwaway `core/photoscore/examples/*.rs`, delete after, never commit it. Confirm every unverified API param with a bogus-value control (bogus returning err/empty vs real returning data proves the param); DEFER + log anything unconfirmable, never fake it.
-- Creds the user pasted this session (rotate reminder standing): user `sahilagnihotri`. The DSM password was exposed in chat and MUST be changed by the user (it is in TODO.md). Prefer asking for a fresh OTP over reusing a chat-exposed password where possible.
-- Keep TODO.md + Fixed.md in sync every task (CLAUDE.md rule): move done items to Fixed.md with commit hash, delete from TODO.md.
+## Tests (measured 2026-10-16)
 
-## Immediate first action in the fresh session
-Start with task 1 (delete). Because the destructive call is blocked under auto-mode and the prior job's backup is gone: (a) ask the user for one fresh OTP, log in, save the session; (b) re-back-up victim id=73412 (download original); (c) stage the delete+recyclebin+restore verify as a throwaway example and have the USER run the destructive `cargo run` line via `!` (or explicitly approve it); (d) interpret the recycle-bin/restore result; (e) then build the delete UI + Recently Deleted view. Do NOT permanently delete anything without explicit per-action confirm.
+- Rust: `cargo test --workspace` from the repo root. 385 passed, 0 failed, 1 ignored (the real NAS test).
+- Swift unit tests: 470 passed, 0 failed, 0 skipped. Run with
+  `xcodebuild test -project app/MySynologyPhotos.xcodeproj -scheme MySynologyPhotos -destination 'platform=macOS' -only-testing:MySynologyPhotosTests`
+  or `scripts/test.sh app`. Use `ADHOC_SIGN=1 scripts/test.sh app` in a shell that cannot see the login keychain (for example a sandboxed agent). Run unit tests only: the UI test target triggers a System Events automation prompt.
+- After any core change run `make xcframework` if the build complains about missing `uniffi_..._checksum` (the self-heal watches `core/**/*.rs` only, not `Cargo.toml` or the UDL).
+- Falsify new tests: revert the fix, watch the test fail, restore.
+
+## Real NAS probing workflow
+
+Host `fafnir.ladon-pirate.ts.net`, port `5001`, Personal space only (`SYNO.Foto.*`). Shared/`FotoTeam` returns error 801.
+
+- The DSM account has 2FA, and an OTP lives about 30 seconds. On the FIRST probe of a session ask the user for ONE fresh OTP, log in with `enable_device_token=yes`, and save `sid`, `syno_token` and `device_token` to `$CLAUDE_JOB_DIR/tmp/syno_session.txt`. Later probes reuse the `sid`, and re-login with the saved `device_token` (no OTP) if it expired.
+- Prefer reproducing through the app's real path (`PhotosCore.login -> probe_capabilities -> crawl_space -> fetch_assets -> thumbnail`) in a throwaway `core/photoscore/examples/*.rs`. Delete it afterwards, never commit it.
+- Gotchas: state-reading calls need the `X-SYNO-TOKEN` header (else error 119). Thumbnails and downloads key on `unit_id` (from `additional.thumbnail.unit_id`), not the item id. `SYNO.Foto.Thumbnail` max version is 2. Browse list needs `additional=["thumbnail","resolution"]` for `cache_key` and `unit_id`. Browse.Item must be pinned to version 2 for the enriched `additional`.
+- Destructive network calls are blocked under auto mode. Have the user run them from the prompt shell prefix, and back up the original first.
+- Secrets hygiene: the session file is session only and never committed. The device token is revocable in DSM. The repo is public, so never write credentials into any tracked file.
+
+## Prioritized next list
+
+1. Recycle bin enabled probe (HIGH): read the recycle setting for the homes share via `SYNO.Core.Share` / `SYNO.Core.RecycleBin`, then warn or block delete when it is off. Also confirm File Station error 408 for a missing folder and the completion polling on the real NAS.
+2. Remove the dead trash-album core methods and their FFI exports.
+3. Albums: create, add and remove, replacing the sidebar placeholder. Probe each method read-first, with bogus-value controls.
+4. Import and upload UI for migrating off iCloud (File Station upload is already in the API client).
+5. Notarization: Developer ID cert, then `notarytool submit` and `stapler staple` on the dmg.
+6. Smaller items listed in `TODO.md` (editor cache bypass, delete dialog UI tests, clippy and Swift 6 warnings).
+
+## How to work here
+
+- Use subagents for independent work, with disjoint file sets. The app's RootView, Grid and Detail files are hot.
+- Commit small and human, straight to `main`, no feature branches, no AI attribution, no dashes used as dashes in prose. Use pathspec commits when siblings are active.
+- Keep `TODO.md` and `Fixed.md` in sync: move done items to `Fixed.md` with the commit hash and delete them from `TODO.md`. Plans live in `documentation/plans/`, finished ones in `documentation/plans/done/`.
+- Safety invariants (never destroy an original, soft and confirmed delete, never touch iCloud or the phone) are in `CLAUDE.md`.
