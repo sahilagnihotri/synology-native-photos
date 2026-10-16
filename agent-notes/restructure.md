@@ -79,3 +79,26 @@
 - clippy --workspace --all-targets -D warnings: clean. Rust 364/0/1, Swift 498/0/0.
 - Siblings appeared mid step (W11 recycle-errors, W12 albums-core) with dirty files in core/synology-api.
   Not touched; my commit is pathspec limited to core/photoscore/src/lib.rs. My gate runs included their WIP.
+
+### Step 6c: local CI scripts
+- bd5cdc2 (recycle-errors) committed core/synology-api/tests/recycle_mock.rs unformatted, so the fmt stage was
+  red on the real tree. Formatted that one file alone: b4f6d6a. Orchestrator told.
+- scripts/ci/ci.sh core|macos|all: fmt, clippy -D warnings, cargo test, scripts/tests/test-*.sh, Swift unit
+  tests through scripts/macos/test-app.sh (ad hoc, timeouts on) with counts from the xcresult (skips fail).
+  All stages run, summary table, exit 0/1, 2 on usage. CI_ROOT points the core stages at another workspace.
+- Real tree `scripts/ci/ci.sh all`: exit 0, CI PASS. fmt PASS, clippy PASS, test PASS (385/0/1; siblings
+  added 21 tests since the 364 baseline), scripts PASS (2), swift PASS 498/0/0. The self heal rebuilt at
+  .../build/macos/PhotosCore.xcframework (sibling core edits made it stale).
+- Falsification, scripts/tests/test-ci.sh (fake workspaces under $TMPDIR, repo untouched): good tree exit 0
+  "PASS test" and "CI PASS"; failing test exit 1 "FAIL test" and "CI FAIL"; unformatted code exit 1 "FAIL fmt";
+  clippy warning exit 1 "FAIL clippy"; unknown stage exit 2. 7/7 ok.
+  First version shared one CARGO_TARGET_DIR across the fake trees and the failing tree then PASSED (cargo reused
+  another tree's build, 0 tests ran). Fixed with per tree target dirs.
+  Mutants of ci.sh in $TMPDIR via CI_SCRIPT: "failure exits 0" -> test-ci 4 failed, exit 1; "stages always
+  PASS" -> 4 failed, exit 1.
+  Not falsified: the swift stage's FAIL path (needs a failing or skipped Swift test; no real code was broken).
+- scripts/windows/check-core.sh: cargo-xwin is NOT installed -> prints `cargo install --locked cargo-xwin`
+  (and brew install llvm), exit 3. x86_64-pc-windows-msvc rust-std is also not installed (rustup lists only
+  aarch64-apple-darwin); that branch exits 4. Neither installed.
+- scripts/ci/ci.ps1 core|windows|all: UNTESTED, no pwsh on this Mac. Mirrors fmt, clippy, test; windows stage
+  SKIPs while platforms/windows holds only the README.

@@ -35,6 +35,21 @@ scripts/test.sh --include-integration  # also run real NAS tests (needs SYNO_* e
 
 Self-healing: if the Rust toolchain is missing on a Mac, the core tests run setup first.
 
+## CI (local gate)
+
+```bash
+scripts/ci/ci.sh               # fmt, clippy, cargo test, script tests, Swift unit tests
+scripts/ci/ci.sh core          # core stages only (macOS or Linux)
+scripts/ci/ci.sh macos         # Swift unit tests only, counts read from the xcresult
+scripts/windows/check-core.sh  # cross check the core for x86_64-pc-windows-msvc (needs cargo-xwin)
+```
+
+```powershell
+pwsh scripts/ci/ci.ps1 core    # the same core stages on Windows
+```
+
+The exit code is the gate. The GitHub workflow is manual only and just calls these.
+
 ## Layout
 
 ```
@@ -47,6 +62,8 @@ scripts/
   macos/xcodegen/            Xcode build phase helpers (xcframework self heal, GitVersion)
   macos/package/             dmg installer packaging
   windows/setup.ps1          Windows core toolchain setup (UI deferred)
+  windows/check-core.sh      Windows cross check of the core from a Mac (cargo-xwin)
+  ci/ci.sh, ci/ci.ps1        local CI gate (macOS and Linux, Windows)
   tests/                     tests for the scripts themselves
   test.sh                    top level dispatcher: core | macos | windows | all
 ```
