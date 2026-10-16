@@ -32,6 +32,19 @@ final class PhotoCellView: NSCollectionViewItem {
     /// thumbnail load is only applied while it still matches this value.
     private(set) var representedAssetId: Int64 = -1
 
+    /// The asset this cell was last configured with, kept so the VoiceOver
+    /// label can be rebuilt when the selection state changes.
+    private var configuredAsset: Asset?
+
+    private func refreshAccessibilityLabel() {
+        guard isViewLoaded else { return }
+        if let asset = configuredAsset {
+            view.setAccessibilityLabel(GridAccessibility.cellLabel(asset: asset, isSelected: isSelected))
+        } else {
+            view.setAccessibilityLabel(nil)
+        }
+    }
+
     /// The in-flight async load for the current configuration, if any.
     /// Cancelled on reuse and on every re-`configure` so a superseded load
     /// can never win a race against a newer one.
@@ -108,6 +121,7 @@ final class PhotoCellView: NSCollectionViewItem {
     /// app is running.
     override var isSelected: Bool {
         didSet {
+            refreshAccessibilityLabel()
             selectionRing.isHidden = !isSelected
             selectionRing.borderColor = NSColor.controlAccentColor.cgColor
             selectionRing.frame = view.bounds
@@ -126,6 +140,8 @@ final class PhotoCellView: NSCollectionViewItem {
         loadTask = nil
         thumbView.image = nil
         representedAssetId = -1
+        configuredAsset = nil
+        view.setAccessibilityLabel(nil)
         displayedKey = nil
         selectionRing.isHidden = true
         playBadge.isHidden = true
@@ -154,6 +170,8 @@ final class PhotoCellView: NSCollectionViewItem {
     /// is discarded.
     @MainActor
     func configure(asset: Asset, space: Space, cache: ThumbnailCache) {
+        configuredAsset = asset
+        view.setAccessibilityLabel(GridAccessibility.cellLabel(asset: asset, isSelected: isSelected))
         let key = ThumbKey(assetId: asset.id, size: .sm, cacheKey: asset.cacheKey)
         if !Self.needsReload(currentKey: displayedKey, requestedKey: key, hasImage: thumbView.image != nil) {
             return

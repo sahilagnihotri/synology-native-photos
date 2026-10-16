@@ -29,6 +29,12 @@ struct ZoomSliderView: View {
             )
             .frame(width: 120)
             .accessibilityIdentifier("grid.zoom.slider")
+            .accessibilityLabel(GridAccessibility.zoomSliderLabel)
+            .accessibilityValue(GridAccessibility.zoomSliderValue(
+                itemSize: zoom.itemSize,
+                min: GridZoomModel.minItemSize,
+                max: GridZoomModel.maxItemSize
+            ))
             Image(systemName: "photo.fill")
                 .font(.body)
                 .foregroundStyle(.secondary)
