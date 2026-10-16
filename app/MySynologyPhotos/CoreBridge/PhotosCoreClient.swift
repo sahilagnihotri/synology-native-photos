@@ -78,6 +78,11 @@ actor PhotosCoreClient {
     func deleteAssets(space: Space, assetIds: [Int64]) async throws {
         try await core.deleteAssets(space: space, assetIds: assetIds)
     }
+    /// Reads whether the DSM recycle bin for home folders is on, live from
+    /// the NAS. The everyday delete is only recoverable while it is enabled.
+    func recycleBinStatus() async throws -> RecycleBinStatus {
+        try await core.recycleBinStatus()
+    }
     /// Reads the DSM recycle bin, newest first, windowed by `offset`/`limit`.
     /// A live File Station read (there is no local mirror of the recycle
     /// bin), so it needs a session and makes network calls.

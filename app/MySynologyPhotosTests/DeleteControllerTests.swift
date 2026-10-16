@@ -20,25 +20,25 @@ struct DeleteControllerTests {
         return (controller, fake)
     }
 
-    @Test func requestDeletePresentsConfirmBeforeAnyCoreCall() {
+    @Test func requestDeletePresentsConfirmBeforeAnyCoreCall() async {
         let (controller, fake) = makeController()
-        controller.requestDelete(ids: [1, 2, 3])
+        await controller.requestDelete(ids: [1, 2, 3])
         #expect(controller.isShowingDeleteConfirm)
         #expect(controller.pendingDeleteCount == 3)
         // The confirm must be up with nothing yet deleted.
         #expect(fake.deleteAssetsCallCount == 0)
     }
 
-    @Test func requestDeleteWithEmptySelectionShowsNoConfirm() {
+    @Test func requestDeleteWithEmptySelectionShowsNoConfirm() async {
         let (controller, fake) = makeController()
-        controller.requestDelete(ids: [])
+        await controller.requestDelete(ids: [])
         #expect(!controller.isShowingDeleteConfirm)
         #expect(fake.deleteAssetsCallCount == 0)
     }
 
-    @Test func cancelDeleteMakesZeroCoreCalls() {
+    @Test func cancelDeleteMakesZeroCoreCalls() async {
         let (controller, fake) = makeController()
-        controller.requestDelete(ids: [7, 8])
+        await controller.requestDelete(ids: [7, 8])
         controller.cancelDelete()
         #expect(!controller.isShowingDeleteConfirm)
         #expect(controller.pendingDeleteCount == 0)
@@ -47,7 +47,7 @@ struct DeleteControllerTests {
 
     @Test func confirmDeleteCallsDeleteAssetsWithExactlyTheSelectedIds() async {
         let (controller, fake) = makeController()
-        controller.requestDelete(ids: [10, 20, 30])
+        await controller.requestDelete(ids: [10, 20, 30])
 
         var didRefresh = false
         await controller.confirmDelete(space: .personal) { didRefresh = true }
@@ -64,7 +64,7 @@ struct DeleteControllerTests {
     @Test func confirmDeleteFailureSurfacesErrorAndSkipsRefresh() async {
         let (controller, fake) = makeController()
         fake.deleteAssetsResult = .failure(.Network(message: "dropped"))
-        controller.requestDelete(ids: [1])
+        await controller.requestDelete(ids: [1])
 
         var didRefresh = false
         await controller.confirmDelete(space: .personal) { didRefresh = true }
@@ -84,7 +84,7 @@ struct DeleteControllerTests {
         let shown = asset(4242)
 
         // Mirror the detail viewer's onDelete closure exactly.
-        controller.requestDelete(ids: [shown.id])
+        await controller.requestDelete(ids: [shown.id])
         #expect(controller.isShowingDeleteConfirm)
         #expect(controller.pendingDeleteCount == 1)
         #expect(fake.deleteAssetsCallCount == 0)
@@ -138,7 +138,7 @@ struct DeleteControllerTests {
     @Test func canUndoDeleteIsFalseUntilADeleteSucceeds() async {
         let (controller, _) = makeController()
         #expect(!controller.canUndoDelete)
-        controller.requestDelete(ids: [1], filenames: ["a.jpg"])
+        await controller.requestDelete(ids: [1], filenames: ["a.jpg"])
         // Still nothing to undo while the confirm is merely up.
         #expect(!controller.canUndoDelete)
         await controller.confirmDelete(space: .personal) {}
@@ -152,7 +152,7 @@ struct DeleteControllerTests {
     /// pending undo.
     @Test func undoLastDeleteRestoresTheNewestMatchingPathsThenClearsPendingUndo() async {
         let (controller, fake) = makeController()
-        controller.requestDelete(ids: [1, 2], filenames: ["a.jpg", "b.jpg"])
+        await controller.requestDelete(ids: [1, 2], filenames: ["a.jpg", "b.jpg"])
         await controller.confirmDelete(space: .personal) {}
         #expect(controller.canUndoDelete)
 
@@ -184,7 +184,7 @@ struct DeleteControllerTests {
 
     @Test func undoLastDeleteWithNoMatchingRecycleEntryRestoresNothingAndClearsUndo() async {
         let (controller, fake) = makeController()
-        controller.requestDelete(ids: [1], filenames: ["a.jpg"])
+        await controller.requestDelete(ids: [1], filenames: ["a.jpg"])
         await controller.confirmDelete(space: .personal) {}
         fake.recentlyDeleted = [recycle("#recycle/x", "x.jpg", 1)]
 
@@ -200,7 +200,7 @@ struct DeleteControllerTests {
 
     @Test func undoLastDeleteKeepsPendingUndoOnAThrownError() async {
         let (controller, fake) = makeController()
-        controller.requestDelete(ids: [1], filenames: ["a.jpg"])
+        await controller.requestDelete(ids: [1], filenames: ["a.jpg"])
         await controller.confirmDelete(space: .personal) {}
         fake.recentlyDeleted = [recycle("#recycle/a", "a.jpg", 1)]
         fake.restoreRecentlyDeletedResult = .failure(.Network(message: "dropped"))

@@ -455,7 +455,9 @@ struct LibraryView: View {
             // the grid uses: raise the confirm for just this asset (with its
             // filename, so Cmd-Z can undo it); the shared `.deleteConfirm`
             // modifier closes the viewer and refreshes on a confirmed success.
-            onDelete: { asset in deleteController.requestDelete(ids: [asset.id], filenames: [asset.filename]) },
+            onDelete: { asset in
+                Task { await deleteController.requestDelete(ids: [asset.id], filenames: [asset.filename]) }
+            },
             // Edit opens the non-destructive crop/rotate editor for this photo.
             // Saving there uploads a NEW photo and leaves the original
             // untouched; the sheet's onSaved refreshes the library.
@@ -1063,7 +1065,7 @@ struct LibraryView: View {
     /// Nothing is deleted until the user confirms.
     private func requestDeleteSelected() {
         let assets = controller.selectedAssets()
-        deleteController.requestDelete(ids: assets.map(\.id), filenames: assets.map(\.filename))
+        Task { await deleteController.requestDelete(ids: assets.map(\.id), filenames: assets.map(\.filename)) }
     }
 
     /// Undoes the most recent delete (Cmd-Z), restoring those photos from the
