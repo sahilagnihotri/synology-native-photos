@@ -18,19 +18,13 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 XCF="$ROOT/PhotosCore.xcframework"
 LIB="$XCF/macos-arm64/libphotoscore.a"
 
-# Rebuild when the xcframework or bindings are missing, OR when any Rust
-# source is newer than the built static lib. Checking existence alone is not
-# enough: a stale lib built from old sources will link and run OLD code, which
-# silently hides fixes. Freshness matters here.
+# Rebuild when the xcframework or bindings are missing, OR when any build
+# input (Rust source, Cargo.toml, Cargo.lock, .udl) is newer than the built
+# static lib. Checking existence alone is not enough: a stale lib built from
+# old sources will link and run OLD code, which silently hides fixes. The
+# logic lives in xcframework-staleness.sh so it can be tested.
 needs_build=0
-if [ ! -f "$LIB" ] || [ ! -f "$ROOT/bindings/PhotosCore.swift" ] || [ ! -f "$ROOT/bindings/models.swift" ]; then
-  needs_build=1
-else
-  # Any Rust source under core/ newer than the built lib means the lib is stale.
-  if [ -n "$(find "$ROOT/core" -name '*.rs' -newer "$LIB" -print -quit 2>/dev/null)" ]; then
-    needs_build=1
-  fi
-fi
+"$SCRIPT_DIR/xcframework-staleness.sh" "$ROOT" >/dev/null || needs_build=1
 
 if [ "$needs_build" -eq 0 ]; then
   exit 0
