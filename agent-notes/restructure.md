@@ -102,3 +102,17 @@
   aarch64-apple-darwin); that branch exits 4. Neither installed.
 - scripts/ci/ci.ps1 core|windows|all: UNTESTED, no pwsh on this Mac. Mirrors fmt, clippy, test; windows stage
   SKIPs while platforms/windows holds only the README.
+
+### Step 7: manual GitHub workflow
+- .github/workflows/ci.yml: `on: workflow_dispatch` only (parsed with ruby YAML: the only trigger key is
+  workflow_dispatch). Jobs macos (macos-latest, scripts/ci/ci.sh all) and windows (windows-latest,
+  ./scripts/ci/ci.ps1 all), each `if: github.ref == 'refs/heads/stable'`. No stable branch created, not triggered.
+- Untested on GitHub. Risk: macos-latest may ship an Xcode older than the app's macOS 26 deployment target.
+- Gates: Rust 385/0/1, Swift 498/0/0, self heal at .../build/macos/PhotosCore.xcframework.
+
+### Final grep for old paths (excluding .git, target, build, documentation/plans/done)
+- No root PhotosCore.xcframework path, no bindings/ path, no app/ path in code, scripts, config or current docs.
+- Left on purpose: documentation/plans/2026-07-24-phase0-phase1-implementation.md, -interface-contract.md,
+  2026-07-25-phase2-manage-implementation.md (historical plans), documentation/reviews/2026-07-26-ux-adversarial-review.md
+  (dated review), the restructure plan itself, and these notes. Remaining "PhotosCore.xcframework" hits are the
+  product name (build phase name, comments, the build/macos tree in macos.md), not root paths.

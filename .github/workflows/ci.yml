@@ -1,0 +1,35 @@
+# Manual only. GitHub Actions minutes are used up, so this never runs on its
+# own: no push, pull_request or schedule triggers. Every job is also guarded to
+# the stable branch, so a manual run from any other branch does nothing.
+# The jobs only call the local CI scripts, which are the source of truth.
+name: ci
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    if: github.ref == 'refs/heads/stable'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # rustup reads rust-toolchain.toml (pinned channel, clippy, rustfmt).
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - name: Local CI gate
+        run: scripts/ci/ci.sh all
+
+  windows:
+    if: github.ref == 'refs/heads/stable'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        shell: pwsh
+        run: rustup toolchain install
+      - name: Local CI gate
+        shell: pwsh
+        run: ./scripts/ci/ci.ps1 all
