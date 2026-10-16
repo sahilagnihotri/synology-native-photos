@@ -111,7 +111,7 @@ Bigger bets:
 
 ## Security (before real use)
 
-- [ ] Change the DSM password `xatkiW-pitkew-dizno7` (exposed in chat during debugging).
+- [ ] HIGH: change the DSM password. It was exposed in chat and committed in plain text to this PUBLIC repo in `db2a439` (removed from the file 2026-10-16, still in git history). Rotating it is the only fix.
 - [ ] Switch the app from the main DSM account to a dedicated least-privilege `photosclient` user (Photos-only). Main account used during dev only. Steps in `documentation/phase0-probe-results.md`.
 - [ ] Tailscale host and IP appear in tracked files (`CLAUDE.md`, docs, tests). The repo is PUBLIC; low risk, consider placeholders.
 - [ ] Add defensive `.gitignore` patterns (`syno_session*`, `*.pem`, `*.p12`, `.env*`, `*.mobileprovision`).
