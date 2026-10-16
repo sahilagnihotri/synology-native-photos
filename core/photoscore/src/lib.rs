@@ -401,6 +401,9 @@ impl PhotosCore {
     /// Favorites are deliberately not folded in here: they are server-side
     /// clusters with their own sidebar destinations (`fetch_assets_for`), not
     /// local-index columns.
+    // Exported over UniFFI as flat optional filters; bundling them into a
+    // struct would change the Swift API for no gain.
+    #[allow(clippy::too_many_arguments)]
     pub fn filter_assets(
         &self,
         space: Space,
@@ -1057,8 +1060,7 @@ impl PhotosCore {
         let _lock = self.trash_lock.lock().await;
         let (transport, sid, syno_token) = self.recycle_call_context()?;
         let total = recycle_paths.len();
-        let mut restored = 0usize;
-        for path in &recycle_paths {
+        for (restored, path) in recycle_paths.iter().enumerate() {
             if let Err(e) =
                 synology_api::restore_recycle_item(&transport, &sid, syno_token.as_deref(), path)
                     .await
@@ -1070,7 +1072,6 @@ impl PhotosCore {
                     message: format!("restored {restored} of {total} item(s) before failing: {e}"),
                 });
             }
-            restored += 1;
         }
         // All moves confirmed; re-index once so Photos picks the files back up.
         synology_api::trigger_reindex(&transport, &sid, syno_token.as_deref()).await
@@ -2487,7 +2488,7 @@ mod core_tests {
             ]))
             .with_status(200)
             .with_header("content-type", "application/octet-stream")
-            .with_body(b"ORIGINAL-BYTES".to_vec())
+            .with_body(b"ORIGINAL-BYTES")
             .create_async()
             .await;
         let core = core_at("download-ok");
@@ -2614,7 +2615,7 @@ mod core_tests {
             ]))
             .with_status(200)
             .with_header("content-type", "video/quicktime")
-            .with_body(b"FAKE-MOV-BYTES".to_vec())
+            .with_body(b"FAKE-MOV-BYTES")
             .create_async()
             .await;
         let core = core_at("video-playback-ok");
