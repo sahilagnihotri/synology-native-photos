@@ -17,7 +17,7 @@ pub mod thumbnail;
 pub mod transport;
 pub mod upload;
 
-pub use album_write::{add_items, create_album, delete_album, remove_items};
+pub use album_write::delete_album;
 pub use auth::{login, logout};
 pub use browse::{
     filter_items, list_albums, list_items, list_items_filtered, search, search_filtered, CollectionFilter,
@@ -47,9 +47,6 @@ mod facade_tests {
         let _ = crate::list_items_filtered;
         let _ = crate::filter_items;
         let _ = crate::list_albums;
-        let _ = crate::create_album;
-        let _ = crate::add_items;
-        let _ = crate::remove_items;
         let _ = crate::delete_album;
         let _ = crate::permanent_delete;
         let _ = crate::list_recycle_photos;

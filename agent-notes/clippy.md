@@ -11,3 +11,11 @@
 - Added `components = ["clippy", "rustfmt"]` to rust-toolchain.toml. Bare `cargo clippy` could NOT be confirmed: rustup needs to write ~/.rustup/tmp to install the component and the sandbox returns "Operation not permitted". Needs one unsandboxed run by Sahil: `rustup component add clippy rustfmt` (or any cargo command in the repo).
 - Measured with `cargo +stable clippy -p persistence -p models --all-targets`: before 5 warnings (1 too_many_arguments on filter_assets, 4 identity_op `1 *` in assets.rs tests), models 0. After 0. Tests: persistence 23+65 passed, 0 failed.
 - filter_assets keeps an allow: signature is used by photoscore, which another worker owns.
+
+---
+## clippy worker, trash leftovers (2026-10-16)
+- Grep over core/ app/ bindings/ found no callers of fetch_trash, trash_count, set_trash_flag, all_in_trash outside persistence itself, and no callers of synology-api add_items, remove_items, create_album outside their own tests and the lib.rs re-export. Removed all seven plus their tests. delete_album kept (not in scope).
+- New persistence migration step 5 `UPDATE assets SET in_trash = 0, trashed_at = NULL` (columns and index kept). Test `v4_to_v5_migration_unhides_legacy_trashed_rows`. Falsified: with the UPDATE neutralised the test FAILED ("legacy trashed row must be visible again", left: []); restored, 61 persistence tests pass.
+- v2_to_v3 trash-preservation test now calls the v3 step directly, since a full run_migrations now ends in step 5 which clears flags by design.
+- Tests that pin "upsert preserves in_trash" remain and use a test-only SQL helper. Crawl upserts still never reset the flag: harmless now that nothing sets it.
+- Results: persistence 61 passed, synology-api all suites passed, clippy clean for both, workspace cargo check clean.
