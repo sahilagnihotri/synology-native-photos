@@ -15,12 +15,12 @@ import Observation
 final class GridZoomModel {
     /// Smallest square item size, in points. Below this, Photos-style tiny
     /// thumbnails stop being individually tappable.
-    static let minItemSize: CGFloat = 60
+    nonisolated static let minItemSize: CGFloat = 60
     /// Largest square item size, in points. Above this a single row holds
     /// only one or two items, which is still useful (matches Photos' own
     /// max zoom) but no larger.
-    static let maxItemSize: CGFloat = 320
-    static let defaultItemSize: CGFloat = 160
+    nonisolated static let maxItemSize: CGFloat = 320
+    nonisolated static let defaultItemSize: CGFloat = 160
 
     private(set) var itemSize: CGFloat
 
@@ -41,7 +41,7 @@ final class GridZoomModel {
 
     /// Pure clamp, extracted for testing without touching the
     /// `@Observable` instance.
-    static func clamp(_ value: CGFloat) -> CGFloat {
+    nonisolated static func clamp(_ value: CGFloat) -> CGFloat {
         min(max(value, minItemSize), maxItemSize)
     }
 }

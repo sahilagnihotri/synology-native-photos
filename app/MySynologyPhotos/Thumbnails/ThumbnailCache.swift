@@ -40,7 +40,17 @@ struct ThumbKey: Hashable {
 /// different keys, and never blocks the main actor.
 actor ThumbnailCache {
     private let client: PhotosCoreClient
-    private let memory = NSCache<NSString, CacheBox>()
+    /// Holder that lets `peekMemory` read the tier without an actor hop.
+    /// `NSCache` is not annotated `Sendable`, but Apple documents it as safe
+    /// for concurrent get/set from multiple threads, and the holder's only
+    /// state is an immutable `let` reference, so `@unchecked Sendable` is
+    /// sound here. The boxed values are immutable (`CacheBox.image` is a
+    /// `let`).
+    private final class MemoryTier: @unchecked Sendable {
+        let cache = NSCache<NSString, CacheBox>()
+    }
+
+    private nonisolated let memory = MemoryTier()
 
     /// Boxes a `CGImage` for `NSCache`, which requires its values to be
     /// class instances.
@@ -57,7 +67,7 @@ actor ThumbnailCache {
     ///     while holding hundreds of decoded thumbnails at once.
     init(client: PhotosCoreClient, memoryByteLimit: Int = 128 * 1024 * 1024) {
         self.client = client
-        memory.totalCostLimit = memoryByteLimit
+        memory.cache.totalCostLimit = memoryByteLimit
     }
 
     /// Maximum pixel dimension ImageIO should downsample to for each
@@ -100,7 +110,7 @@ actor ThumbnailCache {
     /// not exist", and callers should fall back to the async `image(...)`
     /// path on a miss.
     nonisolated func peekMemory(_ key: ThumbKey) -> CGImage? {
-        memory.object(forKey: Self.nsKey(key))?.image
+        memory.cache.object(forKey: Self.nsKey(key))?.image
     }
 
     /// Decoded-bytes cost used as the `NSCache` cost for eviction bookkeeping.
@@ -123,7 +133,7 @@ actor ThumbnailCache {
     /// grid cell can show a placeholder), not a fatal condition.
     func image(space: Space, asset: Asset, size: ThumbnailSize) async -> CGImage? {
         let key = ThumbKey(assetId: asset.id, size: size, cacheKey: asset.cacheKey)
-        if let hit = memory.object(forKey: nsKey(key)) {
+        if let hit = memory.cache.object(forKey: nsKey(key)) {
             return hit.image
         }
 
@@ -140,7 +150,7 @@ actor ThumbnailCache {
         }
 
         if let image = decoded {
-            memory.setObject(CacheBox(image), forKey: nsKey(key), cost: Self.byteCost(image))
+            memory.cache.setObject(CacheBox(image), forKey: nsKey(key), cost: Self.byteCost(image))
         }
         return decoded
     }
@@ -175,7 +185,7 @@ actor ThumbnailCache {
     /// `cacheKey`). The disk tier is unaffected: it is owned and invalidated
     /// by the core itself when `cacheKey` changes.
     func invalidate(assetId: Int64) {
-        memory.removeAllObjects()
+        memory.cache.removeAllObjects()
         _ = assetId
     }
 }
