@@ -13,9 +13,18 @@ Completed work with commit hashes. Newest at top.
 - The core is built for the app's macOS 26 deployment target, `scripts/test.sh app`
   runs only the unit tests, and `ADHOC_SIGN=1` signs ad hoc for shells that cannot
   see the login keychain (`05dd0e3`). Swift bindings regenerated (`848d47a`).
+- `Session` has a manual `Debug` that redacts `sid`, `syno_token` and
+  `device_did`, so a stray `{:?}` log cannot leak them (`772f6ed`).
+- The "Skip certificate check" toggle is no longer persisted: it always starts
+  off, and a value saved by an older build is removed on load (`b4220aa`).
+- Unit test runs no longer touch the user's real keychain items. Under the
+  XCTest host every keychain service gets a `.tests` suffix and launch skips
+  session restore and the legacy pin migration. Ad hoc signed test builds have a
+  new signature each build, so reading the real session item raised a login
+  keychain password prompt on every run (`b52b7f1`).
 - Measured: `cargo test --workspace` 385 passed, 0 failed, 1 ignored (the real NAS
-  test). Swift unit tests 470 passed, 0 failed, 0 skipped. Every new guard test was
-  falsified (guard reverted, test watched fail, guard restored).
+  test). Swift unit tests 474 passed, 0 failed, 0 skipped. Every new test was
+  falsified (fix reverted, test watched fail, fix restored).
 - Moved here from TODO.md because they are already shipped:
   - Edit (crop/rotate): saves a new asset into `/home/Photos/Edited`, original
     untouched (`82b9995`).
