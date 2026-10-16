@@ -40,7 +40,7 @@
 
 use crate::envelope::{decode_envelope, decode_write_success, map_binary_or_error};
 use crate::transport::Transport;
-use models::{media_kind_from_filename, CoreError, RecycleItem};
+use models::{media_kind_from_filename, CoreError, RecycleBinStatus, RecycleItem};
 use serde::Deserialize;
 
 /// The Photos subtree inside the DSM home recycle bin. Files deleted from the
@@ -301,10 +301,47 @@ fn json_path_array(path: &str) -> Result<String, CoreError> {
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct UserHomeData {
+    #[serde(default)]
+    enable_recycle_bin: Option<bool>,
+}
+
+/// Read whether the recycle bin for user home folders is on, via
+/// `SYNO.Core.User.Home` v1 `get` (verified on the real NAS on 2026-10-16 with
+/// an admin account: `data.enable_recycle_bin` is the user home setting, and
+/// the Photos library lives in the user's home). `SYNO.Core.Share get` for
+/// `homes` does NOT return the field, so it is not used.
+///
+/// This is an admin API, so a non-admin account is expected to be refused.
+/// Any DSM error envelope, an undecodable body or a missing field therefore
+/// yields `Unknown` rather than an error. `Auth`/`OtpRequired` (a bad session)
+/// and `Network` still propagate, so the caller fails closed exactly as it
+/// would on any other call.
+pub async fn recycle_bin_status(
+    transport: &Transport,
+    sid: &str,
+    syno_token: Option<&str>,
+) -> Result<RecycleBinStatus, CoreError> {
+    let query: Vec<(&str, String)> = vec![
+        ("api", "SYNO.Core.User.Home".to_string()),
+        ("version", "1".to_string()),
+        ("method", "get".to_string()),
+        ("_sid", sid.to_string()),
+    ];
+    let body = fs_get_body(transport, &query, syno_token).await?;
+    match decode_envelope::<UserHomeData>(&body) {
+        Ok(UserHomeData { enable_recycle_bin: Some(true) }) => Ok(RecycleBinStatus::Enabled),
+        Ok(UserHomeData { enable_recycle_bin: Some(false) }) => Ok(RecycleBinStatus::Disabled),
+        Ok(UserHomeData { enable_recycle_bin: None }) => Ok(RecycleBinStatus::Unknown),
+        Err(e @ (CoreError::Auth { .. } | CoreError::OtpRequired | CoreError::Network { .. })) => Err(e),
+        Err(_) => Ok(RecycleBinStatus::Unknown),
+    }
+}
+
 /// File Station's "no such file or directory" error code. Taken from the
-/// official File Station API guide, NOT yet observed on the real NAS: a
-/// different code only makes a vanished folder look like "still pending"
-/// (a false failure after the timeout), never a false success.
+/// official File Station API guide and verified on the real NAS on
+/// 2026-10-16 (listing a missing folder answers with error 408).
 const FS_NO_SUCH_FILE: i64 = 408;
 
 /// How long a restore or permanent delete waits for File Station to finish

@@ -1,7 +1,7 @@
 use mockito::Matcher;
-use models::CoreError;
+use models::{CoreError, RecycleBinStatus};
 use synology_api::recycle::{
-    delete_recycle_item, delete_recycle_item_with_polling, list_recycle_photos, recycle_thumbnail,
+    delete_recycle_item, delete_recycle_item_with_polling, list_recycle_photos, recycle_bin_status, recycle_thumbnail,
     restore_recycle_item, restore_recycle_item_with_polling, trigger_reindex, TaskPolling,
 };
 use synology_api::transport::Transport;
@@ -472,4 +472,84 @@ async fn trigger_reindex_fails_closed_on_a_server_error() {
     let t = transport_for(&server);
     let err = trigger_reindex(&t, "SID", None).await.unwrap_err();
     assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+}
+
+// --- recycle_bin_status -------------------------------------------------
+
+/// Mock `SYNO.Core.User.Home get` (a GET, with the SynoToken header required,
+/// like every other state read), returning `body`.
+async fn mock_user_home(server: &mut mockito::ServerGuard, body: &str) -> mockito::Mock {
+    server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_header("X-SYNO-TOKEN", "TOK")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("api".into(), "SYNO.Core.User.Home".into()),
+            Matcher::UrlEncoded("version".into(), "1".into()),
+            Matcher::UrlEncoded("method".into(), "get".into()),
+            Matcher::UrlEncoded("_sid".into(), "SID".into()),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(body)
+        .expect(1)
+        .create_async()
+        .await
+}
+
+#[tokio::test]
+async fn recycle_bin_status_reads_enabled() {
+    let mut server = mockito::Server::new_async().await;
+    // The shape the real NAS returned on 2026-10-16.
+    let m = mock_user_home(
+        &mut server,
+        r#"{"data":{"enable":true,"enable_domain":false,"enable_ldap":false,"enable_recycle_bin":true,"encryption":0,"location":"/volume1"},"success":true}"#,
+    )
+    .await;
+    let t = transport_for(&server);
+    assert_eq!(recycle_bin_status(&t, "SID", Some("TOK")).await.unwrap(), RecycleBinStatus::Enabled);
+    m.assert_async().await;
+}
+
+#[tokio::test]
+async fn recycle_bin_status_reads_disabled() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = mock_user_home(&mut server, r#"{"data":{"enable":true,"enable_recycle_bin":false},"success":true}"#).await;
+    let t = transport_for(&server);
+    assert_eq!(recycle_bin_status(&t, "SID", Some("TOK")).await.unwrap(), RecycleBinStatus::Disabled);
+}
+
+#[tokio::test]
+async fn recycle_bin_status_is_unknown_when_the_field_is_missing() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = mock_user_home(&mut server, r#"{"data":{"enable":true},"success":true}"#).await;
+    let t = transport_for(&server);
+    assert_eq!(recycle_bin_status(&t, "SID", Some("TOK")).await.unwrap(), RecycleBinStatus::Unknown);
+}
+
+#[tokio::test]
+async fn recycle_bin_status_is_unknown_on_a_permission_error() {
+    // DSM error 105 is "permission denied", the expected answer for a
+    // non-admin account.
+    let mut server = mockito::Server::new_async().await;
+    let _m = mock_user_home(&mut server, r#"{"success":false,"error":{"code":105}}"#).await;
+    let t = transport_for(&server);
+    assert_eq!(recycle_bin_status(&t, "SID", Some("TOK")).await.unwrap(), RecycleBinStatus::Unknown);
+}
+
+#[tokio::test]
+async fn recycle_bin_status_propagates_an_auth_error() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = mock_user_home(&mut server, r#"{"success":false,"error":{"code":400}}"#).await;
+    let t = transport_for(&server);
+    let err = recycle_bin_status(&t, "SID", Some("TOK")).await.unwrap_err();
+    assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+}
+
+#[tokio::test]
+async fn recycle_bin_status_propagates_an_otp_error() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = mock_user_home(&mut server, r#"{"success":false,"error":{"code":403}}"#).await;
+    let t = transport_for(&server);
+    let err = recycle_bin_status(&t, "SID", Some("TOK")).await.unwrap_err();
+    assert!(matches!(err, CoreError::OtpRequired), "got {err:?}");
 }

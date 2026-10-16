@@ -242,6 +242,14 @@ pub struct RecycleItem {
     pub media_kind: MediaKind,
 }
 
+/// Whether the DSM recycle bin for user home folders is switched on, as read
+/// from `SYNO.Core.User.Home` `get` (`enable_recycle_bin`). The everyday
+/// delete is only soft while this is on: with it off, a deleted original is
+/// gone for good. `Unknown` means DSM did not say (the field was missing, or
+/// the call was refused, which is expected for a non-admin account).
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecycleBinStatus { Enabled, Disabled, Unknown }
+
 /// One row from `SYNO.Foto.Browse.Album`: either a user-created normal album
 /// or a rule-based smart (condition) album; the two share this one list
 /// surface on the real NAS (see `synology_api::browse::list_albums`'s doc
