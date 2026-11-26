@@ -336,3 +336,17 @@ struct DetailImageLoaderTests {
         #expect(DetailImageLoader.displayMaxPixel(screenMaxDimension: nil, scale: nil) == 3200)
     }
 }
+
+/// R4-4: a video download that finishes after the viewer was closed must not
+/// start playback into the dismantled view.
+@MainActor
+struct DetailVideoCoordinatorTests {
+    @Test func aDismantledCoordinatorIgnoresALateCompletion() {
+        let coordinator = DetailVideoPlayerView.Coordinator()
+        coordinator.lastAssetId = 5
+        #expect(coordinator.isShowing(5))
+        coordinator.invalidate()
+        #expect(!coordinator.isShowing(5), "a late download for asset 5 must no longer pass the guard")
+        #expect(coordinator.loadTask == nil)
+    }
+}

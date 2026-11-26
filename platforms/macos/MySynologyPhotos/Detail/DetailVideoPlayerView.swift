@@ -323,16 +323,17 @@ struct DetailVideoPlayerView: NSViewRepresentable {
         let cache = self.cache
         let originalCache = self.originalCache
         let coordinator = context.coordinator
-        Task {
+        coordinator.loadTask?.cancel()
+        coordinator.loadTask = Task {
             do {
                 let playable = try await DetailVideoPlayerView.resolvePlayableSource(
                     asset: a, space: s, client: c, originalCache: originalCache, cache: cache)
-                guard coordinator.lastAssetId == a.id else { return }
+                guard coordinator.isShowing(a.id), !Task.isCancelled else { return }
                 let urlAsset = VideoPlaybackAssetBuilder.makeAsset(source: playable, synoToken: token)
                 let item = AVPlayerItem(asset: urlAsset)
                 let player = AVPlayer(playerItem: item)
                 await MainActor.run {
-                    guard coordinator.lastAssetId == a.id else { return }
+                    guard coordinator.isShowing(a.id), !Task.isCancelled else { return }
                     nsView.hideError()
                     coordinator.observeStatus(of: item, in: nsView)
                     nsView.playerView.player = player
@@ -340,7 +341,7 @@ struct DetailVideoPlayerView: NSViewRepresentable {
                 }
             } catch {
                 await MainActor.run {
-                    guard coordinator.lastAssetId == a.id else { return }
+                    guard coordinator.isShowing(a.id), !Task.isCancelled else { return }
                     nsView.showError(DetailVideoPlayerView.message(for: error))
                 }
             }
@@ -348,6 +349,9 @@ struct DetailVideoPlayerView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ nsView: VideoPlayerContainerView, coordinator: Coordinator) {
+        // Stop a download that is still running from starting playback into a
+        // view that is gone.
+        coordinator.invalidate()
         coordinator.statusObservation?.invalidate()
         coordinator.statusObservation = nil
         nsView.playerView.player?.pause()
@@ -364,6 +368,19 @@ struct DetailVideoPlayerView: NSViewRepresentable {
     final class Coordinator {
         var lastAssetId: Int64?
         var statusObservation: NSKeyValueObservation?
+        /// The in-flight download/prepare task for `lastAssetId`.
+        var loadTask: Task<Void, Never>?
+
+        /// True while the hosted view is still showing asset `id`.
+        func isShowing(_ id: Int64) -> Bool { lastAssetId == id }
+
+        /// The view was dismantled: forget the asset (so any late completion
+        /// fails `isShowing`) and cancel the pending load.
+        func invalidate() {
+            lastAssetId = nil
+            loadTask?.cancel()
+            loadTask = nil
+        }
 
         /// Observes `item.status`: a `.failed` transition (undecodable or
         /// unreachable media) shows the error overlay, `.readyToPlay` hides
