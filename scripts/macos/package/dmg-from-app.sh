@@ -11,6 +11,10 @@
 #
 # Usage: dmg-from-app.sh <path-to-.app> [output-dir]
 #   Set DMG_OPEN=1 to reveal the finished dmg in Finder.
+#   Set DMG_ALLOW_DIRTY=1 to package despite uncommitted tracked changes.
+#   DMG_REPO_ROOT=<dir> uses another git tree (scripts/tests uses a fake one).
+# The dmg is named MySynologyPhotos-<app version>[-<short hash>].dmg: the version
+# comes from the app's Info.plist, the hash is added when HEAD is not on a tag.
 #
 # Signing gate: refuses to package unless the app is signed with DEVELOPMENT_TEAM
 # (default 5W67TF3579, Agnihotri AS), so a release can never go out signed with
@@ -30,19 +34,38 @@ if [ -z "$APP" ] || [ ! -d "$APP" ]; then
   exit 1
 fi
 
-ROOT="$(repo_root)"
+ROOT="${DMG_REPO_ROOT:-$(repo_root)}"
 OUT_DIR="${2:-$ROOT/build/macos/dist}"
 STAGE_DIR="$ROOT/build/macos/dmg-stage"
 
-# Version tag for the dmg filename and volume name: the latest git tag
-# (v1.0.1 -> 1.0.1), falling back to the project's MARKETING_VERSION, then 1.0.
+# Version for the dmg filename and volume name: the built app's own
+# CFBundleShortVersionString, so the name always matches the code inside. When
+# HEAD is not exactly on a tag the short commit hash is appended, so a build
+# from different code never overwrites or impersonates a tagged release.
 version() {
-  local v
-  v="$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
+  local v sha
+  v="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || true)"
   if [ -z "$v" ]; then
-    v="$(grep -m1 'MARKETING_VERSION' "$ROOT/platforms/macos/project.yml" 2>/dev/null | sed -E 's/.*"([0-9.]+)".*/\1/')"
+    err "cannot read CFBundleShortVersionString from $APP/Contents/Info.plist"
+    exit 1
   fi
-  [ -n "$v" ] && printf '%s\n' "$v" || printf '%s\n' "1.0"
+  if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 \
+     && ! git -C "$ROOT" describe --tags --exact-match HEAD >/dev/null 2>&1; then
+    sha="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || true)"
+    [ -n "$sha" ] && v="$v-$sha"
+  fi
+  printf '%s\n' "$v"
+}
+
+# Refuse to package a tree with uncommitted changes to tracked files: the dmg
+# name carries a commit hash, which would be a lie. DMG_ALLOW_DIRTY=1 overrides.
+check_clean_tree() {
+  if [ "${DMG_ALLOW_DIRTY:-0}" = "1" ]; then return; fi
+  if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 \
+     && [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    err "the working tree has uncommitted changes; the dmg would not match any commit. Commit them, or set DMG_ALLOW_DIRTY=1 to package anyway."
+    exit 1
+  fi
 }
 
 verify_signing() {
@@ -92,5 +115,6 @@ make_dmg() {
   fi
 }
 
+check_clean_tree
 verify_signing
 make_dmg
