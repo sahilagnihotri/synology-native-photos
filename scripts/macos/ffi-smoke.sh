@@ -23,7 +23,7 @@ ROOT="$(repo_root)"
 XCF="$ROOT/build/macos/PhotosCore.xcframework"
 HEADERS="$XCF/macos-arm64/Headers"
 LIBDIR="$XCF/macos-arm64"
-WORKDIR="$(mktemp -d -t photoscore-ffi-smoke)"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/photoscore-ffi-smoke.XXXXXX")"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 step "Cross-boundary FFI smoke test"
@@ -44,8 +44,9 @@ func fail(_ msg: String) -> Never {
     exit(1)
 }
 
-let pid = ProcessInfo.processInfo.processIdentifier
-let base = FileManager.default.temporaryDirectory.appendingPathComponent("photoscore-ffi-smoke-\(pid)")
+// The script passes its own work directory, which its EXIT trap removes.
+guard CommandLine.arguments.count == 2 else { fail("usage: smoke <work directory>") }
+let base = URL(fileURLWithPath: CommandLine.arguments[1])
 let dbDir = base.appendingPathComponent("db")
 let cacheDir = base.appendingPathComponent("cache")
 try! FileManager.default.createDirectory(at: dbDir, withIntermediateDirectories: true)
@@ -87,7 +88,7 @@ print("SMOKE: calling thumbnail() with no prior login (must fail-closed with Cor
 let semaphore = DispatchSemaphore(value: 0)
 Task {
     do {
-        _ = try await core.thumbnail(space: .personal, assetId: 1, cacheKey: "x", size: .sm)
+        _ = try await core.thumbnail(space: .personal, unitId: 1, cacheKey: "x", size: .sm)
         fail("thumbnail() unexpectedly succeeded with no login")
     } catch let error as CoreError {
         switch error {
@@ -106,9 +107,9 @@ semaphore.wait()
 print("SMOKE: calling login() against an unreachable host (must fail-closed with CoreError.Network)...")
 let semaphore2 = DispatchSemaphore(value: 0)
 Task {
-    let conn = Connection(host: "https://127.0.0.1:1", verifyTls: false, pinnedCertDer: nil)
+    let conn = Connection(host: "https://127.0.0.1:1", verifyTls: false, pinnedCertDer: nil, allowUntrustedTls: false)
     do {
-        _ = try await core.login(connection: conn, username: "smoke", password: "smoke", otpCode: nil)
+        _ = try await core.login(connection: conn, username: "smoke", password: "smoke", otpCode: nil, deviceToken: nil)
         fail("login() unexpectedly succeeded against an unreachable host")
     } catch let error as CoreError {
         print("SMOKE: login() correctly threw CoreError across FFI: \(error)")
@@ -123,12 +124,21 @@ print("SMOKE PASS: real PhotosCore methods (assetCount, fetchAssets, thumbnail, 
 EOF
 
 info "compiling smoke test against $HEADERS"
-xcrun swiftc \
+# The compiler's own exit code decides. Its output goes to a log, so that
+# filtering the linker warnings for display cannot hide a failed compile.
+if xcrun swiftc \
+  -module-cache-path "$WORKDIR/module-cache" \
   -I "$HEADERS" \
   -L "$LIBDIR" -lphotoscore -lc++ \
   "$WORKDIR/PhotosCore.swift" "$WORKDIR/models.swift" "$WORKDIR/main.swift" \
-  -o "$WORKDIR/smoke" 2>&1 | grep -v '^ld: warning' || true
+  -o "$WORKDIR/smoke" > "$WORKDIR/swiftc.log" 2>&1; then
+  grep -v '^ld: warning' "$WORKDIR/swiftc.log" || true
+else
+  cat "$WORKDIR/swiftc.log" >&2
+  err "the smoke program does not compile against the current bindings."
+  exit 1
+fi
 
-"$WORKDIR/smoke"
+"$WORKDIR/smoke" "$WORKDIR/data"
 
 ok "FFI smoke test passed."
