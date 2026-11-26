@@ -16,7 +16,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/../shared/common.sh"
 
 VERIFY_ONLY=0
-[ "${1:-}" = "--verify" ] && VERIFY_ONLY=1
+usage() { echo "usage: $(basename "$0") [--verify]" >&2; }
+if [ "$#" -gt 1 ]; then
+  err "too many arguments: $*"; usage; exit 2
+fi
+case "${1:-}" in
+  "") ;;
+  --verify) VERIFY_ONLY=1 ;;
+  -h|--help) usage; exit 0 ;;
+  *) err "unknown argument: $1 (nothing was installed)"; usage; exit 2 ;;
+esac
 
 MIN_XCODE="26.0"
 MIN_SWIFT="6.3"
