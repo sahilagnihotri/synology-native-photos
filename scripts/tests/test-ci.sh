@@ -23,6 +23,8 @@ mk() {
   cp "$REPO/rust-toolchain.toml" "$d/"
   printf '[package]\nname = "cigate"\nversion = "0.1.0"\nedition = "2021"\n\n[workspace]\n' > "$d/Cargo.toml"
   printf '%s\n' "$2" > "$d/src/lib.rs"
+  # The gate runs with --locked, so a tree needs a lockfile unless a case is about its absence.
+  [ "${NO_LOCK:-0}" = "1" ] || ( cd "$d" && cargo generate-lockfile --offline >/dev/null 2>&1 )
   echo "$d"
 }
 
@@ -64,6 +66,47 @@ pub fn empty(v: &[i32]) -> bool {
 }")"
 expect "good tree prints CI PASS" 0 "CI PASS" "$BASE/good"
 expect "failing tree prints CI FAIL" 1 "CI FAIL" "$BASE/badtest"
+expect "tree with zero tests fails the test stage" 1 "FAIL test .*no tests ran" "$(mk notests 'pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}')"
+expect "tree without a lockfile fails the gate (--locked)" 1 "^FAIL clippy" "$(NO_LOCK=1 mk nolock "$GOOD")"
+expect "good tree reports the passed count" 0 "PASS test (1 passed)" "$BASE/good"
 expect "unknown stage is a usage error" 2 "usage" ""
+
+# --- swift stage, driven with a stub test-app.sh and a fake xcrun on PATH ----
+# swift_case <name> <stub exit code> <failed count> <skipped count> <total> <wanted exit> <wanted text>
+if [ "$(uname -s)" = "Darwin" ]; then
+  mkdir -p "$BASE/fakebin"
+  cat > "$BASE/fakebin/xcrun" <<X
+#!/bin/sh
+printf '{"totalTestCount": %s, "passedTests": 1, "failedTests": %s, "skippedTests": %s}' "\$FAKE_TOTAL" "\$FAKE_FAILED" "\$FAKE_SKIPPED"
+X
+  chmod +x "$BASE/fakebin/xcrun"
+  cat > "$BASE/stub-test-app.sh" <<'X'
+#!/bin/sh
+mkdir -p "$RESULT_BUNDLE"
+exit "${FAKE_RC:-0}"
+X
+  chmod +x "$BASE/stub-test-app.sh"
+  swift_case() {
+    local out rc
+    out="$(FAKE_RC="$2" FAKE_FAILED="$3" FAKE_SKIPPED="$4" FAKE_TOTAL="$5" CI_TEST_APP="$BASE/stub-test-app.sh" \
+      CI_BUNDLE_DIR="$BASE/bundles/$1" PATH="$BASE/fakebin:$PATH" "$CI" macos 2>&1)"; rc=$?
+    if [ "$rc" -eq "$6" ] && printf '%s' "$out" | grep -q "$7"; then
+      echo "ok   swift: $1"
+    else
+      echo "FAIL swift: $1: wanted exit $6 and '$7', got exit $rc"
+      printf '%s\n' "$out" | tail -8
+      fails=$((fails + 1))
+    fi
+  }
+  swift_case "passing run prints PASS" 0 0 0 5 0 "^PASS swift"
+  swift_case "failing tests print FAIL" 1 2 0 5 1 "^FAIL swift"
+  swift_case "nonzero xcodebuild exit with clean counts fails" 65 0 0 5 1 "^FAIL swift"
+  swift_case "skipped test fails" 0 0 1 5 1 "^FAIL swift"
+  swift_case "zero tests fails" 0 0 0 0 1 "^FAIL swift"
+else
+  echo "skip swift stage cases (not a Mac)"
+fi
 
 [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

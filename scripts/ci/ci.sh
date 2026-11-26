@@ -5,8 +5,8 @@
 #
 # Stages:
 #   core   fmt       cargo fmt --all --check
-#          clippy    cargo clippy --workspace --all-targets -- -D warnings
-#          test      cargo test --workspace
+#          clippy    cargo clippy --workspace --all-targets --locked -- -D warnings
+#          test      cargo test --workspace --locked, fails when no test ran
 #          scripts   every scripts/tests/test-*.sh
 #   macos  swift     macOS app unit tests (ad hoc signed, test timeouts on),
 #                    pass, fail and skip counts read from the xcresult
@@ -24,6 +24,9 @@
 # CI_ROOT=<dir> runs the core stages against another Cargo workspace instead
 # of this repo. scripts/tests/test-ci.sh uses it to prove the gate fails on a
 # failing tree without touching the real one.
+# CI_TEST_APP=<script> replaces scripts/macos/test-app.sh in the swift stage and
+# CI_BUNDLE_DIR=<dir> moves the xcresult out of build/macos/ci, so the test can
+# drive the swift stage with a stub and a fake xcresulttool on PATH.
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,6 +89,24 @@ stage_scripts() {
   fi
 }
 
+# A test stage that ran zero tests is a failure: an empty run looks like a pass.
+stage_test() {
+  local log passed rc
+  log="$(mktemp "${TMPDIR:-/tmp}/ci-test.XXXXXX")"
+  step "== test: cargo test --workspace --locked"
+  ( cd "$ROOT" && cargo test --workspace --locked ) 2>&1 | tee "$log"
+  rc=${PIPESTATUS[0]}
+  passed="$(awk '/^test result:/ { for (i = 1; i < NF; i++) if ($(i + 1) ~ /^passed/) n += $i } END { print n + 0 }' "$log")"
+  rm -f "$log"
+  if [ "$rc" -ne 0 ]; then
+    record test FAIL "(cargo test exit $rc)"
+  elif [ "$passed" -eq 0 ]; then
+    record test FAIL "(no tests ran)"
+  else
+    record test PASS "($passed passed)"
+  fi
+}
+
 run_core() {
   load_cargo_env
   if ! have cargo; then
@@ -93,8 +114,8 @@ run_core() {
     return
   fi
   run_stage fmt cargo fmt --all --check
-  run_stage clippy cargo clippy --workspace --all-targets -- -D warnings
-  run_stage test cargo test --workspace
+  run_stage clippy cargo clippy --workspace --all-targets --locked -- -D warnings
+  stage_test
   stage_scripts
 }
 
@@ -104,10 +125,10 @@ run_macos() {
     return
   fi
   local bundle summary counts passed failed skipped total
-  bundle="$REPO/build/macos/ci/unit-tests.xcresult"
+  bundle="${CI_BUNDLE_DIR:-$REPO/build/macos/ci}/unit-tests.xcresult"
   mkdir -p "$(dirname "$bundle")"
   step "== swift: scripts/macos/test-app.sh (ad hoc signed)"
-  ADHOC_SIGN=1 RESULT_BUNDLE="$bundle" "$REPO/scripts/macos/test-app.sh"
+  ADHOC_SIGN=1 RESULT_BUNDLE="$bundle" "${CI_TEST_APP:-$REPO/scripts/macos/test-app.sh}"
   local rc=$?
   if [ ! -d "$bundle" ]; then
     record swift FAIL "(xcodebuild exit $rc, no xcresult written)"
