@@ -4,6 +4,77 @@ Completed work with commit hashes. Newest at top.
 
 ## Session 2026-11-26: review, release build, Windows core check
 
+Review fixes (finding IDs from `documentation/reviews/2026-11-26-full-repo-review/`).
+Every code fix has a test that was seen failing before the fix; the failing
+lines are in the `fixes/` notes in that folder. Gates on the final tree, run by
+the orchestrator: `scripts/ci/ci.sh core` exit 0 (Rust 449 passed, 0 failed,
+1 ignored, 5 script tests), Xcode unit run exit 0 (512 Swift Testing tests in
+54 suites plus 6 XCTest, 0 failed, 0 skipped), `scripts/macos/ffi-smoke.sh`
+exit 0, `scripts/windows/check-core.sh` exit 0. Nothing was run against the
+real NAS or in the running app.
+
+- DSM client (`core/synology-api`): R1-1 redirects refused (`bd53372`); R1-2
+  request URL stripped from every network error so the sid and SynoToken no
+  longer reach error text (`27f3457`); R1-7 a non 2xx download is an error
+  (`9e70dec`); R1-10 inverted version window no longer panics (`9388894`);
+  R1-3 a crawl page with an unusable item fails loudly in the strict call
+  (`3965787`) and the new `list_items_page` returns the raw count and the
+  skipped ids (`fc5042e`); R1-6 File Station paging bounded at 32 pages with a
+  no progress check (`baea50e`); R1-4 codes 106, 107, 119 map to `Auth`
+  (`e942def`); R1-9 recycle path guard tightened (`da7ffbe`) and a permanent
+  delete first lists the parent and refuses anything that is not a listed file
+  (`8d60373`); R1-8 a skipped upload is an error (`7544243`); R1-5 the recycle
+  listing keeps the newest deletions at its cap (`2cdae7a`); R1-11 timeouts
+  name the real cause (`b443f66`).
+- Index and sync (`core/persistence`, `core/sync-engine`): R3-1 and R2-1 sweep
+  and delete without one SQL variable per id, tested with 40,000 rows
+  (`c4319c2`); R2-4 and R3-4 an empty listing is never applied as deletions and
+  a drop above 20 percent of a space with 100 or more rows needs the same
+  listing twice (`05240b6`, see SYNC-1 in `TODO.md`); R3-3 in progress crawls
+  are rewound on data bearing migrations (`09090ec`); R3-6 a database from a
+  newer app version is refused (`0719051`); R3-7 histogram days are floored and
+  undated rows use the key `i64::MIN`, so day 0 is the real 1970-01-01
+  (`80d4210`); R3-2 grid reads use the `taken_at` index again (`4aeff57`); R3-5
+  a failed COMMIT rolls back (`b0fb201`).
+- Facade (`core/photoscore`): crawl and reconcile page with `list_items_page`,
+  so an item without a thumbnail yet neither ends the crawl nor counts as
+  deleted (`ee27208`); R2-2 `delete_assets` refuses in the core when the recycle
+  bin is Disabled and sends no delete request (`8ab1b83`); R2-5
+  `restore_session` validates with an authenticated call (`5ec9f7e`); R2-6 a
+  delete during a crawl queues the local removal (`1974d3f`); R2-8 the index is
+  bound to host plus user and cleared on a mismatch (`5945810`), an index with
+  no recorded owner is cleared unless empty (`0c3271c`), and a sync built under
+  the previous account writes nothing (`07c86b4`); R2-10 partial restore and
+  empty keep the error kind and count (`1572682`); a failed reindex after a
+  successful edit upload no longer fails the save (`641aa16`); R2-12 unique
+  temp names for concurrent thumbnail writes (`6bc245f`). Test mock updated for
+  the delete file check (`6d5c7c5`). The exported UniFFI surface is unchanged;
+  the bindings were regenerated for doc comments only.
+- Mac app (`platforms/macos`): R4-1 and R5-9 Sign Out clears the session under
+  the host it was saved with (`448be63`); R4-3 unit tests no longer touch the
+  real certificate pin store (`7b296d3`); R5-1 returning to Library restores the
+  library source (`9fad604`); R5-5 and R5-7 a sidebar change drops the search
+  and a superseded search run is ignored (`fdf4855`); R5-2 and R5-6 live grids
+  are displayable after a full first page and refresh their total on reload
+  (`25fac1e`, the test that pinned the spinner defect was replaced); R4-5
+  Recently Deleted reloads after a partly failed restore or delete, with the
+  "restored N of M" test (`9748c09`); R4-6 a right click on an unselected bin
+  entry acts on that entry alone (`835e183`); R4-2 a late detail image load is
+  discarded (`8b46a9c`); R4-11 and R4-12 a failed editor save is shown and the
+  edited file name carries the date (`465d445`); R4-4 a pending video download
+  no longer plays after the viewer closes (`1e86fdd`); R5-4 section identifiers
+  stay unique (`1016098`) and the app uses the core's undated key (`d2aa0c1`);
+  R5-12 unplottable map coordinates are dropped (`80363c0`).
+- Scripts and docs: R6-7 `setup.sh` rejects unknown arguments (`d2758a0`); R6-6
+  `test.sh` and `test-app.sh` fail closed (`ad4d57d`); R6-5 the core gate uses
+  `--locked` and fails on zero tests, and the `ci.sh` swift FAIL path is now
+  falsified with four mutants (`88a6c1a`); R6-8 the xcframework staleness check
+  counts `uniffi.toml`, the toolchain pin, the `Makefile` and deleted sources
+  (`02b7301`); R6-1 the dmg is named from the app version plus the commit and a
+  dirty tree is refused (`2073e2c`); R6-11 docs drift (`488cf68`, `ac61709`);
+  R6-9 unused dependencies dropped with the lock file (see `git log -1 --
+  Cargo.lock`).
+
 - BUILD-1: the release build of the core failed on macOS 27.0 with Xcode 27.2
   (`can't find crate for time_macros`), so the app could not be built or
   tested. With `MACOSX_DEPLOYMENT_TARGET` set, the release profile's

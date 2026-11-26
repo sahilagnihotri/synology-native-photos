@@ -2,7 +2,7 @@
 
 Only pending work. Completed items live in `Fixed.md`. Live scratch progress in `.superpowers/sdd/progress.md` (gitignored).
 
-Last Updated: 2026-11-26 (review done: 71 findings, fix workers dispatched; Windows cross check passes)
+Last Updated: 2026-11-26 (review fixes landed: Rust 449/0/1, Swift 518/0/0, Windows cross check passes; adversarial pass on the core fixes in flight)
 
 ## 2026-11-26: full-repo review, release build break, Windows core check
 
@@ -14,81 +14,64 @@ Dispatch state and owned paths are in `tasks.md`.
   links the static `libphotoscore.a`), so it is only recorded here. If anything
   ever needs the dylib on macOS, set `strip = false` for the whole release
   profile and measure the app size change first.
-- [ ] REV-2026-11: the six reviewers reported 71 findings against `1c2c107`.
-  Reports with evidence, failure scenarios and suggested fixes are in
-  `documentation/reviews/2026-11-26-full-repo-review/` (one file per area). A
-  finding counts as CONFIRMED only once a fix worker has a test that fails
-  without the fix. Dispatch state is in `tasks.md`. One line per finding:
-  - [ ] R1-1 (high): HTTP redirects are followed cross-origin, resending the password, sid and SynoToken. [queued for worker FA]
-  - [ ] R1-2 (high): Every GET path puts the session id (and for upload, SynoToken) into error text. [queued for worker FA]
-  - [ ] R1-3 (high): Browse drops undecodable items, so the crawl stops early and the local index deletes the rest. [queued for worker FA]
-  - [ ] R1-4 (medium): Session expiry (106, 107, 119) is indistinguishable from any other failure. [queued for worker FA]
-  - [ ] R1-5 (medium): Recycle listing caps at 5000 files in walk order, before sorting by time. [queued for worker FA]
-  - [ ] R1-6 (medium): File Station paging loops are unbounded. [queued for worker FA]
-  - [ ] R1-7 (medium): download_original returns non-2xx bodies as the original file. [queued for worker FA]
-  - [ ] R1-8 (medium): Upload treats a name-collision skip as success. [queued for worker FA]
-  - [ ] R1-9 (medium): Recycle path guard accepts directories and some non-canonical paths. [queued for worker FA]
-  - [ ] R1-10 (low): pin_version panics when a capability reports min > max. [queued for worker FA]
-  - [ ] R1-11 (low): Restore and delete timeouts report "still in the recycle bin" whatever the real cause. [queued for worker FA]
-  - [ ] R1-12 (low): Most mock tests do not assert the session or the parameters actually sent. [DEFER(R1-12): not scheduled in this pass]
-  - [ ] R2-1 (high): delta reconcile fails outright for any library above 32,765 items. [queued for worker FB]
-  - [ ] R2-2 (high): the "refuse delete when the recycle bin is off" rule lives only in the Swift UI, not the core. [queued for worker FC]
-  - [ ] R2-3 (medium): a saved edit can be silently dropped: upload uses overwrite=false, which DSM treats as "skip". [DEFER(R2-3): not scheduled in this pass]
-  - [ ] R2-4 (medium): an empty (or short) server listing wipes the whole local library. [queued for worker FB]
-  - [ ] R2-5 (medium): restore_session reports Valid for an expired session (the probe never sends the sid). [queued for worker FC]
-  - [ ] R2-6 (medium): delete during a crawl or Refresh deletes on the NAS, then reports failure. [queued for worker FC]
-  - [ ] R2-7 (medium): every local read fails for the whole duration of a crawl or Refresh. [DEFER(R2-7): not scheduled in this pass]
-  - [ ] R2-8 (medium): signing in to another account or NAS reuses the previous account's index and skips the crawl. [queued for worker FC]
-  - [ ] R2-9 (medium): download_original and video playback hold the whole original in memory and re-download it every time. [DEFER(R2-9): not scheduled in this pass]
-  - [ ] R2-10 (low): restore and empty lose the error kind or the count on a partial failure. [queued for worker FC]
-  - [ ] R2-11 (low): Windows: atomic cache write fails when the target is open. [queued for worker FC]
-  - [ ] R2-12 (low): temp file names can collide under concurrent thumbnail misses. [queued for worker FC]
-  - [ ] R3-1 (high): reconcile and delete batches fail for any library above 32,766 assets. [queued for worker FB]
-  - [ ] R3-2 (medium): grid ORDER BY defeats the index, every page sorts the whole space. [queued for worker FB]
-  - [ ] R3-3 (medium): data-bearing migrations skip spaces whose crawl was still in progress. [queued for worker FB]
-  - [ ] R3-4 (medium): reconcile sweep wipes the whole space when the listing ends early or empty (persistence half). [queued for worker FB]
-  - [ ] R3-5 (low): hand-rolled transactions can strand an open transaction. [queued for worker FB]
-  - [ ] R3-6 (low): a database from a newer app version is opened, accepted and its version mirror overwritten. [queued for worker FB]
-  - [ ] R3-7 (low): histogram buckets are UTC and truncate toward zero. [queued for worker FB]
-  - [ ] R3-8 (low): reconcile loads the entire library into memory. [DEFER(R3-8): not scheduled in this pass]
-  - [ ] R3-9 (low): tests that cannot fail or pin the hazard. [DEFER(R3-9): not scheduled in this pass]
-  - [ ] R4-1 (high): Sign-out does not clear the Keychain session when AppEnvironment.host was empty at launch, so the app silently signs back in. [queued for worker FS]
-  - [ ] R4-2 (high): Detail viewer can show the previous photo's image for the current photo (late load overwrites newer state). [queued for worker FS]
-  - [ ] R4-3 (medium): Unit tests still touch the real certificate pin store, and one deletes the pin of the user's real NAS host. [queued for worker FS]
-  - [ ] R4-4 (medium): A video whose download is still running starts playing after the viewer was closed. [queued for worker FS]
-  - [ ] R4-5 (medium): Recently Deleted restore or permanent delete that fails part way leaves a stale list, and the retry can never succeed. [queued for worker FS]
-  - [ ] R4-6 (medium): Context menu "Delete Permanently" and "Restore" act on the whole existing selection plus the clicked item. [queued for worker FS]
-  - [ ] R4-7 (medium): Downloaded originals stay in the system temp folder after sign-out and across launches. [DEFER(R4-7): not scheduled in this pass]
-  - [ ] R4-8 (medium): Session expiry during use never routes back to login (`markExpired` has no callers). [DEFER(R4-8): not scheduled in this pass]
-  - [ ] R4-9 (medium): Edited copy loses colour profile and metadata, and the decode path may upscale small originals. [DEFER(R4-9): not scheduled in this pass]
-  - [ ] R4-10 (medium): Sign-out leaves the local asset index of the previous account on disk and in the running core. [DEFER(R4-10): not scheduled in this pass]
-  - [ ] R4-11 (low): A failed Save in the photo editor shows nothing to the user. [queued for worker FS]
-  - [ ] R4-12 (low): Edited filename has only HHmmss, and a partial save invites a duplicate. [queued for worker FS]
-  - [ ] R4-13 (low): `OriginalImageCache` can delete or replace a file another task is about to decode. [DEFER(R4-13): not scheduled in this pass]
-  - [ ] R5-1 (high): Returning to Library after a search, a drill-in or a Quick Filter leaves the data source on the old source, so "Library" shows search results, a co. [queued for worker FS]
-  - [ ] R5-2 (high): A search, collection or server-side filter with a first page of 200 or more results shows the spinner forever, and page 2 can never load. [queued for worker FS]
-  - [ ] R5-3 (high): No generation check in `loadWindow` or `schedulePageLoad`: a page fetched under an old snapshot of the data can land beside pages from a newer one,. [DEFER(R5-3): not scheduled in this pass]
-  - [ ] R5-4 (medium): Duplicate date-section identifier `.day(0)` when the library holds a photo dated within a day of the Unix epoch and any photo with no date. [queued for worker FS]
-  - [ ] R5-5 (medium): An active search overlays every other sidebar route, because the sidebar change handler never clears `activeSearch`. [queued for worker FS]
-  - [ ] R5-6 (medium): `reload()` does not reset `totalCount` for live sources, so a delete from a search, collection or remote-filter grid leaves permanent blank cells. [queued for worker FS]
-  - [ ] R5-7 (medium): The debounced search cannot be cancelled once the sleep ends, so clearing the box mid-search or typing again lets an older result win and can leave. [queued for worker FS]
-  - [ ] R5-8 (medium): Cmd-Z undo restores by filename and by the recycle entry's "deletedAt", which is the file mtime, so it can restore a different photo than the one j. [DEFER(R5-8): not scheduled in this pass]
-  - [ ] R5-9 (medium): Sign Out clears the Keychain under `env.host`, which is the host at launch and is empty after a first login, so the stored session survives Sign Out. [queued for worker FS]
-  - [ ] R5-10 (medium): `prefetchItemsAt` calls `loadWindow` directly, bypassing the loaded-page and in-flight dedupe, so every prefetch tick refetches a page and rebuilds. [DEFER(R5-10): not scheduled in this pass]
-  - [ ] R5-11 (medium): Delete resolves the selection by index against a data source that may already have switched under a still-visible old grid. [DEFER(R5-11): not scheduled in this pass]
-  - [ ] R5-12 (low): Map annotations are validated only for non-nil, so (0,0), NaN and out-of-range coordinates reach MapKit. [queued for worker FS]
-  - [ ] R5-13 (low): A failed count read replaces the library with "No photos", and a failed page read is invisible. [DEFER(R5-13): not scheduled in this pass]
-  - [ ] R5-14 (low): The periodic and activation sync clears the user's selection and shifts the photo shown in an open detail viewer. [DEFER(R5-14): not scheduled in this pass]
-  - [ ] R5-15 (low): Tests that do not test the delete wiring, and tests that encode the defects above. [DEFER(R5-15): not scheduled in this pass]
-  - [ ] R6-1 (medium): dmg is named after the latest git tag, which can disagree with the app version and the code inside. [queued for worker FD]
-  - [ ] R6-3 (low): 32 commit hashes in Fixed.md no longer exist. [queued for worker FD]
-  - [ ] R6-5 (low): the core gate does not use `--locked` and has no minimum test count. [queued for worker FD]
-  - [ ] R6-6 (low): test entry points fail open on a missing project or a mistyped flag. [queued for worker FD]
-  - [ ] R6-7 (low): setup.sh installs software on anything other than `--verify` as the first argument. [queued for worker FD]
-  - [ ] R6-8 (low): xcframework staleness ignores several inputs. [queued for worker FD]
-  - [ ] R6-9 (low): declared dependencies that no source file uses. [queued for worker FD]
-  - [ ] R6-10 (low): no advisory check, and the bundled SQLite is old. [DEFER(R6-10): not scheduled in this pass]
-  - [ ] R6-11 (low): docs drift. [queued for worker FD]
+- [ ] REV-2026-11 (open remainder): the review reported 72 findings against
+  `1c2c107`. 51 are fixed, the code fixes each with a test that failed first
+  (see `Fixed.md`).
+  The 21 below were not fixed in this pass. Reports with evidence and suggested
+  fixes: `documentation/reviews/2026-11-26-full-repo-review/` (finding IDs match).
+  - [ ] R1-12 (low): Most mock tests do not assert the session or the parameters actually sent.
+  - [ ] R2-3 (medium): a saved edit can be silently dropped: upload uses overwrite=false, which DSM treats as "skip". Partly done: a skipped upload is now an error (`7544243`) and the edited file name carries the date (`465d445`). Open: the skip reply shape (`data.blSkip`) is unverified on the real NAS, needs one measured upload.
+  - [ ] R2-7 (medium): every local read fails for the whole duration of a crawl or Refresh.
+  - [ ] R2-9 (medium): download_original and video playback hold the whole original in memory and re-download it every time.
+  - [ ] R2-11 (low): Windows: atomic cache write fails when the target is open. Cannot be tested from the Mac. Do it with the Windows work.
+  - [ ] R3-8 (low): reconcile loads the entire library into memory.
+  - [ ] R3-9 (low): tests that cannot fail or pin the hazard.
+  - [ ] R4-7 (medium): Downloaded originals stay in the system temp folder after sign-out and across launches.
+  - [ ] R4-8 (medium): Session expiry during use never routes back to login (`markExpired` has no callers).
+  - [ ] R4-9 (medium): Edited copy loses colour profile and metadata, and the decode path may upscale small originals.
+  - [ ] R4-10 (medium): Sign-out leaves the local asset index of the previous account on disk and in the running core. Partly done: signing in as another account or NAS now clears the index (`5945810`, `0c3271c`). Open: Sign Out itself leaves the index on disk.
+  - [ ] R4-13 (low): `OriginalImageCache` can delete or replace a file another task is about to decode.
+  - [ ] R5-3 (high): No generation check in `loadWindow` or `schedulePageLoad`: a page fetched under an old snapshot of the data can land beside pages from a newer one,.
+  - [ ] R5-8 (medium): Cmd-Z undo restores by filename and by the recycle entry's "deletedAt", which is the file mtime, so it can restore a different photo than the one j.
+  - [ ] R5-10 (medium): `prefetchItemsAt` calls `loadWindow` directly, bypassing the loaded-page and in-flight dedupe, so every prefetch tick refetches a page and rebuilds.
+  - [ ] R5-11 (medium): Delete resolves the selection by index against a data source that may already have switched under a still-visible old grid.
+  - [ ] R5-13 (low): A failed count read replaces the library with "No photos", and a failed page read is invisible.
+  - [ ] R5-14 (low): The periodic and activation sync clears the user's selection and shifts the photo shown in an open detail viewer.
+  - [ ] R5-15 (low): Tests that do not test the delete wiring, and tests that encode the defects above.
+  - [ ] R6-3 (low): 32 commit hashes in Fixed.md no longer exist. The list of 32 dead hashes is in `documentation/reviews/2026-11-26-full-repo-review/fixes/fd-scripts-docs.md`. They predate the author rewrite, and `Fixed.md` has no commit subjects to re-map them by.
+  - [ ] R6-10 (low): no advisory check, and the bundled SQLite is old.
+- [ ] REV-F1: session expiry (DSM codes 106, 107, 119) now surfaces as an auth
+  error (`e942def`), but nothing signs in again with the saved device token, and
+  the app never routes back to login (same root as R4-8).
+- [ ] REV-F2: `map_error_code` also maps File Station codes 400 to 404 to
+  `Auth` and `OtpRequired`. For File Station calls those numbers are file
+  operation errors. Not changed.
+- [ ] REV-F3: after `25fac1e` a live grid (search, collection, server filter)
+  holds one spare trailing cell while more pages may follow. When the result
+  count is an exact multiple of the page size the blank cell shows briefly and
+  Select All counts it. Not seen in the running app. Alternative: an explicit
+  unknown-total mode.
+- [ ] REV-F4: with several stored hosts or users, `loadMostRecentAccount` can
+  pick an arbitrary stored session (login does not clear the others). Single
+  account assumed.
+- [ ] REV-F5: a sync refused because its session belongs to the previous
+  account (`07c86b4`) returns a storage error, and the app shows its generic
+  storage message for it.
+- [ ] REV-F6: `scripts/macos/setup.sh --verify` still runs `cargo run` for the
+  bindgen bin, and `check_uniffi` passes when the bindgen source is missing.
+  The `platforms/macos/project.yml` comment says `DEVELOPMENT_TEAM` is left
+  unset while the next line sets it. `Fixed.md` records the old bundle ids
+  `se.agnihotri.synologyphotos.*` (the project uses `se.agnihotri.mysynologyphotos`).
+- [ ] REV-F7: none of the 15 Mac app fixes of 2026-11-26 has been exercised in
+  the running app or against the real NAS, only through unit tests. The UI test
+  target was not run. A switch of account or NAS, and the first launch after
+  this update, now clear the local index and run a fresh crawl.
+- [ ] REV-F8 (decision for Sahil): when the recycle bin status is Unknown (a
+  non admin account cannot read the setting) a delete still goes ahead after
+  the Mac app's "may be permanent" confirmation. The core refuses only
+  Disabled (`8ab1b83`). Options: keep, refuse Unknown too (non admin accounts
+  could then not delete), or add an explicit "confirmed permanent" flag to the
+  FFI. Running assumption: keep.
 - [ ] SYNC-1 (decision for Sahil): since `05240b6` a reconcile never applies an
   EMPTY server listing as deletions, and applies a drop of more than 20 percent
   of a space with 100 or more rows only when the same listing comes back twice
@@ -126,12 +109,10 @@ Dispatch state and owned paths are in `tasks.md`.
 ## 2026-10-16: after the platform layout restructure
 
 Layout is now `core/`, `platforms/macos`, `platforms/windows`, `build/`, `scripts/{shared,macos,windows,ci}`.
-`scripts/ci/ci.sh all` is the local gate (measured PASS: Rust 385/0/1, Swift 498/0/0).
+`scripts/ci/ci.sh all` is the local gate (measured 2026-11-26: Rust 449/0/1, Swift 518/0/0).
 Windows work continues on the Windows machine from `documentation/platforms/windows-handover.md`.
 
 - [ ] `.github/workflows/ci.yml` (manual, `stable` only) is untested; the Xcode on `macos-latest` may be older than the macOS 26 deployment target. Creating `stable` is Sahil's call.
-- [ ] The `ci.sh` swift stage FAIL path was not falsified (fmt, clippy, test and unknown stage were, via `scripts/tests/test-ci.sh`).
-- [ ] The Recently Deleted restore loop's "restored N of M" message has no test (loop reworked to `enumerate` in `375c156`).
 
 ## In progress
 
