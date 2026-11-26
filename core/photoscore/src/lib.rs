@@ -160,6 +160,10 @@ pub struct PhotosCore {
     /// operation, so a restore and an empty of the same recycle-bin items can
     /// never race. Acquired exactly once per public call.
     trash_lock: tokio::sync::Mutex<()>,
+    /// Local row removals for deletes the NAS confirmed while a crawl or
+    /// reconcile held the store. Applied by `return_store`. Lock order:
+    /// `store`, then this.
+    pending_local_deletes: Mutex<Vec<(Space, Vec<i64>)>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -174,6 +178,7 @@ impl PhotosCore {
             cache_dir,
             live: Mutex::new(None),
             trash_lock: tokio::sync::Mutex::new(()),
+            pending_local_deletes: Mutex::new(Vec::new()),
         }))
     }
 
@@ -1061,10 +1066,21 @@ impl PhotosCore {
             syno_token.as_deref(),
         )
         .await?;
-        // Confirmed gone from the NAS; drop the local rows entirely.
+        // Confirmed gone from the NAS; drop the local rows entirely. If a
+        // crawl or reconcile holds the store, the NAS delete already
+        // happened, so do not report failure: queue the removal and let
+        // `return_store` apply it when the store comes back.
         let guard = self.store.lock().expect("store mutex poisoned");
-        let store = guard.as_ref().ok_or_else(store_busy_err)?;
-        store.delete_assets(space, &ids)?;
+        match guard.as_ref() {
+            Some(store) => {
+                store.delete_assets(space, &ids)?;
+            }
+            None => self
+                .pending_local_deletes
+                .lock()
+                .expect("pending deletes mutex poisoned")
+                .push((space, ids)),
+        }
         Ok(())
     }
 
@@ -1442,6 +1458,24 @@ impl PhotosCore {
     /// the core stays usable for every call afterward - it never permanently
     /// bricks the store. The mutex is locked twice, once for the initial
     /// take and once for the final swap-back, never across an `.await`.
+    /// Puts the `Store` back after `run_with_store`, first applying every
+    /// local row removal `delete_assets` queued while it was out. Done under
+    /// the store guard, which `delete_assets` also takes before it queues,
+    /// so no removal can be queued after the drain and then be missed. A
+    /// removal that fails stays queued for the next hand back; the rows it
+    /// names are already gone from the NAS, so the next reconcile drops them
+    /// either way.
+    fn return_store(&self, store: Store) {
+        let mut guard = self.store.lock().expect("store mutex poisoned");
+        let mut pending = self
+            .pending_local_deletes
+            .lock()
+            .expect("pending deletes mutex poisoned");
+        pending.retain(|(space, ids)| store.delete_assets(*space, ids).is_err());
+        drop(pending);
+        *guard = Some(store);
+    }
+
     async fn run_with_store<F>(&self, work: F) -> Result<CrawlProgress, CoreError>
     where
         F: for<'a> FnOnce(
@@ -1488,8 +1522,7 @@ impl PhotosCore {
 
         match join {
             Ok((store, result)) => {
-                let mut guard = self.store.lock().expect("store mutex poisoned");
-                *guard = Some(store);
+                self.return_store(store);
                 result
             }
             // A panic inside `work` is already caught above and folded into
@@ -3589,6 +3622,52 @@ mod core_tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    /// A delete while a crawl holds the store: the NAS delete has already
+    /// succeeded, so the call must not report failure (the user would retry
+    /// an item that is gone), and the local row must still leave the index
+    /// once the store is handed back. Simulated by taking the store out the
+    /// way `run_with_store` does, then returning it through the same path.
+    #[tokio::test]
+    async fn delete_assets_while_the_store_is_busy_queues_the_local_removal() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let delete = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=delete".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("delete-store-busy", &server).await;
+        seed_asset(&core, Space::Personal, 1);
+        seed_asset(&core, Space::Personal, 2);
+
+        let store = core.store.lock().unwrap().take().expect("store present");
+        core.delete_assets(Space::Personal, vec![1])
+            .await
+            .expect("a NAS delete that succeeded is not reported as failed");
+        delete.assert_async().await;
+
+        core.return_store(store);
+        assert_eq!(
+            core.fetch_assets(Space::Personal, 0, 10)
+                .unwrap()
+                .iter()
+                .map(|a| a.id)
+                .collect::<Vec<_>>(),
+            vec![2],
+            "the queued removal is applied when the store comes back"
+        );
     }
 
     /// Serves the DSM home recycle bin setting with `enable_recycle_bin`.
