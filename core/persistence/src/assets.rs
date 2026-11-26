@@ -259,28 +259,7 @@ impl Store {
     /// server-side.
     pub fn delete_assets_not_in(&self, space: Space, keep_ids: &[i64]) -> Result<u64, CoreError> {
         self.conn.execute_batch("BEGIN").map_err(map_sql)?;
-        let placeholders: Vec<String> =
-            (0..keep_ids.len()).map(|i| format!("?{}", i + 2)).collect();
-        let sql = format!(
-            "DELETE FROM assets WHERE space = ?1 AND server_id NOT IN ({})",
-            placeholders.join(",")
-        );
-        let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(keep_ids.len() + 1);
-        let space_param = space_to_int(space);
-        params_vec.push(&space_param);
-        for id in keep_ids {
-            params_vec.push(id);
-        }
-        let deleted = if keep_ids.is_empty() {
-            // No placeholders to bind: everything in the space is stale.
-            self.conn.execute(
-                "DELETE FROM assets WHERE space = ?1",
-                params![space_to_int(space)],
-            )
-        } else {
-            self.conn.execute(&sql, params_vec.as_slice())
-        };
-        let deleted = match deleted {
+        let deleted = match self.sweep_not_in(space, keep_ids) {
             Ok(n) => n,
             Err(e) => {
                 let _ = self.conn.execute_batch("ROLLBACK");
@@ -289,6 +268,34 @@ impl Store {
         };
         self.conn.execute_batch("COMMIT").map_err(map_sql)?;
         Ok(deleted as u64)
+    }
+
+    /// The body of `delete_assets_not_in`, run inside the caller's
+    /// transaction. The keep set goes into a TEMP table one row at a time and
+    /// the sweep is a single anti-join against it, so no statement ever binds
+    /// more than one variable per id list. Binding one `?` per id fails above
+    /// SQLite's 32,766 variable limit, and chunking a `NOT IN` list is wrong
+    /// (each chunk would delete every row the other chunks keep).
+    fn sweep_not_in(&self, space: Space, keep_ids: &[i64]) -> rusqlite::Result<usize> {
+        self.conn.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS reconcile_keep (id INTEGER PRIMARY KEY);
+             DELETE FROM temp.reconcile_keep;",
+        )?;
+        {
+            let mut insert = self
+                .conn
+                .prepare_cached("INSERT OR IGNORE INTO temp.reconcile_keep (id) VALUES (?1)")?;
+            for id in keep_ids {
+                insert.execute([id])?;
+            }
+        }
+        let deleted = self.conn.execute(
+            "DELETE FROM assets WHERE space = ?1
+                 AND server_id NOT IN (SELECT id FROM temp.reconcile_keep)",
+            params![space_to_int(space)],
+        )?;
+        self.conn.execute_batch("DELETE FROM temp.reconcile_keep")?;
+        Ok(deleted)
     }
 
     /// Returns a window of assets for `space`, newest-first by `taken_at` with
@@ -489,18 +496,7 @@ impl Store {
             return Ok(0);
         }
         self.conn.execute_batch("BEGIN").map_err(map_sql)?;
-        let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
-        let sql = format!(
-            "DELETE FROM assets WHERE space = ?1 AND server_id IN ({})",
-            placeholders.join(",")
-        );
-        let space_param = space_to_int(space);
-        let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(ids.len() + 1);
-        params_vec.push(&space_param);
-        for id in ids {
-            params_vec.push(id);
-        }
-        let deleted = match self.conn.execute(&sql, params_vec.as_slice()) {
+        let deleted = match self.delete_ids_chunked(space, ids) {
             Ok(n) => n,
             Err(e) => {
                 let _ = self.conn.execute_batch("ROLLBACK");
@@ -509,6 +505,30 @@ impl Store {
         };
         self.conn.execute_batch("COMMIT").map_err(map_sql)?;
         Ok(deleted as u64)
+    }
+
+    /// The body of `delete_assets`, run inside the caller's transaction. An
+    /// `IN` list can be split safely (unlike `NOT IN`), so the ids are bound
+    /// in chunks well below SQLite's 32,766 variable limit.
+    fn delete_ids_chunked(&self, space: Space, ids: &[i64]) -> rusqlite::Result<usize> {
+        const CHUNK: usize = 500;
+        let space_param = space_to_int(space);
+        let mut deleted = 0;
+        for chunk in ids.chunks(CHUNK) {
+            let placeholders: Vec<String> =
+                (0..chunk.len()).map(|i| format!("?{}", i + 2)).collect();
+            let sql = format!(
+                "DELETE FROM assets WHERE space = ?1 AND server_id IN ({})",
+                placeholders.join(",")
+            );
+            let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(chunk.len() + 1);
+            params_vec.push(&space_param);
+            for id in chunk {
+                params_vec.push(id);
+            }
+            deleted += self.conn.execute(&sql, params_vec.as_slice())?;
+        }
+        Ok(deleted)
     }
 }
 
@@ -771,6 +791,63 @@ mod tests {
             .collect();
         assert_eq!(ids, vec![3, 1]);
         // Shared space untouched by a Personal-space sweep.
+        assert_eq!(store.asset_count(Space::Shared).unwrap(), 1);
+    }
+
+    /// Seeds `n` Personal rows with ids 1..=n plus one Shared row with id 1,
+    /// so a sweep that ignores the space filter would be caught.
+    fn seed_large_space(store: &Store, n: i64) {
+        let rows: Vec<Asset> = (1..=n)
+            .map(|id| asset(Space::Personal, id, Some(id), Some(1)))
+            .chain(std::iter::once(asset(Space::Shared, 1, Some(1), Some(1))))
+            .collect();
+        store.upsert_assets(&rows).unwrap();
+    }
+
+    fn sorted_personal_ids(store: &Store) -> Vec<i64> {
+        let mut ids: Vec<i64> = store
+            .fetch_assets(Space::Personal, 0, u32::MAX)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// A 40,000 item library must reconcile: the keep set is larger than
+    /// SQLite's 32,766 bound variable limit, so binding one variable per id
+    /// fails. Exactly the two ids absent from the keep set must go, and an id
+    /// in the keep set that has no local row changes nothing.
+    #[test]
+    fn delete_assets_not_in_handles_a_keep_set_above_the_variable_limit() {
+        let store = Store::open_in_memory().unwrap();
+        seed_large_space(&store, 40_000);
+        let keep: Vec<i64> = (1..=40_001)
+            .filter(|id| *id != 20_000 && *id != 40_000)
+            .collect();
+
+        let deleted = store.delete_assets_not_in(Space::Personal, &keep).unwrap();
+
+        assert_eq!(deleted, 2);
+        let expected: Vec<i64> = (1..=39_999).filter(|id| *id != 20_000).collect();
+        assert_eq!(sorted_personal_ids(&store), expected);
+        assert_eq!(store.asset_count(Space::Shared).unwrap(), 1);
+    }
+
+    /// Permanent delete of more than 32,766 selected items must succeed and
+    /// remove exactly the named rows, leaving the rest and other spaces alone.
+    #[test]
+    fn delete_assets_handles_a_delete_set_above_the_variable_limit() {
+        let store = Store::open_in_memory().unwrap();
+        seed_large_space(&store, 40_000);
+        let doomed: Vec<i64> = (1..=35_000).collect();
+
+        let deleted = store.delete_assets(Space::Personal, &doomed).unwrap();
+
+        assert_eq!(deleted, 35_000);
+        let expected: Vec<i64> = (35_001..=40_000).collect();
+        assert_eq!(sorted_personal_ids(&store), expected);
         assert_eq!(store.asset_count(Space::Shared).unwrap(), 1);
     }
 
