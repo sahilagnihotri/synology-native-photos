@@ -941,3 +941,67 @@ async fn restore_precheck_stops_at_the_page_cap() {
     );
     mv.assert_async().await;
 }
+
+// --- R1-5: the newest deletions survive the 5000 file cap -----------------
+
+/// Folder B holds 5000 old files and is walked first; folder A holds the file
+/// deleted a moment ago. "Recently Deleted" must still show it first.
+#[tokio::test]
+async fn list_recycle_photos_keeps_the_newest_deletion_past_the_file_cap() {
+    let mut server = mockito::Server::new_async().await;
+    let root = "/home/#recycle/Photos";
+    let a = "/home/#recycle/Photos/A";
+    let b = "/home/#recycle/Photos/B";
+    let _root = mock_list_folder(
+        &mut server,
+        root,
+        &format!(
+            r#"{{"success":true,"data":{{"files":[
+                {{"isdir":true,"name":"A","path":"{a}"}},
+                {{"isdir":true,"name":"B","path":"{b}"}}
+            ]}}}}"#
+        ),
+    );
+    let mut b_pages = Vec::new();
+    for page in 0..6usize {
+        let body = if page < 5 {
+            full_page_body(b, page * 1000)
+        } else {
+            r#"{"success":true,"data":{"files":[]}}"#.to_string()
+        };
+        b_pages.push(
+            server
+                .mock("GET", "/webapi/entry.cgi")
+                .match_query(Matcher::AllOf(vec![
+                    Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+                    Matcher::UrlEncoded("folder_path".into(), b.into()),
+                    Matcher::UrlEncoded("offset".into(), (page * 1000).to_string()),
+                ]))
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body(body)
+                .create_async()
+                .await,
+        );
+    }
+    let _a = mock_list_folder(
+        &mut server,
+        a,
+        &format!(
+            r#"{{"success":true,"data":{{"files":[
+                {{"isdir":false,"name":"NEW.JPG","path":"{a}/NEW.JPG","additional":{{"size":1,"time":{{"mtime":999999}}}}}}
+            ]}}}}"#
+        ),
+    );
+    let t = transport_for(&server);
+    let items = list_recycle_photos(&t, "SID", None, 0, 50)
+        .await
+        .expect("listing ok");
+    assert_eq!(items.len(), 50);
+    assert_eq!(
+        items[0].filename, "NEW.JPG",
+        "the newest deletion must be first, got {:?}",
+        items[0]
+    );
+    assert!(items[1].deleted_at >= items[2].deleted_at);
+}

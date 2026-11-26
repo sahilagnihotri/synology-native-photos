@@ -49,7 +49,9 @@ const RECYCLE_PHOTOS_ROOT: &str = "/home/#recycle/Photos";
 
 /// Bounds on the recursive recycle walk, so a pathological tree can never make
 /// `list_recycle_photos` run away: cap how deep we descend and how many files
-/// we collect in total.
+/// we keep. The whole tree (to `MAX_DEPTH`) is walked and only the newest
+/// `MAX_FILES` deletions are kept, so the cap drops the oldest, never the
+/// most recent.
 const MAX_DEPTH: usize = 6;
 const MAX_FILES: usize = 5000;
 
@@ -295,7 +297,7 @@ pub async fn list_recycle_photos(
     // DFS stack of (folder_path, depth); the root is depth 0.
     let mut stack: Vec<(String, usize)> = vec![(RECYCLE_PHOTOS_ROOT.to_string(), 0)];
 
-    'walk: while let Some((folder, depth)) = stack.pop() {
+    while let Some((folder, depth)) = stack.pop() {
         let entries = match list_folder(transport, sid, syno_token, &folder).await {
             Ok(entries) => entries,
             Err(ListError::Dsm(FS_NO_SUCH_FILE)) if depth == 0 => {
@@ -322,19 +324,29 @@ pub async fn list_recycle_photos(
                     deleted_at: entry.mtime,
                     file_size: entry.size,
                 });
-                if items.len() >= MAX_FILES {
-                    break 'walk;
+                // Keep the NEWEST MAX_FILES seen so far, not the first ones
+                // walked: the cap must never hide a fresh deletion behind a
+                // folder of old ones. Trimming at twice the cap keeps memory
+                // bounded without sorting on every push.
+                if items.len() >= 2 * MAX_FILES {
+                    keep_newest(&mut items);
                 }
             }
         }
     }
 
-    // Newest deletion first (mtime DESC), stable so equal mtimes keep order.
-    items.sort_by_key(|item| std::cmp::Reverse(item.deleted_at));
+    keep_newest(&mut items);
 
     let start = (offset as usize).min(items.len());
     let end = start.saturating_add(limit as usize).min(items.len());
     Ok(items[start..end].to_vec())
+}
+
+/// Sort newest deletion first (mtime DESC, stable so equal mtimes keep walk
+/// order) and drop everything past `MAX_FILES`.
+fn keep_newest(items: &mut Vec<RecycleItem>) {
+    items.sort_by_key(|item| std::cmp::Reverse(item.deleted_at));
+    items.truncate(MAX_FILES);
 }
 
 /// Derive the ORIGINAL parent folder a recycled file should be restored into,
