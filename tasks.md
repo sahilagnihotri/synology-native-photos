@@ -15,6 +15,7 @@ orchestrator (see `Fixed.md`), and the adversarial pass is done (open items: AV-
 
 | ID | Goal | Owned paths (write) | Status | Closes |
 |----|------|---------------------|--------|--------|
+| VF | Verify every fix since `1c2c107` by falsification, in throwaway clones under `$TMPDIR` (workflow `wf_1b96ff9c-4d7`, read only on this tree) | none in this tree | in-progress (2026-11-27) | none, findings go to `TODO.md` |
 | W1 | Windows: PowerShell scripts still unexecuted | `scripts/windows/`, `scripts/ci/ci.ps1` | blocked on the user (see WIN-1) | WIN-1 |
 
 Blocked on the user: DSM password change, `photosclient` user, a test album for album verification.
