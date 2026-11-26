@@ -902,13 +902,14 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * Rebuild `Live` state from a previously stored `Session` (e.g. loaded
      * from the Keychain) without re-running the login handshake.
      *
-     * Validates the session with a cheap authed capability probe
-     * (`SYNO.API.Info`): a probe failure that maps to `CoreError::Auth` or
-     * `CoreError::OtpRequired` means the stored session is no longer
-     * accepted by DSM, so this reports `SessionState::Expired` rather than
-     * an error the caller has to handle as failure - the UI can react by
-     * sending the user back through `login`. Any other probe error (e.g.
-     * network failure) is fail-closed and propagated as-is.
+     * Probes capabilities (`SYNO.API.Info`, which DSM answers anonymously),
+     * then validates the session with one authenticated one item
+     * `Browse.Item` list in the personal space. A failure that maps to
+     * `CoreError::Auth` or `CoreError::OtpRequired` means the stored session
+     * is no longer accepted by DSM, so this reports `SessionState::Expired`
+     * rather than an error the caller has to handle as failure; the UI can
+     * react by sending the user back through `login`. Any other error (for
+     * example a network failure) is fail closed and propagated as is.
      */
     func restoreSession(connection: Connection, session: Session) async throws  -> SessionState
     
@@ -928,10 +929,10 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * folder makes it plainly an ADDED asset, not a changed one.
      *
      * FAIL CLOSED on either step: if the upload fails, the re-index is never
-     * sent (there is nothing new to index) and the error propagates; if the
-     * re-index fails, the file is already safely uploaded and the error still
-     * surfaces so the caller can retry (a later crawl/reindex also picks it
-     * up). There is no local index row to write here: the new photo only
+     * sent (there is nothing new to index) and the error propagates. If only
+     * the re-index fails, the file is already safely uploaded, so the save
+     * still succeeds (a retry could only collide with or duplicate the
+     * upload) and the failure is logged; a later re-index picks it up. There is no local index row to write here: the new photo only
      * enters the local mirror when a subsequent crawl re-reads the library.
      *
      * Reuses `recycle_call_context` for the session basics (transport + sid +
@@ -1840,13 +1841,14 @@ open func restoreRecentlyDeleted(recyclePaths: [String])async throws   {
      * Rebuild `Live` state from a previously stored `Session` (e.g. loaded
      * from the Keychain) without re-running the login handshake.
      *
-     * Validates the session with a cheap authed capability probe
-     * (`SYNO.API.Info`): a probe failure that maps to `CoreError::Auth` or
-     * `CoreError::OtpRequired` means the stored session is no longer
-     * accepted by DSM, so this reports `SessionState::Expired` rather than
-     * an error the caller has to handle as failure - the UI can react by
-     * sending the user back through `login`. Any other probe error (e.g.
-     * network failure) is fail-closed and propagated as-is.
+     * Probes capabilities (`SYNO.API.Info`, which DSM answers anonymously),
+     * then validates the session with one authenticated one item
+     * `Browse.Item` list in the personal space. A failure that maps to
+     * `CoreError::Auth` or `CoreError::OtpRequired` means the stored session
+     * is no longer accepted by DSM, so this reports `SessionState::Expired`
+     * rather than an error the caller has to handle as failure; the UI can
+     * react by sending the user back through `login`. Any other error (for
+     * example a network failure) is fail closed and propagated as is.
      */
 open func restoreSession(connection: Connection, session: Session)async throws  -> SessionState  {
     return
@@ -1881,10 +1883,10 @@ open func restoreSession(connection: Connection, session: Session)async throws  
      * folder makes it plainly an ADDED asset, not a changed one.
      *
      * FAIL CLOSED on either step: if the upload fails, the re-index is never
-     * sent (there is nothing new to index) and the error propagates; if the
-     * re-index fails, the file is already safely uploaded and the error still
-     * surfaces so the caller can retry (a later crawl/reindex also picks it
-     * up). There is no local index row to write here: the new photo only
+     * sent (there is nothing new to index) and the error propagates. If only
+     * the re-index fails, the file is already safely uploaded, so the save
+     * still succeeds (a retry could only collide with or duplicate the
+     * upload) and the failure is logged; a later re-index picks it up. There is no local index row to write here: the new photo only
      * enters the local mirror when a subsequent crawl re-reads the library.
      *
      * Reuses `recycle_call_context` for the session basics (transport + sid +
@@ -2790,10 +2792,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_restore_recently_deleted() != 32885) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 22452) {
+    if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 40502) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_save_edited_photo() != 9388) {
+    if (uniffi_photoscore_checksum_method_photoscore_save_edited_photo() != 20393) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_search_assets() != 47405) {
