@@ -242,20 +242,43 @@ impl PhotosCore {
     /// Rebuild `Live` state from a previously stored `Session` (e.g. loaded
     /// from the Keychain) without re-running the login handshake.
     ///
-    /// Validates the session with a cheap authed capability probe
-    /// (`SYNO.API.Info`): a probe failure that maps to `CoreError::Auth` or
-    /// `CoreError::OtpRequired` means the stored session is no longer
-    /// accepted by DSM, so this reports `SessionState::Expired` rather than
-    /// an error the caller has to handle as failure - the UI can react by
-    /// sending the user back through `login`. Any other probe error (e.g.
-    /// network failure) is fail-closed and propagated as-is.
+    /// Probes capabilities (`SYNO.API.Info`, which DSM answers anonymously),
+    /// then validates the session with one authenticated one item
+    /// `Browse.Item` list in the personal space. A failure that maps to
+    /// `CoreError::Auth` or `CoreError::OtpRequired` means the stored session
+    /// is no longer accepted by DSM, so this reports `SessionState::Expired`
+    /// rather than an error the caller has to handle as failure; the UI can
+    /// react by sending the user back through `login`. Any other error (for
+    /// example a network failure) is fail closed and propagated as is.
     pub async fn restore_session(
         &self,
         connection: Connection,
         session: Session,
     ) -> Result<SessionState, CoreError> {
         let transport = Transport::new(&connection)?;
-        match synology_api::probe_capabilities(&transport).await {
+        // SYNO.API.Info answers anonymously, so a successful probe says
+        // nothing about the saved sid. Prove the session with one
+        // authenticated one item list before reporting it Valid; DSM answers
+        // a dead sid there with 106/107/119, which maps to Auth.
+        let probed = match synology_api::probe_capabilities(&transport).await {
+            Ok(caps) => {
+                let version =
+                    synology_api::pin_version(&caps, "SYNO.Foto.Browse.Item", 2).unwrap_or(2);
+                synology_api::list_items_page(
+                    &transport,
+                    &session.sid,
+                    Space::Personal,
+                    0,
+                    1,
+                    version,
+                    session.syno_token.as_deref(),
+                )
+                .await
+                .map(|_| caps)
+            }
+            Err(e) => Err(e),
+        };
+        match probed {
             Ok(caps) => {
                 let mut guard = self.live.lock().expect("live mutex poisoned");
                 *guard = Some(Live {
@@ -1592,6 +1615,12 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{}}"#)
             .create_async()
             .await;
+        let authed = mock_authed_list(
+            &mut server,
+            "SID-RESTORE",
+            r#"{"success":true,"data":{"list":[]}}"#,
+        )
+        .await;
         let core = core_at("restore-valid");
         let conn = Connection {
             host: server.url(),
@@ -1611,8 +1640,33 @@ mod core_tests {
             .expect("restore ok");
         assert!(matches!(state, SessionState::Valid), "got {state:?}");
         assert!(core.live.lock().unwrap().is_some());
+        authed.assert_async().await;
     }
 
+    /// An authenticated one item Browse.Item list carrying `sid`, the call
+    /// `restore_session` uses to prove the saved session is still alive.
+    async fn mock_authed_list(
+        server: &mut mockito::Server,
+        sid: &str,
+        body: &str,
+    ) -> mockito::Mock {
+        server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Item".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "list".into()),
+                mockito::Matcher::UrlEncoded("_sid".into(), sid.into()),
+            ]))
+            .with_status(200)
+            .with_body(body)
+            .expect(1)
+            .create_async()
+            .await
+    }
+
+    /// Like DSM: SYNO.API.Info answers anonymously whatever the sid, so it
+    /// proves nothing about the session. The stale sid is only caught by an
+    /// authenticated call, which DSM answers with error 119.
     #[tokio::test]
     async fn restore_session_with_auth_failure_reports_expired_without_error() {
         let mut server = mockito::Server::new_async().await;
@@ -1620,9 +1674,15 @@ mod core_tests {
             .mock("GET", "/webapi/query.cgi")
             .match_query(mockito::Matcher::Any)
             .with_status(200)
-            .with_body(r#"{"success":false,"error":{"code":400}}"#)
+            .with_body(r#"{"success":true,"data":{}}"#)
             .create_async()
             .await;
+        let _authed = mock_authed_list(
+            &mut server,
+            "SID-STALE",
+            r#"{"success":false,"error":{"code":119}}"#,
+        )
+        .await;
         let core = core_at("restore-expired");
         let conn = Connection {
             host: server.url(),
