@@ -153,7 +153,7 @@ Scope: `platforms/macos/MySynologyPhotos/` Grid/, RootView.swift, MySynologyPhot
 - suggested test: as above; falsify by deleting the `.deleteConfirm(...)` line.
 
 ## Also noted (not scored)
-- Cmd-Z: `CommandGroup(replacing: .undoRedo)` (Menu/LibraryCommands.swift:79-84) enables "Undo Delete" whenever `canUndoDelete` is true, which stays true until the next undo, so Cmd-Z in the search field restores the last deleted photos instead of undoing the text edit. Low.
+- Cmd-Z: `CommandGroup(replacing: .undoRedo)` (Menu/LibraryCommands.swift:87-92) enables "Undo Delete" whenever `canUndoDelete` is true, which stays true until the next undo, so Cmd-Z in the search field restores the last deleted photos instead of undoing the text edit. Low.
 - `DiscoveryTilesModel.fetchLimit = 500` (Discovery/DiscoveryTilesModel.swift:36), one call, no paging and no notice: an account with more than 500 people, places, tags or albums sees only the first 500. Low.
 - `refreshCount` comment claims count, progress and histogram are "the same DB snapshot" (WindowedDataSource.swift:142-146) but they are three separate awaited calls; a write between them gives `dateSections.totalCount != totalCount` until the next refresh. Low, self-heals.
 - Select All on a large library builds a 100k `Set<Int>` and `IndexPath` set and `snapshotItemCount()` copies the diffable snapshot on every key press (PhotoGridController.swift:326-329, :739-741, :856-860). Not measured. The delete confirm only lists rows that are resident (`residentItem`), so the "N selected" label can exceed the number deleted; the confirm text itself is accurate.
