@@ -93,3 +93,11 @@ Scope: `core/synology-api/`. Findings from
 - passes after: whole crate 242 passed, 0 failed, 3 ignored
 - changed tests: none. The two existing "still in the recycle bin" tests still pass, because there the last poll did see the file.
 - left open: session expiry (106, 107, 119) already aborts the loop through R1-4's mapping to `Auth`. The error stays `UnexpectedResponse`; a distinct "unconfirmed" variant would be a UniFFI change.
+
+### R1-3b: FIXED (ruling: keep strict list_items, add a lenient crawl page function)
+- commit: fc5042e
+- test: list_items_page_reports_raw_count_and_skipped_id_for_an_item_without_cache_key, list_items_page_fails_naming_the_index_of_an_element_without_an_id, list_items_page_fails_when_list_is_not_an_array (core/synology-api/tests/browse_mock.rs)
+- failed before the fix: new function, so falsified by mutating the decoder (raw_count from decoded count, unusable ids dropped, no-id element skipped). Observed `panicked at core/synology-api/tests/browse_mock.rs:722:5: left: 2 right: 3` and the no-id test panicked at browse_mock.rs:749. The non-array test passes under that mutation because serde rejects a non-array list before the per element loop; it pins the contract, not the new code.
+- passes after: gate fmt=0 clippy=0 test=0 check=0, cargo test -p synology-api passed=245 failed=0 ignored=3
+- changed tests: none. New public API: `synology_api::list_items_page(transport, sid, space, offset, limit, version, syno_token) -> Result<ItemPage, CoreError>` and `pub struct ItemPage { assets: Vec<Asset>, raw_count: u32, skipped_ids: Vec<i64> }`. Plain Rust, not a UniFFI type. The per element decode moved into a private `asset_from_value` shared with `decode_item_list`, with no behaviour change.
+- left open: core/photoscore ApiPageSource must switch to it (photoscore worker). Gate started at load 63, above the brief's 40 limit.
