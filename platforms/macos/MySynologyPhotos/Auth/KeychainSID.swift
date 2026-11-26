@@ -254,11 +254,16 @@ enum KeychainCertPin {
     /// is one `<sanitized-host>.der` file holding the raw certificate DER,
     /// nothing else, so the file itself is exactly the pinned bytes.
     private static func pinsDir() throws -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("SynologyNativePhotos", isDirectory: true)
+        // Under a unit test run the pins live in a temporary directory, so a
+        // test can never read, overwrite or delete the pin of a real host.
+        let base: URL = KeychainService.isUnitTestHost
+            ? FileManager.default.temporaryDirectory
+            : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = base
+            .appendingPathComponent(KeychainService.isUnitTestHost ? "SynologyNativePhotos-tests" : "SynologyNativePhotos", isDirectory: true)
             .appendingPathComponent("pins", isDirectory: true)
-        try FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
-        return appSupport
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 
     /// Host strings (e.g. `https://fafnir.ladon-pirate.ts.net:5001`) contain

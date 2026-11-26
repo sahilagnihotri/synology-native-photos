@@ -113,6 +113,21 @@ struct LoginViewModelTests {
         #expect(session.sid == "S1")
     }
 
+    /// R4-3: under the unit test host the pin store must live in a temporary
+    /// directory, never in the real Application Support pins folder.
+    @Test func pinStoreIsIsolatedFromRealApplicationSupportUnderTests() throws {
+        let host = "https://pin-isolation-\(UUID().uuidString).invalid:5001"
+        defer { try? KeychainCertPin.clear(host: host) }
+        try KeychainCertPin.save(der: Data([4, 2]), host: host)
+
+        let realPins = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("SynologyNativePhotos/pins", isDirectory: true)
+        let realFiles = (try? FileManager.default.contentsOfDirectory(atPath: realPins.path)) ?? []
+        let encoded = host.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? host
+        #expect(!realFiles.contains("\(encoded).der"), "a test pin reached the real pin store")
+        #expect(try KeychainCertPin.load(host: host) == Data([4, 2]))
+    }
+
     /// Regression test for the real-NAS bug: typing a Tailscale MagicDNS
     /// host (e.g. `fafnir.ladon-pirate.ts.net`) whose certificate's subject
     /// names a completely different, unreachable public DDNS hostname (e.g.
@@ -123,7 +138,7 @@ struct LoginViewModelTests {
     /// `Connection.host`) must carry exactly the host the user typed, from
     /// first submit through approval through the login that follows.
     @Test func loginTargetsTypedHostNeverTheCertSubject() async throws {
-        let typedHost = "https://fafnir.ladon-pirate.ts.net:5001"
+        let typedHost = "https://pin-test-typed.invalid:5001"
         let subjectHost = "CN=agnihotri.synology.me"
         let (suiteName, defaults) = freshDefaults()
         defer {
