@@ -789,3 +789,155 @@ async fn recycle_bin_status_propagates_an_otp_error() {
         .unwrap_err();
     assert!(matches!(err, CoreError::OtpRequired), "got {err:?}");
 }
+
+// --- R1-6: File Station paging must be bounded ---------------------------
+
+/// A full File Station page (1000 entries) whose paths start at `start`.
+fn full_page_body(folder: &str, start: usize) -> String {
+    let files: Vec<String> = (start..start + 1000)
+        .map(|i| {
+            format!(
+                r#"{{"isdir":false,"name":"F{i}.JPG","path":"{folder}/F{i}.JPG","additional":{{"size":1,"time":{{"mtime":{i}}}}}}}"#
+            )
+        })
+        .collect();
+    format!(
+        r#"{{"success":true,"data":{{"files":[{}]}}}}"#,
+        files.join(",")
+    )
+}
+
+/// DSM (or a caching proxy) ignoring `offset` returns the same full page
+/// forever. The recycle listing must stop with an error, not loop.
+#[tokio::test]
+async fn list_recycle_photos_stops_when_paging_makes_no_progress() {
+    let mut server = mockito::Server::new_async().await;
+    let root = "/home/#recycle/Photos";
+    let m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+            Matcher::UrlEncoded("folder_path".into(), root.into()),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(full_page_body(root, 0))
+        .expect_at_most(3)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        list_recycle_photos(&t, "SID", None, 0, 50),
+    )
+    .await
+    .expect("the listing must not hang");
+    assert!(result.is_err(), "a non-advancing listing must fail");
+    m.assert_async().await;
+}
+
+/// The restore precheck lists the destination folder. If that listing never
+/// advances, the restore must fail before any move is queued.
+#[tokio::test]
+async fn restore_precheck_stops_when_paging_makes_no_progress() {
+    let mut server = mockito::Server::new_async().await;
+    let dest = "/home/Photos";
+    let list = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+            Matcher::UrlEncoded("folder_path".into(), dest.into()),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(full_page_body(dest, 0))
+        .expect_at_most(3)
+        .create_async()
+        .await;
+    let mv = server
+        .mock("POST", "/webapi/entry.cgi")
+        .match_body(Matcher::Any)
+        .with_status(200)
+        .with_body(r#"{"success":true}"#)
+        .expect(0)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        restore_recycle_item_with_polling(
+            &t,
+            "SID",
+            None,
+            "/home/#recycle/Photos/a.jpg",
+            TaskPolling {
+                attempts: 1,
+                interval: std::time::Duration::from_millis(1),
+            },
+        ),
+    )
+    .await
+    .expect("the restore precheck must not hang");
+    assert!(result.is_err(), "a non-advancing precheck must fail");
+    list.assert_async().await;
+    mv.assert_async().await;
+}
+
+/// Even when every page is new, a folder listing stops at a hard page cap,
+/// so a server that never returns a short page cannot grow memory forever.
+/// The restore precheck fails closed at the cap and queues no move.
+#[tokio::test]
+async fn restore_precheck_stops_at_the_page_cap() {
+    let mut server = mockito::Server::new_async().await;
+    let dest = "/home/Photos";
+    let mut pages = Vec::new();
+    for page in 0..40usize {
+        pages.push(
+            server
+                .mock("GET", "/webapi/entry.cgi")
+                .match_query(Matcher::AllOf(vec![
+                    Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+                    Matcher::UrlEncoded("folder_path".into(), dest.into()),
+                    Matcher::UrlEncoded("offset".into(), (page * 1000).to_string()),
+                ]))
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body(full_page_body(dest, page * 1000))
+                .create_async()
+                .await,
+        );
+    }
+    let mv = server
+        .mock("POST", "/webapi/entry.cgi")
+        .match_body(Matcher::Any)
+        .with_status(200)
+        .with_body(r#"{"success":true}"#)
+        .expect(0)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        restore_recycle_item_with_polling(
+            &t,
+            "SID",
+            None,
+            "/home/#recycle/Photos/a.jpg",
+            TaskPolling {
+                attempts: 1,
+                interval: std::time::Duration::from_millis(1),
+            },
+        ),
+    )
+    .await
+    .expect("the restore precheck must not hang");
+    assert!(
+        result.is_err(),
+        "the precheck must fail closed at the page cap"
+    );
+    assert!(
+        !pages[39].matched_async().await,
+        "paging must stop before the 40th page"
+    );
+    mv.assert_async().await;
+}

@@ -56,6 +56,53 @@ const MAX_FILES: usize = 5000;
 /// Per-folder page size for `SYNO.FileStation.List`.
 const LIST_PAGE_LIMIT: u32 = 1000;
 
+/// Hard cap on pages read from one folder (32 000 entries). File Station
+/// paging only ends on a short page, so a server that never sends one must
+/// not keep the loop, and its memory, growing without end.
+const MAX_FOLDER_PAGES: u32 = 32;
+
+/// Guards one folder's paging loop: a page cap and a no-progress check. A
+/// full page whose first and last entries match the previous page means the
+/// server ignored `offset`, and paging on would repeat it forever.
+struct PageGuard {
+    pages: u32,
+    last: Option<(serde_json::Value, serde_json::Value)>,
+}
+
+impl PageGuard {
+    fn new() -> Self {
+        PageGuard {
+            pages: 0,
+            last: None,
+        }
+    }
+
+    /// Call after each FULL page, before requesting the next one.
+    fn advance(&mut self, folder: &str, files: &[serde_json::Value]) -> Result<(), CoreError> {
+        self.pages += 1;
+        if self.pages >= MAX_FOLDER_PAGES {
+            return Err(CoreError::UnexpectedResponse {
+                message: format!(
+                    "folder listing for {folder} exceeded {MAX_FOLDER_PAGES} pages; refusing to page further"
+                ),
+            });
+        }
+        let edges = match (files.first(), files.last()) {
+            (Some(a), Some(b)) => Some((a.clone(), b.clone())),
+            _ => None,
+        };
+        if edges.is_some() && edges == self.last {
+            return Err(CoreError::UnexpectedResponse {
+                message: format!(
+                    "folder listing for {folder} repeated the same page; the server is not advancing the offset"
+                ),
+            });
+        }
+        self.last = edges;
+        Ok(())
+    }
+}
+
 /// One decoded File Station directory entry (a file or a subfolder), after the
 /// tolerant per-element decode.
 struct FsEntry {
@@ -190,6 +237,7 @@ async fn list_folder(
 ) -> Result<Vec<FsEntry>, ListError> {
     let mut out: Vec<FsEntry> = Vec::new();
     let mut offset = 0u32;
+    let mut guard = PageGuard::new();
     loop {
         let query: Vec<(&str, String)> = vec![
             ("api", "SYNO.FileStation.List".to_string()),
@@ -217,6 +265,9 @@ async fn list_folder(
         if n < LIST_PAGE_LIMIT {
             break;
         }
+        guard
+            .advance(folder_path, &data.files)
+            .map_err(ListError::Core)?;
         offset += LIST_PAGE_LIMIT;
     }
     Ok(out)
@@ -447,6 +498,7 @@ async fn folder_contains(
     name: &str,
 ) -> Result<Option<bool>, CoreError> {
     let mut offset = 0u32;
+    let mut guard = PageGuard::new();
     loop {
         let query: Vec<(&str, String)> = vec![
             ("api", "SYNO.FileStation.List".to_string()),
@@ -478,6 +530,7 @@ async fn folder_contains(
         if n < LIST_PAGE_LIMIT {
             return Ok(Some(false));
         }
+        guard.advance(folder, &data.files)?;
         offset += LIST_PAGE_LIMIT;
     }
 }
