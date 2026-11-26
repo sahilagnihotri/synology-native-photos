@@ -38,6 +38,37 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// Share of a space's local rows (in percent) that one reconcile may remove
+/// without confirmation. Real server side deletions arrive a few at a time
+/// (a cleanup session on the phone or the web), while a listing that ends
+/// early (a re-index, a briefly unavailable volume, a session race) drops a
+/// large slice or everything. Twenty percent sits well above routine
+/// deletions and well below the truncation cases. A bigger drop is applied
+/// only when the next reconcile sees the identical listing.
+const MAX_UNCONFIRMED_DELETE_PERCENT: usize = 20;
+
+/// Below this many local rows the share rule is not applied: in a tiny space
+/// a single deletion is already a large share, and the cost of a wrong sweep
+/// is small. An empty listing is still refused at any size.
+const MIN_GUARDED_LOCAL_ROWS: usize = 100;
+
+/// `app_state` key holding the fingerprint of the last refused listing, so
+/// an identical listing on the next reconcile counts as confirmation.
+const PENDING_SWEEP_KEY: &str = "reconcile_pending_sweep";
+
+/// Order independent, stable fingerprint of a sorted id list (FNV-1a over
+/// the ids plus the count). Stable across builds, unlike `DefaultHasher`.
+fn listing_fingerprint(sorted_ids: &[i64]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for id in sorted_ids {
+        for b in id.to_le_bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    format!("{}:{h:016x}", sorted_ids.len())
+}
+
 pub struct DeltaReconciler<'a> {
     store: &'a Store,
     source: &'a dyn PageSource,
@@ -118,11 +149,73 @@ impl<'a> DeltaReconciler<'a> {
         // stale local copy is dropped to keep the mirror honest. This is a
         // local-only DELETE against our own SQLite file. No NAS call is made
         // here or anywhere else in this module.
-        let keep_ids: Vec<i64> = seen_ids.into_iter().collect();
+        //
+        // Before sweeping, the listing has to look plausible: see
+        // `sweep_is_plausible`. A refused sweep keeps every local row (the
+        // upserts above still stand), leaves `reconcile_at` unset and
+        // returns an error so the caller does not report a clean sync.
+        let local_count = local_versions.len();
+        let stale = local_versions
+            .keys()
+            .filter(|id| !seen_ids.contains(id))
+            .count();
+        let mut keep_ids: Vec<i64> = seen_ids.into_iter().collect();
+        keep_ids.sort_unstable();
+        if stale > 0 && !self.sweep_is_plausible(space, &keep_ids, stale, local_count)? {
+            let message = if keep_ids.is_empty() {
+                format!(
+                    "The NAS listed no items, so none of the {local_count} local items were removed."
+                )
+            } else {
+                format!(
+                    "The NAS listing would remove {stale} of {local_count} local items, so none \
+                     were removed. Refresh again to confirm the change."
+                )
+            };
+            return Err(CoreError::UnexpectedResponse { message });
+        }
+        self.store.set_app_state(space, PENDING_SWEEP_KEY, "")?;
         self.store.delete_assets_not_in(space, &keep_ids)?;
 
         self.store.set_reconcile_at(space, now_secs())?;
         self.store.crawl_progress(space)
+    }
+
+    /// Decides whether removing `stale` of `local_count` local rows is safe.
+    ///
+    /// - An empty listing for a populated space is never applied: a
+    ///   successful but empty answer is far likelier to be a server hiccup
+    ///   than a library emptied on purpose.
+    /// - In a space of at least `MIN_GUARDED_LOCAL_ROWS`, removing more than
+    ///   `MAX_UNCONFIRMED_DELETE_PERCENT` percent is applied only when the
+    ///   previous refused listing had the same fingerprint, so one glitch
+    ///   can never empty the grid but a real mass deletion converges on the
+    ///   second refresh.
+    ///
+    /// A refusal records the listing's fingerprint for the next reconcile.
+    fn sweep_is_plausible(
+        &self,
+        space: Space,
+        sorted_keep_ids: &[i64],
+        stale: usize,
+        local_count: usize,
+    ) -> Result<bool, CoreError> {
+        if sorted_keep_ids.is_empty() {
+            return Ok(false);
+        }
+        let large_drop = local_count >= MIN_GUARDED_LOCAL_ROWS
+            && stale * 100 > local_count * MAX_UNCONFIRMED_DELETE_PERCENT;
+        if !large_drop {
+            return Ok(true);
+        }
+        let fingerprint = listing_fingerprint(sorted_keep_ids);
+        let pending = self.store.get_app_state(space, PENDING_SWEEP_KEY)?;
+        if pending.as_deref() == Some(fingerprint.as_str()) {
+            return Ok(true);
+        }
+        self.store
+            .set_app_state(space, PENDING_SWEEP_KEY, &fingerprint)?;
+        Ok(false)
     }
 }
 
@@ -324,6 +417,137 @@ mod tests {
             1,
             "reconciling Personal must not sweep Shared rows"
         );
+    }
+
+    /// Serves a fixed listing in `offset`/`limit` windows, the way the real
+    /// list call pages, so tests can feed listings of any size.
+    struct SliceSource {
+        items: Vec<Asset>,
+    }
+    #[async_trait::async_trait]
+    impl PageSource for SliceSource {
+        async fn list_items(
+            &self,
+            _space: Space,
+            offset: u32,
+            limit: u32,
+        ) -> Result<AssetPage, CoreError> {
+            let start = (offset as usize).min(self.items.len());
+            let end = (start + limit as usize).min(self.items.len());
+            Ok(AssetPage {
+                assets: self.items[start..end].to_vec(),
+                total: self.items.len() as u64,
+            })
+        }
+    }
+
+    fn seed(store: &Store, ids: impl Iterator<Item = i64>) {
+        let rows: Vec<Asset> = ids.map(|id| asset_v(id, 1, Some(id))).collect();
+        store.upsert_assets(&rows).unwrap();
+    }
+
+    fn listing(ids: impl Iterator<Item = i64>) -> SliceSource {
+        SliceSource {
+            items: ids.map(|id| asset_v(id, 1, Some(id))).collect(),
+        }
+    }
+
+    /// R2-1 at the sync level: a 40,000 item library reconciles, the one
+    /// server side deletion is mirrored and the one new item lands.
+    #[tokio::test]
+    async fn large_library_reconciles_past_the_sql_variable_limit() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store, 1..=40_000);
+        let src = listing((2..=40_001).rev());
+        let rec = DeltaReconciler::new(&store, &src, 200);
+        rec.reconcile(Space::Personal).await.unwrap();
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 40_000);
+        let ids: HashSet<i64> = store
+            .fetch_assets(Space::Personal, 0, u32::MAX)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert!(!ids.contains(&1));
+        assert!(ids.contains(&40_001));
+    }
+
+    /// A successful but empty listing for a populated space must never be
+    /// applied as deletions, not even when it repeats, and the reconcile
+    /// must not report success.
+    #[tokio::test]
+    async fn empty_listing_keeps_every_local_row() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store, 1..=500);
+        let src = listing(std::iter::empty());
+        let rec = DeltaReconciler::new(&store, &src, 200);
+        for _ in 0..3 {
+            let result = rec.reconcile(Space::Personal).await;
+            assert!(
+                matches!(result, Err(CoreError::UnexpectedResponse { .. })),
+                "empty listing must be refused, got {result:?}"
+            );
+            assert_eq!(store.asset_count(Space::Personal).unwrap(), 500);
+        }
+        assert!(store
+            .load_sync_state(Space::Personal)
+            .unwrap()
+            .last_reconcile_at
+            .is_none());
+    }
+
+    /// A small, plausible server side deletion is mirrored straight away.
+    #[tokio::test]
+    async fn small_legitimate_deletion_is_applied() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store, 1..=500);
+        let src = listing(11..=500);
+        let rec = DeltaReconciler::new(&store, &src, 200);
+        rec.reconcile(Space::Personal).await.unwrap();
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 490);
+    }
+
+    /// A listing that would remove more than the allowed share of a
+    /// non-trivial space is refused the first time (new rows still land),
+    /// and applied only when the next reconcile sees the identical listing.
+    #[tokio::test]
+    async fn listing_over_the_threshold_is_refused_until_repeated() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store, 1..=500);
+        let src = listing(301..=501);
+        let rec = DeltaReconciler::new(&store, &src, 200);
+
+        let first = rec.reconcile(Space::Personal).await;
+        assert!(
+            matches!(first, Err(CoreError::UnexpectedResponse { .. })),
+            "first sight of a 60 percent drop must be refused, got {first:?}"
+        );
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 501);
+
+        rec.reconcile(Space::Personal).await.unwrap();
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 201);
+    }
+
+    /// The confirmation must be the SAME listing: a different over-threshold
+    /// listing on the next reconcile is refused again.
+    #[tokio::test]
+    async fn a_different_short_listing_does_not_confirm_the_first() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store, 1..=500);
+        let first = listing(301..=500);
+        let second = listing(1..=150);
+        assert!(DeltaReconciler::new(&store, &first, 200)
+            .reconcile(Space::Personal)
+            .await
+            .is_err());
+        let result = DeltaReconciler::new(&store, &second, 200)
+            .reconcile(Space::Personal)
+            .await;
+        assert!(
+            matches!(result, Err(CoreError::UnexpectedResponse { .. })),
+            "a different short listing must not count as confirmation, got {result:?}"
+        );
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 500);
     }
 
     #[tokio::test]
