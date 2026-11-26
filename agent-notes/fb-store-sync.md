@@ -17,3 +17,11 @@
 - how the user reaches a correct state after really deleting most of a library on the NAS: press Refresh twice. The second reconcile sees the same listing and applies it. Note the brief's premise that "a later full crawl can still converge" does not hold in the code: `Crawler` only upserts and never deletes, and a completed crawl is a no-op, so only reconcile removes rows.
 - left open (NEEDS RULING, small): a library emptied on purpose on the NAS (every item deleted) never converges, because an empty listing is never applied. Options: (a) keep it so (safest, stale rows stay until the user rebuilds the index, which has no UI today); (b) apply an empty listing on the second identical empty listing, like the share rule (one line change in `sweep_is_plausible`); (c) add an explicit "rebuild local index" action in photoscore and the app. My recommendation is (b) only if (c) is not wanted, since a wrongly applied sweep self-heals on the next good reconcile (every id is re-inserted as NEW).
 - changed tests: none. `delete_assets_not_in_with_empty_keep_list_clears_the_space` in persistence still pins the primitive's literal semantics, which are correct for the primitive; the guard lives in the only caller.
+
+### R3-3: FIXED
+- commit: 09090ec
+- test: `data_bearing_migration_rewinds_an_in_progress_crawl_cursor` in core/persistence/src/schema.rs (v2 DB, Personal at `initial_crawl_complete=0, last_offset=5000, last_page_limit=200`)
+- failed before the fix: `assertion left == right failed: an in-progress crawl must restart from the beginning to backfill the new columns, left: 5000, right: 0`
+- passes after: `cargo test -p persistence`: `test result: ok. 64 passed; 0 failed; 0 ignored`
+- changed tests: none (the existing Shared all-zero row assertion still holds)
+- left open: the private function keeps its name `reset_crawl_barrier_for_completed_spaces` (no renames rule); its doc comment now says it resets every space.
