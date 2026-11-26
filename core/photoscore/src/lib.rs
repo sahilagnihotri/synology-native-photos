@@ -1142,12 +1142,7 @@ impl PhotosCore {
                 synology_api::restore_recycle_item(&transport, &sid, syno_token.as_deref(), path)
                     .await
             {
-                if restored == 0 {
-                    return Err(e);
-                }
-                return Err(CoreError::UnexpectedResponse {
-                    message: format!("restored {restored} of {total} item(s) before failing: {e}"),
-                });
+                return Err(with_partial_progress(e, "restored", restored, total));
             }
         }
         // All moves confirmed; re-index once so Photos picks the files back up.
@@ -1173,9 +1168,11 @@ impl PhotosCore {
         }
         let _lock = self.trash_lock.lock().await;
         let (transport, sid, syno_token) = self.recycle_call_context()?;
-        for path in &recycle_paths {
+        let total = recycle_paths.len();
+        for (deleted, path) in recycle_paths.iter().enumerate() {
             synology_api::delete_recycle_item(&transport, &sid, syno_token.as_deref(), path)
-                .await?;
+                .await
+                .map_err(|e| with_partial_progress(e, "permanently deleted", deleted, total))?;
         }
         Ok(())
     }
@@ -1309,6 +1306,40 @@ fn write_cache_file_atomically(
 /// taken the `Store` out to run on its blocking thread. Any other caller
 /// landing in that window gets a clear, fail-closed error rather than a
 /// panic on `Option::unwrap`.
+/// Adds "{verb} {done} of {total} item(s) before failing" to `e` when a batch
+/// stopped part way, KEEPING its variant so the UI still reacts to the kind
+/// (an Auth failure sends the user to sign in, a Network one can be retried).
+/// Variants without a text field (`OtpRequired`, `WriteRefused`) cannot carry
+/// the count and are returned unchanged; `CapabilityUnavailable` names an API
+/// and is left alone too. `done == 0` is returned unchanged.
+fn with_partial_progress(e: CoreError, verb: &str, done: usize, total: usize) -> CoreError {
+    if done == 0 {
+        return e;
+    }
+    let note =
+        |message: String| format!("{verb} {done} of {total} item(s) before failing: {message}");
+    match e {
+        CoreError::Auth { message } => CoreError::Auth {
+            message: note(message),
+        },
+        CoreError::Network { message } => CoreError::Network {
+            message: note(message),
+        },
+        CoreError::Decode { message } => CoreError::Decode {
+            message: note(message),
+        },
+        CoreError::UnexpectedResponse { message } => CoreError::UnexpectedResponse {
+            message: note(message),
+        },
+        CoreError::Storage { message } => CoreError::Storage {
+            message: note(message),
+        },
+        other @ (CoreError::OtpRequired
+        | CoreError::WriteRefused
+        | CoreError::CapabilityUnavailable { .. }) => other,
+    }
+}
+
 fn store_busy_err() -> CoreError {
     CoreError::Storage {
         message: "store busy: a crawl or reconcile is in progress".into(),
@@ -3999,6 +4030,126 @@ mod core_tests {
             .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
         _reindex_trap.assert_async().await;
+    }
+
+    /// A restore that fails part way keeps the failure's kind (an Auth
+    /// failure must still send the user to sign in) and says how many items
+    /// were already restored.
+    #[tokio::test]
+    async fn restore_recently_deleted_partial_failure_keeps_the_kind_and_the_count() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _dest = mock_empty_fs_folder(&mut server, "/home/Photos").await;
+        let _src = mock_empty_fs_folder(&mut server, "/home/#recycle/Photos").await;
+        let _first_move = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("SYNO.FileStation.CopyMove".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true,"data":{"taskid":"t1"}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let _second_move = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("SYNO.FileStation.CopyMove".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":false,"error":{"code":119}}"#)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("restore-partial", &server).await;
+        let err = core
+            .restore_recently_deleted(vec![
+                "/home/#recycle/Photos/a.jpg".into(),
+                "/home/#recycle/Photos/b.jpg".into(),
+            ])
+            .await
+            .unwrap_err();
+        match &err {
+            CoreError::Auth { message } => assert!(
+                message.contains("restored 1 of 2"),
+                "count missing: {message}"
+            ),
+            other => panic!("the Auth kind must survive a partial restore, got {other:?}"),
+        }
+    }
+
+    /// An empty that fails part way keeps the failure's kind and says how
+    /// many items were already permanently deleted (that is not undoable,
+    /// so the user must be told).
+    #[tokio::test]
+    async fn empty_recently_deleted_partial_failure_keeps_the_kind_and_the_count() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let mut list = |body: &'static str| {
+            server
+                .mock("GET", "/webapi/entry.cgi")
+                .match_query(mockito::Matcher::AllOf(vec![
+                    mockito::Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+                    mockito::Matcher::UrlEncoded(
+                        "folder_path".into(),
+                        "/home/#recycle/Photos".into(),
+                    ),
+                ]))
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body(body)
+        };
+        // a.jpg: listed as a file, deleted, then gone. b.jpg: the session
+        // dies before its check (error 119).
+        let _present = list(
+            r##"{"success":true,"data":{"files":[{"isdir":false,"name":"a.jpg","path":"/home/#recycle/Photos/a.jpg"}]}}"##,
+        )
+        .expect(1)
+        .create_async()
+        .await;
+        let _gone = list(r#"{"success":true,"data":{"files":[]}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let _dead = list(r#"{"success":false,"error":{"code":119}}"#)
+            .create_async()
+            .await;
+        let _del = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("SYNO.FileStation.Delete".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true,"data":{"taskid":"t2"}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("empty-partial", &server).await;
+        let err = core
+            .empty_recently_deleted(vec![
+                "/home/#recycle/Photos/a.jpg".into(),
+                "/home/#recycle/Photos/b.jpg".into(),
+            ])
+            .await
+            .unwrap_err();
+        match &err {
+            CoreError::Auth { message } => assert!(
+                message.contains("permanently deleted 1 of 2"),
+                "count missing: {message}"
+            ),
+            other => panic!("the Auth kind must survive a partial empty, got {other:?}"),
+        }
+        _del.assert_async().await;
     }
 
     #[tokio::test]
