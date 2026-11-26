@@ -60,3 +60,11 @@
 - passes after: `cargo test -p photoscore`: 74 passed, 0 failed, 0 ignored (lib)
 - design: private `with_partial_progress(e, verb, done, total)` keeps the variant and prefixes the message for Auth, Network, Decode, UnexpectedResponse and Storage. No UniFFI change.
 - left open: OtpRequired and WriteRefused have no text field, so a partial failure of those kinds keeps the kind but loses the count (adding a field is an FFI change); CapabilityUnavailable is left unchanged because its field names an API. A failure on the first item is returned unchanged (count 0).
+
+### R4-12b: FIXED
+- commit: 641aa16
+- test: `core_tests::save_edited_photo_succeeds_when_only_the_reindex_fails` (localhost mockito: upload succeeds, reindex answers 119; both mocks asserted hit once)
+- failed before the fix: `an uploaded edit is saved even if the re-index fails: Auth { message: "synology session expired (code 119)" }`
+- passes after: `cargo test -p photoscore`: 75 passed, 0 failed, 0 ignored (lib)
+- design: the reindex error is logged with `tracing::warn!` and the save returns Ok. Upload failures still propagate and still send no reindex (existing test). No UniFFI change.
+- left open: the UI is not told the reindex failed (that needs a new return type, an FFI change), so the edited copy may take until the next reindex (a restore, or DSM's own indexing; unverified how soon DSM indexes on its own) to appear in the library.
