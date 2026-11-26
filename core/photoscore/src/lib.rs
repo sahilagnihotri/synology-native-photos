@@ -219,6 +219,7 @@ impl PhotosCore {
             device_token.as_deref(),
         )
         .await?;
+        self.bind_index_to_account(&transport, &username)?;
         let mut guard = self.live.lock().expect("live mutex poisoned");
         *guard = Some(Live {
             transport,
@@ -285,6 +286,7 @@ impl PhotosCore {
         };
         match probed {
             Ok(caps) => {
+                self.bind_index_to_account(&transport, &session.username)?;
                 let mut guard = self.live.lock().expect("live mutex poisoned");
                 *guard = Some(Live {
                     transport,
@@ -1458,6 +1460,37 @@ impl PhotosCore {
     /// the core stays usable for every call afterward - it never permanently
     /// bricks the store. The mutex is locked twice, once for the initial
     /// take and once for the final swap-back, never across an `.await`.
+    /// Ties the local index to the account being signed in to: the
+    /// normalized base URL plus the username, both lowercased (DSM user
+    /// names ignore case). When the index belonged to another account, the
+    /// store clears every mirrored row and the crawl barrier (so the next
+    /// crawl starts fresh) and the thumbnail cache is emptied too, because
+    /// `cache_key` values from another NAS can collide. Fails closed with
+    /// store busy if a crawl holds the store, before any `Live` is set.
+    fn bind_index_to_account(
+        &self,
+        transport: &Transport,
+        username: &str,
+    ) -> Result<(), CoreError> {
+        let identity = format!(
+            "{}|{}",
+            transport.base_url().to_ascii_lowercase(),
+            username.to_lowercase()
+        );
+        let reset = {
+            let guard = self.store.lock().expect("store mutex poisoned");
+            let store = guard.as_ref().ok_or_else(store_busy_err)?;
+            store.bind_account(&identity)?
+        };
+        if reset {
+            let thumbs = std::path::Path::new(&self.cache_dir).join("thumbs");
+            if thumbs.exists() {
+                let _ = std::fs::remove_dir_all(&thumbs);
+            }
+        }
+        Ok(())
+    }
+
     /// Puts the `Store` back after `run_with_store`, first applying every
     /// local row removal `delete_assets` queued while it was out. Done under
     /// the store guard, which `delete_assets` also takes before it queues,
@@ -3667,6 +3700,95 @@ mod core_tests {
                 .collect::<Vec<_>>(),
             vec![2],
             "the queued removal is applied when the store comes back"
+        );
+    }
+
+    /// The index belongs to one host plus username. Signing in as someone
+    /// else must not show the previous account's rows; signing in again as
+    /// the same account keeps them. Same rule for a restored session.
+    #[tokio::test]
+    async fn signing_in_as_another_account_clears_the_index() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _info = server
+            .mock("GET", "/webapi/query.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{}}"#)
+            .create_async()
+            .await;
+        let _list = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "list".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"list":[]}}"#)
+            .create_async()
+            .await;
+        let conn = || Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        let core = core_at("account-switch");
+
+        core.login(conn(), "alice".into(), "p".into(), None, None)
+            .await
+            .expect("login alice");
+        seed_asset(&core, Space::Personal, 1);
+        let thumbs = std::path::Path::new(&core.cache_dir).join("thumbs");
+        std::fs::create_dir_all(&thumbs).unwrap();
+        std::fs::write(thumbs.join("ck1"), b"alice thumb").unwrap();
+        core.login(conn(), "Alice".into(), "p".into(), None, None)
+            .await
+            .expect("login alice again");
+        assert!(
+            thumbs.join("ck1").exists(),
+            "same account keeps its thumbnails"
+        );
+        assert_eq!(
+            core.asset_count(Space::Personal).unwrap(),
+            1,
+            "the same account (DSM usernames ignore case) keeps its index"
+        );
+
+        core.login(conn(), "bob".into(), "p".into(), None, None)
+            .await
+            .expect("login bob");
+        assert_eq!(
+            core.asset_count(Space::Personal).unwrap(),
+            0,
+            "another account must not see alice's rows"
+        );
+        assert!(
+            !thumbs.join("ck1").exists(),
+            "another account must not see alice's cached thumbnails"
+        );
+
+        seed_asset(&core, Space::Personal, 2);
+        let state = core
+            .restore_session(
+                conn(),
+                Session {
+                    sid: "S".into(),
+                    syno_token: None,
+                    username: "alice".into(),
+                    device_did: None,
+                },
+            )
+            .await
+            .expect("restore alice");
+        assert!(matches!(state, SessionState::Valid), "got {state:?}");
+        assert_eq!(
+            core.asset_count(Space::Personal).unwrap(),
+            0,
+            "a restored session for another account clears bob's rows"
         );
     }
 
