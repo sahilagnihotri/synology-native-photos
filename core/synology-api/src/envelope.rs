@@ -41,6 +41,13 @@ pub fn map_error_code(code: i64) -> CoreError {
         400 | 401 => CoreError::Auth {
             message: format!("synology auth error code {code}"),
         },
+        // DSM common codes for a session that is gone: 106 session timeout,
+        // 107 session interrupted by a duplicate login, 119 SID not found.
+        // `Auth` is what callers already treat as "sign in again", and the
+        // restore and delete wait loops abort on it instead of retrying.
+        106 | 107 | 119 => CoreError::Auth {
+            message: format!("synology session expired (code {code})"),
+        },
         403 | 404 => CoreError::OtpRequired,
         other => CoreError::UnexpectedResponse {
             message: format!("unhandled synology error code {other}"),
