@@ -292,19 +292,19 @@ fn run_pending_steps(conn: &Connection, pending: &[&MigrationStep]) -> Result<()
     set_user_version(conn, highest_applied)
 }
 
-/// Forces a re-crawl for every space that had already finished its initial
-/// crawl: clears `initial_crawl_complete` and rewinds the paging cursor
-/// (`last_offset`/`last_page_limit`) back to the start, so
-/// `PhotosCore::crawl_space` starts over from page zero on next launch and
-/// repopulates whatever data-bearing column the triggering migration just
-/// added. Spaces that never completed a crawl are left untouched: their
-/// barrier is already down and a partial cursor is exactly what a resumed
-/// crawl expects.
+/// Forces a full re-crawl for every space: clears `initial_crawl_complete`
+/// and rewinds the paging cursor (`last_offset`/`last_page_limit`) back to the
+/// start, so `PhotosCore::crawl_space` starts over from page zero on next
+/// launch and repopulates whatever data-bearing column the triggering
+/// migration just added. This includes spaces whose crawl was still in
+/// progress: the rows below their cursor hold the new column's stale default
+/// too, a resumed crawl would start past them, and the delta reconcile skips
+/// rows whose `server_version` did not change, so nothing else would ever
+/// refresh them.
 fn reset_crawl_barrier_for_completed_spaces(conn: &Connection) -> Result<(), CoreError> {
     conn.execute(
         "UPDATE sync_state
-         SET initial_crawl_complete = 0, last_offset = 0, last_page_limit = 0
-         WHERE initial_crawl_complete != 0",
+         SET initial_crawl_complete = 0, last_offset = 0, last_page_limit = 0",
         [],
     )
     .map_err(map_sql)?;
@@ -854,6 +854,38 @@ mod tests {
             offset, 0,
             "the paging cursor must rewind so the crawl restarts and backfills metadata"
         );
+    }
+
+    /// A space whose crawl was still in progress when the app updated holds
+    /// rows below its cursor with the stale defaults of the new columns. The
+    /// resumed crawl would start past them, and the delta reconcile skips rows
+    /// whose `server_version` is unchanged, so they would never be refreshed.
+    /// The data-bearing migration must therefore rewind that cursor too.
+    #[test]
+    fn data_bearing_migration_rewinds_an_in_progress_crawl_cursor() {
+        let conn = open_v2_db_without_metadata_columns();
+        conn.execute(
+            "INSERT INTO sync_state (space, initial_crawl_complete, expected_total, last_offset, last_page_limit)
+             VALUES (0, 0, 10000, 5000, 200)",
+            [],
+        )
+        .expect("personal sync_state mid crawl");
+
+        run_migrations(&conn).expect("v2 to latest migration");
+
+        let (complete, offset, limit): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT initial_crawl_complete, last_offset, last_page_limit FROM sync_state WHERE space = 0",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(complete, 0);
+        assert_eq!(
+            offset, 0,
+            "an in-progress crawl must restart from the beginning to backfill the new columns"
+        );
+        assert_eq!(limit, 0);
     }
 
     /// A v4 database holding a row an older build flagged as trashed must,
