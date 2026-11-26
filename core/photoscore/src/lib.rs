@@ -1276,8 +1276,14 @@ fn write_cache_file_atomically(
     std::fs::create_dir_all(dir).map_err(|e| CoreError::Storage {
         message: e.to_string(),
     })?;
+    // The clock alone is not unique: concurrent writers in one process read
+    // the same tick and collided on `create_new`. A process wide counter
+    // makes every name in this process distinct; the pid separates processes
+    // and the clock separates runs of a reused pid.
+    static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let unique = format!(
-        ".tmp-{}-{}",
+        ".tmp-{}-{}-{seq}",
         std::process::id(),
         cache_digest(&[&std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1623,6 +1629,38 @@ mod tests {
 #[cfg(test)]
 mod core_tests {
     use super::*;
+
+    /// Concurrent atomic writes (the grid fetches many thumbnails at once)
+    /// must never pick the same temp name: a collision makes `create_new`
+    /// fail and a thumbnail fails to load.
+    #[test]
+    fn concurrent_atomic_cache_writes_never_collide_on_the_temp_name() {
+        let dir = std::env::temp_dir().join(format!("photoscore-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(256));
+        let handles: Vec<_> = (0..256)
+            .map(|i| {
+                let dir = dir.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    write_cache_file_atomically(&dir, &dir.join(format!("f{i}")), b"x")
+                })
+            })
+            .collect();
+        let errors: Vec<_> = handles
+            .into_iter()
+            .filter_map(|h| h.join().unwrap().err())
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            errors.is_empty(),
+            "{} of 256 writes failed: {:?}",
+            errors.len(),
+            errors.first()
+        );
+    }
 
     #[test]
     fn new_opens_store() {
