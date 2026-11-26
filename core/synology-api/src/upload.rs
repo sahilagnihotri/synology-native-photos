@@ -49,7 +49,9 @@ use models::CoreError;
 /// `X-SYNO-TOKEN` header. Pass `None` to omit both (DSM will then reject a
 /// token-auth session with error 119, surfaced as a `CoreError`).
 ///
-/// Fails closed on any non-success envelope (`decode_write_success`).
+/// Fails closed on any non-success envelope (`decode_write_success`), and on
+/// a success envelope that flags the file as skipped (`data.blSkip`), since a
+/// skip stores nothing.
 pub async fn upload_file(
     transport: &Transport,
     sid: &str,
@@ -98,7 +100,24 @@ pub async fn upload_file(
         .text()
         .await
         .map_err(|e| crate::transport::network_error("reading upload response body failed", e))?;
-    decode_write_success(&body)
+    decode_write_success(&body)?;
+    if upload_was_skipped(&body) {
+        return Err(CoreError::UnexpectedResponse {
+            message: format!(
+                "upload skipped: {filename} already exists in {dest_folder_path}; nothing was stored"
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Whether a success envelope says DSM skipped the file (`data.blSkip`),
+/// which `overwrite=false` does for a name that already exists.
+fn upload_was_skipped(body: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("data")?.get("blSkip")?.as_bool())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -151,6 +170,67 @@ mod tests {
         .await
         .expect("upload should succeed");
         mock.assert_async().await;
+    }
+
+    /// R1-8: with `overwrite=false`, DSM skips a name that already exists and
+    /// still answers `success:true`, flagging it with `data.blSkip`. A skip
+    /// means nothing was stored, so it must be an error. The `data` shape is
+    /// the one community clients document; it is unverified on this NAS.
+    #[tokio::test]
+    async fn upload_skipped_for_an_existing_name_is_an_error() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"success":true,"data":{"blSkip":true,"file":"edited.jpg","pid":1,"progress":1}}"#,
+            )
+            .create_async()
+            .await;
+
+        let transport = Transport::new(&conn(&server.url())).expect("transport builds");
+        let result = upload_file(
+            &transport,
+            "SID",
+            Some("TK"),
+            "/home/Photos/Edited",
+            "edited.jpg",
+            b"x",
+        )
+        .await;
+        match result {
+            Err(CoreError::UnexpectedResponse { message }) => {
+                assert!(message.contains("edited.jpg"), "{message}");
+            }
+            other => panic!("a skipped upload stored nothing, got {other:?}"),
+        }
+    }
+
+    /// `blSkip:false` is an ordinary success.
+    #[tokio::test]
+    async fn upload_with_bl_skip_false_is_success() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true,"data":{"blSkip":false,"file":"edited.jpg"}}"#)
+            .create_async()
+            .await;
+        let transport = Transport::new(&conn(&server.url())).expect("transport builds");
+        upload_file(
+            &transport,
+            "SID",
+            Some("TK"),
+            "/home/Photos/Edited",
+            "edited.jpg",
+            b"x",
+        )
+        .await
+        .expect("not skipped");
     }
 
     #[tokio::test]
