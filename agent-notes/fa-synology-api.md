@@ -59,3 +59,21 @@ Scope: `core/synology-api/`. Findings from
 - passes after: whole crate 232 passed, 0 failed, 1 ignored
 - changed tests: none
 - left open: mapped to the existing `Auth` variant, so no new variant and no ruling needed. Nothing in core re-logs in with the saved device token on `Auth`; that is a photoscore or app follow up, not in my paths. Observation only: `map_error_code` also maps 400, 401, 403 and 404 to Auth and OtpRequired for File Station calls, where those numbers mean file operation errors. Not changed here.
+
+### R1-9: FIXED (string guard and thumbnail) and NEEDS RULING (delete is-a-file check)
+- commit: da7ffbe
+- test: `guard_refuses_ambiguous_or_non_file_paths`, `guard_still_accepts_ordinary_media_files`, `delete_refuses_a_bare_recycle_folder_without_any_write`, `restore_refuses_a_comma_joined_path_without_any_write` and `recycle_thumbnail_refuses_a_path_outside_the_bin` in `core/synology-api/tests/recycle_guard_mock.rs`. Every write in them is a localhost mockito mock with `expect(0)`.
+- failed before the fix: guard table `"/home/#recycle/Photos/iPhone"` accepted; bare folder delete reached the `expect(0)` Delete mock; comma restore `got Ok(())` (the move mock was reached, after I made every listing answer "empty" so only the guard stood in the way; my first version passed before the fix for the wrong reason, a 501 on an unmocked listing); thumbnail `got Ok([76, 73, 86, 69, ...])` for `/home/Photos/a.jpg`.
+- passes after: whole crate 237 passed, 0 failed, 3 ignored
+- changed tests: none. The existing accept cases (including `..hidden.jpg` and `dir.with.dots/`) still pass.
+- what the guard now refuses: control characters, invisible formatting and direction override characters, `\`, `,`, Unicode dot and slash lookalikes, and a last segment that is not `stem.ext` (non-empty stem, 1 to 10 ASCII alphanumeric extension). Non-ASCII names such as `Ålesund/IMG 1.HEIC` stay allowed. The `path` param was already sent as a JSON array.
+- NEEDS RULING: a folder NAMED like a file (`/home/#recycle/Photos/2016.09`) still passes the string guard and would reach Delete. I wrote `ensure_is_recycled_file`: before Delete it lists the parent folder (the verified `List` call) and refuses unless the entry is listed with `isdir:false`. It works, but it breaks `core_tests::empty_recently_deleted_permanently_deletes_each_path` in `core/photoscore/src/lib.rs` (`refusing to delete a.jpg: it is not listed in /home/#recycle/Photos`), whose fixture lists an empty recycle folder. That crate is not mine, so I did not commit the check. The two tests for it are committed as `#[ignore = "R1-9 NEEDS RULING..."]` (`delete_refuses_a_folder_whose_name_looks_like_a_file`, `delete_refuses_an_entry_it_cannot_find`); both failed before the check and passed with it. Options: (a) land the check and have FC change that photoscore fixture to list `a.jpg` once (mockito serves a mock short of its expected hits first, so `.expect(1)` on a "present" listing created before the "gone" listing works); also two synology-api fixtures need the same (`delete_recycle_item_sends_filestation_delete` and `delete_recycle_item_fails_closed_on_a_server_error`); (b) leave delete with the string guard only and accept the dotted folder case.
+- left open: whether DSM really splits a `path` on commas is unverified (no NAS contact).
+
+### R1-8: FIXED
+- commit: 7544243
+- test: `upload_skipped_for_an_existing_name_is_an_error` and `upload_with_bl_skip_false_is_success` in `core/synology-api/src/upload.rs` (unit tests, localhost mock)
+- failed before the fix: `a skipped upload stored nothing, got Ok(())`
+- passes after: whole crate 239 passed, 0 failed, 3 ignored
+- changed tests: none
+- left open: only `data.blSkip == true` is detected, the marker community clients document. The real skip response shape on this NAS is unverified, and any other per-file skip field DSM may use is not handled. Picking a unique name instead of failing (so a second edit of the same photo is kept) is a product choice left to photoscore or the app.
