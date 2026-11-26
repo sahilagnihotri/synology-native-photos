@@ -10,18 +10,19 @@ Baseline at `1c2c107` (2026-11-26, this Mac now on macOS 27.0 and Xcode 27.2):
 2 script tests). The Swift stage could not build until `a911257`; after it the
 Xcode test run passes with 498 tests, 0 failed, 0 skipped.
 
-Review workers are READ-ONLY on source. Each owns only its notes file.
+The review is finished (reports in `documentation/reviews/2026-11-26-full-repo-review/`).
+Fix workers below. One finding is one commit with a test that failed before the
+fix. Each worker appends to `agent-notes/<label>.md`. Queues are in order.
 
-| ID | Goal | Owned paths (write) | Reviews (read) | Status | Closes |
-|----|------|---------------------|----------------|--------|--------|
-| R1 | Review the DSM API client | `agent-notes/r1-synology-api.md` | `core/synology-api/` | in-progress | REV-2026-11 |
-| R2 | Review the FFI facade and sync engine | `agent-notes/r2-photoscore-sync.md` | `core/photoscore/`, `core/sync-engine/` | in-progress | REV-2026-11 |
-| R3 | Review the local index and models | `agent-notes/r3-persistence-models.md` | `core/persistence/`, `core/models/` | in-progress | REV-2026-11 |
-| R4 | Review app auth, session, caches, detail, trash, settings | `agent-notes/r4-app-auth-detail.md` | `platforms/macos/MySynologyPhotos/{Auth,Session,CoreBridge,Thumbnails,Detail,Trash,Settings,Reachability}/` and their tests | in-progress | REV-2026-11 |
-| R5 | Review app grid, root, map, discovery, search, filter, menu, sidebar | `agent-notes/r5-app-grid-root.md` | `platforms/macos/MySynologyPhotos/{Grid,Map,Discovery,Search,Filter,Menu,Sidebar,About}/`, `RootView.swift`, app entry, their tests | in-progress | REV-2026-11 |
-| R6 | Review scripts, Makefile, project.yml, bindings freshness, docs drift, repo hygiene | `agent-notes/r6-build-infra.md` | `scripts/{shared,macos,ci,tests}/`, `Makefile`, `platforms/macos/project.yml`, root docs | in-progress | REV-2026-11 |
-| W1 | Windows core: run the cross check, fix the scripts and any core breakage | `scripts/windows/`, `scripts/ci/ci.ps1`, `rust-toolchain.toml`, `.gitattributes` | whole core | in-progress (main): cross check passes, ps1 scripts not executed | WIN-1 |
+| ID | Goal and queue | Owned paths (write) | Status | Closes |
+|----|----------------|---------------------|--------|--------|
+| FA | DSM client fixes: R1-1, R1-2, R1-7, R1-10, R1-3, R1-6, R1-4, R1-9, R1-8, R1-5, R1-11 | `core/synology-api/`, `agent-notes/fa-synology-api.md` | in-progress | those IDs |
+| FB | Index and reconcile fixes: R3-1 (same as R2-1), R2-4 (same as R3-4), R3-3, R3-6, R3-7, R3-2, R3-5 | `core/persistence/`, `core/sync-engine/`, `core/models/`, `agent-notes/fb-store-sync.md` | in-progress | those IDs |
+| FC | Facade fixes: R2-2, R2-5, R2-6, R2-8, R2-10, R2-11, R2-12 | `core/photoscore/`, `agent-notes/fc-photoscore.md` | queued, starts when FA and FB are verified | those IDs |
+| FS | Mac app fixes: R4-1 (same as R5-9), R4-3, R5-1, R5-5, R5-2, R5-6, R4-5, R4-6, R4-2, R5-7, R4-11, R4-4, R5-4, R5-12, R4-12 | `platforms/macos/`, `agent-notes/fs-macos-app.md` | in-progress | those IDs |
+| FD | Scripts and docs: R6-1, R6-5, R6-6, R6-7, R6-8, R6-9, R6-11, R6-3, and the `ci.sh` swift FAIL path falsification | `scripts/shared/`, `scripts/macos/`, `scripts/ci/ci.sh`, `scripts/tests/`, `scripts/test.sh`, `scripts/README.md`, `Makefile`, `README.md`, `CLAUDE.md`, `documentation/` except `reviews/`, per-crate `Cargo.toml` dependency lines, `agent-notes/fd-scripts-docs.md` | in-progress | those IDs |
+| W1 | Windows: PowerShell scripts still unexecuted | `scripts/windows/`, `scripts/ci/ci.ps1` | blocked on the user (see WIN-1) | WIN-1 |
 
-Fix tasks are added below once the findings are synthesized and verified.
+`TODO.md`, `Fixed.md`, `tasks.md`, `.gitignore`, the root `Cargo.toml` and `Cargo.lock` belong to the orchestrator.
 
 Blocked on the user: DSM password change, `photosclient` user, a test album for album verification.

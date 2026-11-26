@@ -37,6 +37,10 @@ Completed work with commit hashes. Newest at top.
   directory (it also honours `TMPDIR`). Measured: exit 0 with SMOKE PASS, and a
   copy with the stale `Connection(...)` call exits 1 with the compiler error.
 
+- R6-2: `.gitignore` now covers the old layout leftovers (`/app/`,
+  `/PhotosCore.xcframework/`, `/dist/`) and `*.dmg`, so a `git add -A` on an old
+  checkout cannot push them. `git check-ignore` lists all three.
+
 ## Session 2026-10-16: platform layout, local CI, recycle errors, albums API
 
 - Platform layout (plan `documentation/plans/done/2026-10-16-platform-layout-restructure.md`):

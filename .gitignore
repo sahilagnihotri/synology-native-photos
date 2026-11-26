@@ -30,3 +30,9 @@ syno_session*
 .env
 .env.*
 *.mobileprovision
+
+# Leftovers of the pre-October layout on older checkouts. Never commit them.
+/app/
+/PhotosCore.xcframework/
+/dist/
+*.dmg
