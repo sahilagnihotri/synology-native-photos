@@ -174,6 +174,20 @@ fn filter_assets_sql(where_clause: &str) -> String {
 }
 
 impl Store {
+    /// Commits the open transaction. A COMMIT can fail (a deferred constraint,
+    /// SQLITE_BUSY, a full disk) and SQLite then leaves the transaction open,
+    /// so every later `BEGIN` on this connection would fail too. Roll back on
+    /// failure so the connection is usable again.
+    fn commit_or_rollback(&self) -> Result<(), CoreError> {
+        if let Err(e) = self.conn.execute_batch("COMMIT") {
+            if !self.conn.is_autocommit() {
+                let _ = self.conn.execute_batch("ROLLBACK");
+            }
+            return Err(map_sql(e));
+        }
+        Ok(())
+    }
+
     /// Inserts a new asset row or updates it in place, keyed on `(space, server_id)`.
     /// Re-crawling the same server item never duplicates a row.
     pub fn upsert_asset(&self, asset: &Asset) -> Result<(), CoreError> {
@@ -265,7 +279,7 @@ impl Store {
                 return Err(e);
             }
         }
-        self.conn.execute_batch("COMMIT").map_err(map_sql)?;
+        self.commit_or_rollback()?;
         Ok(())
     }
 
@@ -300,7 +314,7 @@ impl Store {
                 return Err(map_sql(e));
             }
         };
-        self.conn.execute_batch("COMMIT").map_err(map_sql)?;
+        self.commit_or_rollback()?;
         Ok(deleted as u64)
     }
 
@@ -530,7 +544,7 @@ impl Store {
                 return Err(map_sql(e));
             }
         };
-        self.conn.execute_batch("COMMIT").map_err(map_sql)?;
+        self.commit_or_rollback()?;
         Ok(deleted as u64)
     }
 
@@ -709,6 +723,77 @@ mod tests {
             !filter_plan.contains("TEMP B-TREE") && filter_plan.contains("idx_assets_space_taken"),
             "unfiltered filter_assets plan must use the taken index without a sort:\n{filter_plan}"
         );
+    }
+
+    /// Makes the next COMMIT on `store` fail: a trigger on `event` writes a
+    /// row that violates a DEFERRED foreign key, which SQLite only checks at
+    /// COMMIT. A failed COMMIT leaves the transaction open unless the caller
+    /// rolls back.
+    fn poison_next_commit(store: &Store, event: &str) {
+        store
+            .conn
+            .execute_batch(&format!(
+                "PRAGMA foreign_keys = ON;
+                 CREATE TABLE fk_parent (id INTEGER PRIMARY KEY);
+                 CREATE TABLE fk_child (
+                     pid INTEGER REFERENCES fk_parent(id) DEFERRABLE INITIALLY DEFERRED
+                 );
+                 CREATE TRIGGER poison AFTER {event} ON assets
+                 BEGIN INSERT INTO fk_child (pid) VALUES (999); END;"
+            ))
+            .unwrap();
+    }
+
+    fn assert_recovers_after_failed_commit(store: &Store, what: &str) {
+        assert!(
+            store.conn.is_autocommit(),
+            "{what}: a failed COMMIT must not leave the transaction open"
+        );
+        store.conn.execute_batch("DROP TRIGGER poison").unwrap();
+        store
+            .upsert_assets(&[asset(Space::Personal, 77, Some(7), Some(1))])
+            .unwrap_or_else(|e| panic!("{what}: a later batch must succeed, got {e:?}"));
+    }
+
+    #[test]
+    fn failed_commit_in_upsert_assets_rolls_back_and_frees_the_connection() {
+        let store = Store::open_in_memory().unwrap();
+        poison_next_commit(&store, "INSERT");
+        assert!(store
+            .upsert_assets(&[asset(Space::Personal, 1, Some(1), Some(1))])
+            .is_err());
+        assert_recovers_after_failed_commit(&store, "upsert_assets");
+        let ids: Vec<i64> = store
+            .fetch_assets(Space::Personal, 0, 10)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(ids, vec![77], "the failed batch must have been rolled back");
+    }
+
+    #[test]
+    fn failed_commit_in_delete_assets_not_in_rolls_back_and_frees_the_connection() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .upsert_assets(&[asset(Space::Personal, 1, Some(1), Some(1))])
+            .unwrap();
+        poison_next_commit(&store, "DELETE");
+        assert!(store.delete_assets_not_in(Space::Personal, &[2]).is_err());
+        assert_recovers_after_failed_commit(&store, "delete_assets_not_in");
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 2);
+    }
+
+    #[test]
+    fn failed_commit_in_delete_assets_rolls_back_and_frees_the_connection() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .upsert_assets(&[asset(Space::Personal, 1, Some(1), Some(1))])
+            .unwrap();
+        poison_next_commit(&store, "DELETE");
+        assert!(store.delete_assets(Space::Personal, &[1]).is_err());
+        assert_recovers_after_failed_commit(&store, "delete_assets");
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 2);
     }
 
     #[test]
