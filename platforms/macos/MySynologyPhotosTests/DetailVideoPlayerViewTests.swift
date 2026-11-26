@@ -267,6 +267,65 @@ struct DetailImageLoaderTests {
         #expect(fullCalls == 1)
     }
 
+    private func photo(id: Int64) -> Asset {
+        Asset(id: id, unitId: id, cacheKey: "k\(id)", filename: "IMG_\(id).jpg", mediaKind: .photo,
+              takenAt: nil, addedAt: nil, width: nil, height: nil, fileSize: nil,
+              space: .personal, serverVersion: nil)
+    }
+
+    /// A load the test can hold open and release by hand.
+    @MainActor private final class Gate {
+        var continuation: CheckedContinuation<NSImage?, Never>?
+        func wait() async -> NSImage? {
+            await withCheckedContinuation { continuation = $0 }
+        }
+        func waitUntilParked() async {
+            while continuation == nil { await Task.yield() }
+        }
+        func release(_ image: NSImage?) {
+            continuation?.resume(returning: image)
+            continuation = nil
+        }
+    }
+
+    /// R4-2: a slow load for photo A that lands after photo B has loaded must
+    /// not replace B's image.
+    @Test func aLateLoadForThePreviousPhotoDoesNotOverwriteTheCurrentOne() async {
+        let imageA = NSImage(size: NSSize(width: 1, height: 1))
+        let imageB = NSImage(size: NSSize(width: 2, height: 2))
+        let gate = Gate()
+        let loader = DetailImageLoader(loadDisplay: { asset, _ in
+            asset.id == 1 ? await gate.wait() : imageB
+        })
+
+        let slowA = Task { await loader.load(asset: photo(id: 1), space: .personal) }
+        await gate.waitUntilParked()
+        await loader.load(asset: photo(id: 2), space: .personal)
+        #expect(loader.state == .loaded(imageB))
+
+        gate.release(imageA)
+        await slowA.value
+        #expect(loader.state == .loaded(imageB), "the late result for photo 1 must be discarded")
+    }
+
+    /// R4-2: same for the full resolution decode started for the previous photo.
+    @Test func aLateFullResolutionForThePreviousPhotoIsDiscarded() async {
+        let fullA = NSImage(size: NSSize(width: 9, height: 9))
+        let gate = Gate()
+        let loader = DetailImageLoader(
+            loadDisplay: { _, _ in NSImage(size: NSSize(width: 2, height: 2)) },
+            loadFull: { asset, _ in asset.id == 1 ? await gate.wait() : nil })
+
+        await loader.load(asset: photo(id: 1), space: .personal)
+        let slowFull = Task { await loader.loadFullResolutionIfNeeded(asset: photo(id: 1), space: .personal) }
+        await gate.waitUntilParked()
+        await loader.load(asset: photo(id: 2), space: .personal)
+
+        gate.release(fullA)
+        await slowFull.value
+        #expect(loader.fullResolution == nil, "photo 1's full decode must not appear under photo 2")
+    }
+
     @Test func displayMaxPixelIsBoundedAndScaledToTheScreen() {
         // A retina 1440-point screen -> 2880 native px, within bounds.
         #expect(DetailImageLoader.displayMaxPixel(screenMaxDimension: 1440, scale: 2) == 2880)

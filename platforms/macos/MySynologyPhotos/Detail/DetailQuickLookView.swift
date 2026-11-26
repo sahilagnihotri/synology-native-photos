@@ -231,19 +231,33 @@ final class DetailImageLoader {
     /// cache miss, decode) is inside `loadDisplay`, which returns the already
     /// downsampled image; a `nil` return means the bytes could not be decoded.
     func load(asset: Asset, space: Space) async {
+        // One loader is reused across paging and the awaited work cannot be
+        // cancelled, so a slow load for an earlier photo can finish after a
+        // newer one. Only the latest load may publish.
+        loadGeneration += 1
+        let generation = loadGeneration
+        currentAssetId = asset.id
         fullResolution = nil
         placeholder = placeholderFor(asset)
         state = .loading
         do {
-            if let image = try await loadDisplay(asset, space) {
+            let image = try await loadDisplay(asset, space)
+            guard generation == loadGeneration else { return }
+            if let image {
                 state = .loaded(image)
             } else {
                 state = .failed("This file could not be opened as an image.")
             }
         } catch {
+            guard generation == loadGeneration else { return }
             state = .failed(Self.message(for: error))
         }
     }
+
+    /// Bumped by every `load`; a result is published only if it is still the
+    /// latest. `currentAssetId` is the photo that latest load is for.
+    private var loadGeneration = 0
+    private var currentAssetId: Int64?
 
     /// Loads the near-full-resolution decode once (idempotent), for when the
     /// user magnifies past fit. Served from cache on a disk/RAM hit, so it is
@@ -252,7 +266,9 @@ final class DetailImageLoader {
     /// zoomed), which beats replacing a working view with an error.
     func loadFullResolutionIfNeeded(asset: Asset, space: Space) async {
         guard fullResolution == nil else { return }
-        if let image = try? await loadFull(asset, space) {
+        let generation = loadGeneration
+        if let image = try? await loadFull(asset, space),
+           generation == loadGeneration, currentAssetId == asset.id {
             fullResolution = image
         }
     }
