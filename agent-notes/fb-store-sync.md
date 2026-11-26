@@ -50,3 +50,11 @@
 - passes after: plan uses `idx_assets_space_taken` with no TEMP B-TREE; `cargo test -p persistence`: `test result: ok. 67 passed; 0 failed; 0 ignored`. `null_taken_at_sorts_last` and the filter equality tests still pass, so NULL rows still sort last.
 - changed tests: none
 - left open: no index or migration was needed, the existing index serves the order once the term is gone. A faceted `filter_assets` (media kind, rating, date range) was not plan tested and may still sort; `date_histogram` still uses temp b-trees for GROUP BY and ORDER BY on the computed day (needs an expression index; not done, the reviewer measured about 60 ms at 100k rows).
+
+### R3-5: FIXED
+- commit: b0fb201
+- test: `failed_commit_in_upsert_assets_rolls_back_and_frees_the_connection`, `failed_commit_in_delete_assets_not_in_rolls_back_and_frees_the_connection`, `failed_commit_in_delete_assets_rolls_back_and_frees_the_connection` in core/persistence/src/assets.rs. The failing COMMIT is injected with a trigger that writes a row violating a DEFERRABLE INITIALLY DEFERRED foreign key, which SQLite only checks at COMMIT (in-memory DB, no new dependency). Each test then asserts `is_autocommit()`, drops the trigger and checks that a later `upsert_assets` succeeds and that the failed batch left no rows.
+- failed before the fix: `upsert_assets: a failed COMMIT must not leave the transaction open` (and the same line for `delete_assets_not_in` and `delete_assets`)
+- passes after: `cargo test -p persistence`: `test result: ok. 70 passed; 0 failed; 0 ignored`
+- changed tests: none
+- left open: the migration COMMIT in `schema::run_migrations` is not changed. If it fails, the open fails and the connection is dropped, and dropping it rolls back the transaction, so nothing is left stranded.
