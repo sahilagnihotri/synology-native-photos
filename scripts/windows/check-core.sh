@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Cross check the shared Rust core for Windows from a Mac:
-# `cargo xwin check --workspace --all-targets --target x86_64-pc-windows-msvc`.
+# `cargo xwin check --workspace --all-targets --target x86_64-pc-windows-msvc`,
+# then `cargo xwin clippy` with -D warnings for the same target.
 # Catches Windows only breakage in the core (paths, cfg(windows) code, crates
 # that do not build for MSVC) before it reaches the Windows machine. It only
 # type checks; it does not link or run anything.
@@ -13,8 +14,8 @@
 #   scripts/windows/check-core.sh
 #
 # Exit codes:
-#   0  the core type checks for Windows
-#   1  the check ran and failed
+#   0  the core type checks for Windows and clippy is clean
+#   1  the check or clippy ran and failed
 #   3  cargo-xwin is not installed
 #   4  the x86_64-pc-windows-msvc rust-std is not installed for the pinned toolchain
 
@@ -48,5 +49,14 @@ if cargo xwin check --workspace --all-targets --target "$TARGET"; then
   ok "core type checks for $TARGET"
 else
   err "core does not build for $TARGET"
+  exit 1
+fi
+
+# The Windows gate (scripts/ci/ci.ps1) runs clippy with -D warnings, and a lint
+# can fire only in cfg(windows) code, so run it for the target here as well.
+if cargo xwin clippy --workspace --all-targets --target "$TARGET" -- -D warnings; then
+  ok "clippy is clean for $TARGET"
+else
+  err "clippy fails for $TARGET"
   exit 1
 fi
