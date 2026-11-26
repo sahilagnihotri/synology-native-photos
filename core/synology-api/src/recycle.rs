@@ -393,8 +393,9 @@ pub(crate) fn original_parent_folder(recycle_path: &str) -> Result<String, CoreE
 /// Refuses when in doubt: control and invisible formatting characters,
 /// backslashes, commas (a File Station `path` may be read as a comma list),
 /// Unicode dot and slash lookalikes, and a last segment without a
-/// `name.ext` shape, so a bare recycle folder never reaches Delete. A folder
-/// that is NAMED like a file still passes; see the R1-9 notes.
+/// `name.ext` shape, so a bare recycle folder never reaches Delete. Delete
+/// also confirms with File Station that the entry is a file
+/// (`ensure_is_recycled_file`), since a folder can be named like a file.
 pub fn ensure_recycle_photos_path(path: &str) -> Result<(), CoreError> {
     let refuse = || CoreError::UnexpectedResponse {
         message: format!("refusing a path outside {RECYCLE_PHOTOS_ROOT}: {path:?}"),
@@ -437,6 +438,32 @@ fn is_refused_path_char(c: char) -> bool {
         '\u{FEFF}',
     ];
     c.is_control() || c == '\\' || c == ',' || LOOKALIKES.contains(&c)
+}
+
+/// Confirm with File Station that `recycle_path` is a FILE in its recycle
+/// folder before an unrecoverable delete. A folder (whatever its name looks
+/// like), a missing entry or an unreadable listing all refuse.
+async fn ensure_is_recycled_file(
+    transport: &Transport,
+    sid: &str,
+    syno_token: Option<&str>,
+    recycle_path: &str,
+) -> Result<(), CoreError> {
+    let (folder, name) = split_parent(recycle_path)?;
+    let entries = match list_folder(transport, sid, syno_token, folder).await {
+        Ok(entries) => entries,
+        Err(ListError::Dsm(code)) => return Err(map_error_code(code)),
+        Err(ListError::Core(err)) => return Err(err),
+    };
+    match entries.iter().find(|e| e.name == name) {
+        Some(entry) if !entry.is_dir => Ok(()),
+        Some(_) => Err(CoreError::UnexpectedResponse {
+            message: format!("refusing to delete {name}: it is a folder, not a file"),
+        }),
+        None => Err(CoreError::UnexpectedResponse {
+            message: format!("refusing to delete {name}: it is not listed in {folder}"),
+        }),
+    }
 }
 
 /// JSON-encode a single path as the one-element array string File Station
@@ -720,6 +747,7 @@ pub async fn delete_recycle_item_with_polling(
     polling: TaskPolling,
 ) -> Result<(), CoreError> {
     ensure_recycle_photos_path(recycle_path)?;
+    ensure_is_recycled_file(transport, sid, syno_token, recycle_path).await?;
     let path_array = json_path_array(recycle_path)?;
     let form: Vec<(&str, &str)> = vec![
         ("api", "SYNO.FileStation.Delete"),

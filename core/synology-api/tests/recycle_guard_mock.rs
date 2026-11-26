@@ -119,7 +119,6 @@ async fn delete_refuses_a_bare_recycle_folder_without_any_write() {
 /// A folder whose name looks like a file name passes the string guard, so
 /// delete must confirm with File Station that the entry is a file.
 #[tokio::test]
-#[ignore = "R1-9 NEEDS RULING: delete has no is-a-file check yet"]
 async fn delete_refuses_a_folder_whose_name_looks_like_a_file() {
     let mut server = mockito::Server::new_async().await;
     let _parent = list_parent(
@@ -142,7 +141,6 @@ async fn delete_refuses_a_folder_whose_name_looks_like_a_file() {
 
 /// An entry File Station does not list is not provably a file. Refuse.
 #[tokio::test]
-#[ignore = "R1-9 NEEDS RULING: delete has no is-a-file check yet"]
 async fn delete_refuses_an_entry_it_cannot_find() {
     let mut server = mockito::Server::new_async().await;
     let _parent = list_parent(

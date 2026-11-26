@@ -481,9 +481,32 @@ async fn restore_recycle_item_refuses_a_non_recycle_path_without_any_network_cal
 
 // --- delete_recycle_item ------------------------------------------------
 
+/// Answer exactly ONE recycle folder listing with `name` present as a file:
+/// the is-a-file check that delete runs before it writes. Create it before
+/// any other listing mock for the folder, so later listings (the poll that
+/// confirms the file is gone) fall through to those.
+async fn listed_once_before_delete(server: &mut mockito::ServerGuard, name: &str) -> mockito::Mock {
+    let folder = "/home/#recycle/Photos";
+    server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+            Matcher::UrlEncoded("folder_path".into(), folder.into()),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(format!(
+            r#"{{"success":true,"data":{{"files":[{{"isdir":false,"name":"{name}","path":"{folder}/{name}"}}]}}}}"#
+        ))
+        .expect(1)
+        .create_async()
+        .await
+}
+
 #[tokio::test]
 async fn delete_recycle_item_sends_filestation_delete() {
     let mut server = mockito::Server::new_async().await;
+    let _pre = listed_once_before_delete(&mut server, "a.jpg").await;
     let _src = mock_folder_files(&mut server, "/home/#recycle/Photos", &["b.jpg"]).await;
     let _del = server
         .mock("POST", "/webapi/entry.cgi")
@@ -589,6 +612,7 @@ async fn restore_recycle_item_refuses_a_traversal_out_of_the_recycle_bin() {
 #[tokio::test]
 async fn delete_recycle_item_fails_closed_on_a_server_error() {
     let mut server = mockito::Server::new_async().await;
+    let _pre = listed_once_before_delete(&mut server, "a.jpg").await;
     let _del = server
         .mock("POST", "/webapi/entry.cgi")
         .match_body(Matcher::Regex("SYNO.FileStation.Delete".into()))
@@ -1060,6 +1084,7 @@ async fn restore_timeout_after_failed_polls_names_the_poll_error() {
 #[tokio::test]
 async fn delete_timeout_after_failed_polls_names_the_poll_error() {
     let mut server = mockito::Server::new_async().await;
+    let _pre = listed_once_before_delete(&mut server, "a.jpg").await;
     failing_recycle_listing(&mut server, 503, "Service Unavailable").await;
     let _del = server
         .mock("POST", "/webapi/entry.cgi")
