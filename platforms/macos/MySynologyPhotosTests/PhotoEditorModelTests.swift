@@ -103,6 +103,39 @@ struct PhotoEditorModelTests {
         }
     }
 
+    /// R4-11: a failed Save while an image is loaded must expose a message the
+    /// view can show (the canvas only showed one for a failed LOAD), and
+    /// dismissing it returns to the editable state.
+    @Test func aFailedSaveExposesAUserVisibleMessageUntilDismissed() async {
+        let (model, fake) = makeModel()
+        fake.saveEditedPhotoResult = .failure(.Network(message: "dropped"))
+        model.setSourceImage(makeImage())
+        model.rotateRight()
+        #expect(model.saveFailureMessage == nil)
+
+        await model.save { }
+
+        #expect(model.saveFailureMessage?.contains("dropped") == true)
+        model.dismissSaveFailure()
+        #expect(model.saveFailureMessage == nil)
+        #expect(model.state == .ready, "the user can retry after dismissing")
+    }
+
+    /// R4-12: the edited name carries the date as well as the time, so two
+    /// edits of the same photo on different days cannot collide.
+    @Test func editedFilenameIncludesTheDate() {
+        var parts = DateComponents()
+        parts.year = 2026; parts.month = 11; parts.day = 26
+        parts.hour = 10; parts.minute = 10; parts.second = 10
+        let day1 = Calendar.current.date(from: parts)!
+        parts.day = 27
+        let day2 = Calendar.current.date(from: parts)!
+        let a = PhotoEditorModel.editedFilename(originalFilename: "IMG_1.heic", date: day1)
+        let b = PhotoEditorModel.editedFilename(originalFilename: "IMG_1.heic", date: day2)
+        #expect(a == "IMG_1-edited-20261126-101010.jpg")
+        #expect(a != b)
+    }
+
     @Test func hasEditsIsFalseUntilRotatedOrCropped() {
         let (model, _) = makeModel()
         model.setSourceImage(makeImage())
@@ -119,10 +152,14 @@ struct PhotoEditorModelTests {
         let name = PhotoEditorModel.editedFilename(originalFilename: "IMG_1234.JPG", date: Date(timeIntervalSince1970: 0))
         #expect(name.hasPrefix("IMG_1234-edited-"))
         #expect(name.hasSuffix(".jpg"))
-        // The stamp between the prefix and ".jpg" is exactly six digits.
+        // The stamp between the prefix and ".jpg" is yyyyMMdd-HHmmss: date and
+        // time, fifteen characters, digits around one hyphen (R4-12 changed this
+        // from a bare six digit time of day).
         let stamp = String(name.dropFirst("IMG_1234-edited-".count).dropLast(".jpg".count))
-        #expect(stamp.count == 6)
-        let allDigits = stamp.allSatisfy { $0.isNumber }
+        #expect(stamp.count == 15)
+        let digits = stamp.filter { $0 != "-" }
+        #expect(digits.count == 14)
+        let allDigits = digits.allSatisfy { $0.isNumber }
         #expect(allDigits)
         // An empty original name falls back to a safe placeholder base.
         let fallback = PhotoEditorModel.editedFilename(originalFilename: "", date: Date(timeIntervalSince1970: 0))

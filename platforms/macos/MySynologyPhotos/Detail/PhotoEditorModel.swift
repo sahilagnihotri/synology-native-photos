@@ -145,8 +145,20 @@ final class PhotoEditorModel {
         }
     }
 
+    /// The message to show after a failed Save while an image is still loaded.
+    /// A failed LOAD (no source image) is shown by the canvas instead.
+    var saveFailureMessage: String? {
+        if case .failed(let message) = state, sourceImage != nil { return message }
+        return nil
+    }
+
+    /// The user acknowledged a failed Save; back to the editable state.
+    func dismissSaveFailure() {
+        if saveFailureMessage != nil { state = .ready }
+    }
+
     /// Pure filename builder (static so it is directly unit-testable): derives
-    /// `<originalBasename>-edited-<HHmmss>.jpg` from the original filename and a
+    /// `<originalBasename>-edited-<yyyyMMdd-HHmmss>.jpg` from the original filename and a
     /// timestamp. The base is sanitized to a single safe path component so a
     /// hostile NAS-supplied filename can never smuggle a path separator into
     /// the upload destination. The output always ends in `.jpg` because the
@@ -157,7 +169,7 @@ final class PhotoEditorModel {
         let safeBase = sanitize(base)
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HHmmss"
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
         let stamp = formatter.string(from: date)
         return "\(safeBase)-edited-\(stamp).jpg"
     }

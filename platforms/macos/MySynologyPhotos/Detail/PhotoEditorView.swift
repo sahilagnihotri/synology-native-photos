@@ -75,6 +75,17 @@ struct PhotoEditorView: View {
         .onChange(of: model.state) { _, newValue in
             if newValue == .saved { onClose() }
         }
+        // A failed Save used to show nothing: surface it and let the user retry.
+        .alert(
+            "Could Not Save",
+            isPresented: Binding(
+                get: { model.saveFailureMessage != nil },
+                set: { if !$0 { model.dismissSaveFailure() } })
+        ) {
+            Button("OK") { model.dismissSaveFailure() }
+        } message: {
+            Text(model.saveFailureMessage ?? "")
+        }
     }
 
     // MARK: - Header
