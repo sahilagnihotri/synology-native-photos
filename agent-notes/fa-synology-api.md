@@ -101,3 +101,11 @@ Scope: `core/synology-api/`. Findings from
 - passes after: gate fmt=0 clippy=0 test=0 check=0, cargo test -p synology-api passed=245 failed=0 ignored=3
 - changed tests: none. New public API: `synology_api::list_items_page(transport, sid, space, offset, limit, version, syno_token) -> Result<ItemPage, CoreError>` and `pub struct ItemPage { assets: Vec<Asset>, raw_count: u32, skipped_ids: Vec<i64> }`. Plain Rust, not a UniFFI type. The per element decode moved into a private `asset_from_value` shared with `decode_item_list`, with no behaviour change.
 - left open: core/photoscore ApiPageSource must switch to it (photoscore worker). Gate started at load 63, above the brief's 40 limit.
+
+### R1-9b: FIXED (ruling: option a, is-a-file check before permanent delete)
+- commit: 8d60373
+- test: delete_refuses_a_folder_whose_name_looks_like_a_file, delete_refuses_an_entry_it_cannot_find (core/synology-api/tests/recycle_guard_mock.rs, `#[ignore]` removed)
+- failed before the fix: with the `ensure_is_recycled_file` call removed, `delete_refuses_an_entry_it_cannot_find` panicked at recycle_guard_mock.rs:157:5 and `delete_refuses_a_folder_whose_name_looks_like_a_file` panicked in mockito mock.rs:633 (the expect(0) Delete trap was hit)
+- passes after: gate fmt=0 clippy=0 test=0 check=0, cargo test -p synology-api passed=247 failed=0 ignored=1
+- changed tests: three delete fixtures in recycle_mock.rs gained one line each, `listed_once_before_delete(&mut server, "a.jpg")` (a FileStation.List mock showing a.jpg as a file with expect(1), created before the other listing mocks): delete_recycle_item_sends_filestation_delete, delete_recycle_item_fails_closed_on_a_server_error, delete_timeout_after_failed_polls_names_the_poll_error (the third was added in R1-11 after the first attempt). Assertions unchanged.
+- left open: photoscore core_tests::empty_recently_deleted_permanently_deletes_each_path needs the same expect(1) listing mock before its empty listing mock; it was uncommitted in the tree when I looked and is the facade worker's.
