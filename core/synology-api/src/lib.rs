@@ -20,8 +20,8 @@ pub mod upload;
 pub use album_write::{add_items, create_album, delete_album, remove_items};
 pub use auth::{login, logout};
 pub use browse::{
-    filter_items, list_album_items, list_albums, list_items, list_items_filtered, search,
-    search_filtered, CollectionFilter,
+    filter_items, list_album_items, list_albums, list_items, list_items_filtered, list_items_page,
+    search, search_filtered, CollectionFilter, ItemPage,
 };
 pub use delete_item::permanent_delete;
 pub use discovery::{list_people, list_places, list_subjects, list_tags};

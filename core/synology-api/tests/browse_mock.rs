@@ -1,6 +1,8 @@
 use mockito::Matcher;
 use models::{Connection, MediaKind, Space};
-use synology_api::browse::{list_albums, list_items, list_items_filtered, CollectionFilter};
+use synology_api::browse::{
+    list_albums, list_items, list_items_filtered, list_items_page, CollectionFilter,
+};
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
@@ -677,4 +679,90 @@ async fn list_items_page_with_an_undecodable_element_fails_naming_it() {
             other => panic!("a full page must not come back short, got {other:?}"),
         }
     }
+}
+
+fn three_item_page(middle: &str) -> String {
+    format!(
+        r#"{{"success":true,"data":{{"list":[
+        {{"id":901,"type":"photo","additional":{{"thumbnail":{{"cache_key":"CK901","unit_id":1}}}}}},
+        {middle},
+        {{"id":903,"type":"photo","additional":{{"thumbnail":{{"cache_key":"CK903","unit_id":3}}}}}}
+    ]}}}}"#
+    )
+}
+
+async fn serve_page(server: &mut mockito::ServerGuard, body: String) -> mockito::Mock {
+    server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("api".into(), "SYNO.Foto.Browse.Item".into()),
+            Matcher::UrlEncoded("method".into(), "list".into()),
+            Matcher::UrlEncoded("offset".into(), "0".into()),
+            Matcher::UrlEncoded("limit".into(), "3".into()),
+        ]))
+        .with_status(200)
+        .with_body(body)
+        .create_async()
+        .await
+}
+
+#[tokio::test]
+async fn list_items_page_reports_raw_count_and_skipped_id_for_an_item_without_cache_key() {
+    let mut server = mockito::Server::new_async().await;
+    let m = serve_page(
+        &mut server,
+        three_item_page(r#"{"id":902,"filename":"pending.jpg","type":"photo"}"#),
+    )
+    .await;
+    let t = transport_for(&server);
+    let page = list_items_page(&t, "SID", Space::Personal, 0, 3, 1, None)
+        .await
+        .expect("a page with one unusable item still decodes");
+    m.assert_async().await;
+    assert_eq!(
+        page.raw_count, 3,
+        "raw count is the page size the server sent"
+    );
+    let ids: Vec<i64> = page.assets.iter().map(|a| a.id).collect();
+    assert_eq!(ids, vec![901, 903], "the usable items still decode");
+    assert_eq!(
+        page.skipped_ids,
+        vec![902],
+        "the unusable item is kept by id"
+    );
+}
+
+#[tokio::test]
+async fn list_items_page_fails_naming_the_index_of_an_element_without_an_id() {
+    for bad in [
+        r#"{"identifier":"not-an-id","additional":{"thumbnail":{"cache_key":"CKX"}}}"#,
+        r#"{"id":"902","additional":{"thumbnail":{"cache_key":"CKX"}}}"#,
+    ] {
+        let mut server = mockito::Server::new_async().await;
+        let _m = serve_page(&mut server, three_item_page(bad)).await;
+        let t = transport_for(&server);
+        match list_items_page(&t, "SID", Space::Personal, 0, 3, 1, None).await {
+            Err(models::CoreError::Decode { message }) => assert!(
+                message.contains("element 1"),
+                "should name the element: {message}"
+            ),
+            other => panic!("an element without an id must fail the page, got {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn list_items_page_fails_when_list_is_not_an_array() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = serve_page(
+        &mut server,
+        r#"{"success":true,"data":{"list":{"id":901}}}"#.to_string(),
+    )
+    .await;
+    let t = transport_for(&server);
+    let result = list_items_page(&t, "SID", Space::Personal, 0, 3, 1, None).await;
+    assert!(
+        matches!(result, Err(models::CoreError::Decode { .. })),
+        "a non-array list must be a decode error, got {result:?}"
+    );
 }

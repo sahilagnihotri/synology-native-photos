@@ -567,6 +567,96 @@ fn ensure_every_item_usable(body: &str, kind_label: &str) -> Result<(), CoreErro
     Ok(())
 }
 
+/// One page of the unfiltered item list, as returned by `list_items_page`.
+///
+/// Contract: every element the server returned is accounted for exactly
+/// once, either in `assets` or in `skipped_ids`, so
+/// `assets.len() + skipped_ids.len() == raw_count`. An element whose `id`
+/// cannot be read never reaches this struct: the whole page is an error.
+#[derive(Debug, Clone)]
+pub struct ItemPage {
+    /// The elements that decoded into a usable `Asset` (they have an `id`
+    /// and a non-empty `cache_key`), in server order.
+    pub assets: Vec<Asset>,
+    /// The RAW number of elements the server returned in this page, counted
+    /// before any decoding. A caller paging to exhaustion compares this, not
+    /// `assets.len()`, with the requested limit: a page whose `raw_count`
+    /// equals the limit is full even when some of its items were unusable,
+    /// and the next offset is `offset + raw_count`.
+    pub raw_count: u32,
+    /// The ids of elements whose `id` was readable but that could not be
+    /// fully decoded (for example an item still missing its `cache_key`
+    /// while its thumbnail is being generated). These items still exist on
+    /// the server, so a reconcile must count them as present and never
+    /// delete them locally.
+    pub skipped_ids: Vec<i64>,
+}
+
+/// `SYNO.Foto.Browse.Item` / `SYNO.FotoTeam.Browse.Item`, `method=list`: the
+/// same request as `list_items`, decoded for a crawl that pages to
+/// exhaustion. Instead of failing the page (as `list_items` does) or silently
+/// dropping elements, it returns an `ItemPage` that reports the raw element
+/// count and the ids of the unusable elements alongside the decoded assets.
+///
+/// Errors: everything `list_items` returns for the request and envelope, plus
+/// `Decode` naming the element index when an element has no readable integer
+/// `id`, and `Decode` when `list` is not an array.
+pub async fn list_items_page(
+    transport: &Transport,
+    sid: &str,
+    space: Space,
+    offset: u32,
+    limit: u32,
+    version: u32,
+    syno_token: Option<&str>,
+) -> Result<ItemPage, CoreError> {
+    let query: Vec<(&str, String)> = vec![
+        ("api", browse_item_api(space).to_string()),
+        ("version", version.to_string()),
+        ("method", "list".to_string()),
+        ("offset", offset.to_string()),
+        ("limit", limit.to_string()),
+        ("additional", ITEM_ADDITIONAL.to_string()),
+        ("_sid", sid.to_string()),
+    ];
+    let body = get_body(transport, &query, syno_token).await?;
+    decode_item_page(&body, space, "browse item")
+}
+
+/// Decode a browse item list body into an `ItemPage` (see its contract).
+fn decode_item_page(body: &str, space: Space, kind_label: &str) -> Result<ItemPage, CoreError> {
+    let parsed: ItemList = decode_envelope(body)?;
+    let total = parsed.list.len();
+    let mut assets = Vec::with_capacity(total);
+    let mut skipped_ids = Vec::new();
+    for (index, raw) in parsed.list.iter().enumerate() {
+        let Some(id) = raw.get("id").and_then(serde_json::Value::as_i64) else {
+            return Err(CoreError::Decode {
+                message: format!(
+                    "{kind_label} list: element {index} of {total} has no readable id"
+                ),
+            });
+        };
+        match asset_from_value(raw, space, kind_label) {
+            Ok(asset) => assets.push(asset),
+            Err(_) => skipped_ids.push(id),
+        }
+    }
+    if !skipped_ids.is_empty() {
+        tracing::warn!(
+            "{kind_label} list: {} of {} elements unusable, kept as present: {:?}",
+            skipped_ids.len(),
+            total,
+            skipped_ids
+        );
+    }
+    Ok(ItemPage {
+        assets,
+        raw_count: u32::try_from(total).unwrap_or(u32::MAX),
+        skipped_ids,
+    })
+}
+
 /// `SYNO.Foto.Browse.Item` / `SYNO.FotoTeam.Browse.Item`, `method=list` with
 /// `album_id`: one page of the items inside the album `album_id`.
 ///
@@ -684,66 +774,13 @@ fn decode_item_list(body: &str, space: Space, kind_label: &str) -> Result<Vec<As
     let assets: Vec<Asset> = parsed
         .list
         .iter()
-        .filter_map(|raw| {
-            let item: RawItem = decode_one(raw, kind_label)?;
-            let additional = item.additional.unwrap_or_default();
-            let thumb = additional.thumbnail;
-            let cache_key = thumb.as_ref().map(|t| t.cache_key.clone()).unwrap_or_default();
-            if cache_key.is_empty() {
-                tracing::warn!(
-                    "skipping {kind_label} (id={}): missing cache_key, not usable for thumbnails/downloads",
-                    item.id
-                );
+        .filter_map(|raw| match asset_from_value(raw, space, kind_label) {
+            Ok(asset) => Some(asset),
+            Err(ItemSkip::NoCacheKey) => {
                 skipped += 1;
-                return None;
+                None
             }
-            // unit_id (not the item id) is what the thumbnail/download
-            // endpoints actually key on, verified against the real NAS. An
-            // item that lacks it is still imported (so the grid count stays
-            // correct) rather than dropped, but it defaults to 0, which
-            // cannot be thumbnailed/downloaded, so this is logged loudly.
-            let unit_id = thumb.and_then(|t| t.unit_id).unwrap_or_else(|| {
-                tracing::warn!(
-                    "{kind_label} (id={}): missing additional.thumbnail.unit_id, thumbnails/downloads for it will fail (defaulting unit_id=0)",
-                    item.id
-                );
-                0
-            });
-            let (width, height) = match additional.resolution {
-                Some(r) => (r.width, r.height),
-                None => (None, None),
-            };
-            let exif = additional.exif.unwrap_or_default();
-            let video = additional.video_meta.unwrap_or_default();
-            let gps = additional.gps.unwrap_or_default();
-            Some(Asset {
-                id: item.id,
-                unit_id,
-                cache_key,
-                filename: item.filename.unwrap_or_else(|| item.id.to_string()),
-                media_kind: parse_media_kind(&item.kind, item.live_type.as_deref()),
-                taken_at: item.time,
-                added_at: item.create_time,
-                width,
-                height,
-                file_size: item.filesize,
-                space,
-                server_version: item.version,
-                rating: additional.rating,
-                description: additional.description,
-                camera: exif.camera,
-                aperture: exif.aperture,
-                exposure_time: exif.exposure_time,
-                focal_length: exif.focal_length,
-                iso: exif.iso,
-                lens: exif.lens,
-                duration: video.duration,
-                framerate: video.framerate,
-                video_codec: video.video_codec,
-                container_type: video.container_type,
-                latitude: gps.latitude,
-                longitude: gps.longitude,
-            })
+            Err(ItemSkip::Undecodable) => None,
         })
         .collect();
     let hard_skipped = total - (assets.len() + skipped);
@@ -757,6 +794,85 @@ fn decode_item_list(body: &str, space: Space, kind_label: &str) -> Result<Vec<As
         );
     }
     Ok(assets)
+}
+
+/// Why one item list element did not become an `Asset`.
+enum ItemSkip {
+    /// The element does not deserialize into `RawItem` at all.
+    Undecodable,
+    /// The element decoded but has no non-empty `cache_key`.
+    NoCacheKey,
+}
+
+/// Turn one raw item list element into an `Asset`, logging why when it
+/// cannot. Shared by `decode_item_list` and `list_items_page` so both decode
+/// an element identically.
+fn asset_from_value(
+    raw: &serde_json::Value,
+    space: Space,
+    kind_label: &str,
+) -> Result<Asset, ItemSkip> {
+    let item: RawItem = decode_one(raw, kind_label).ok_or(ItemSkip::Undecodable)?;
+    let additional = item.additional.unwrap_or_default();
+    let thumb = additional.thumbnail;
+    let cache_key = thumb
+        .as_ref()
+        .map(|t| t.cache_key.clone())
+        .unwrap_or_default();
+    if cache_key.is_empty() {
+        tracing::warn!(
+            "skipping {kind_label} (id={}): missing cache_key, not usable for thumbnails/downloads",
+            item.id
+        );
+        return Err(ItemSkip::NoCacheKey);
+    }
+    // unit_id (not the item id) is what the thumbnail/download
+    // endpoints actually key on, verified against the real NAS. An
+    // item that lacks it is still imported (so the grid count stays
+    // correct) rather than dropped, but it defaults to 0, which
+    // cannot be thumbnailed/downloaded, so this is logged loudly.
+    let unit_id = thumb.and_then(|t| t.unit_id).unwrap_or_else(|| {
+        tracing::warn!(
+            "{kind_label} (id={}): missing additional.thumbnail.unit_id, thumbnails/downloads for it will fail (defaulting unit_id=0)",
+            item.id
+        );
+        0
+    });
+    let (width, height) = match additional.resolution {
+        Some(r) => (r.width, r.height),
+        None => (None, None),
+    };
+    let exif = additional.exif.unwrap_or_default();
+    let video = additional.video_meta.unwrap_or_default();
+    let gps = additional.gps.unwrap_or_default();
+    Ok(Asset {
+        id: item.id,
+        unit_id,
+        cache_key,
+        filename: item.filename.unwrap_or_else(|| item.id.to_string()),
+        media_kind: parse_media_kind(&item.kind, item.live_type.as_deref()),
+        taken_at: item.time,
+        added_at: item.create_time,
+        width,
+        height,
+        file_size: item.filesize,
+        space,
+        server_version: item.version,
+        rating: additional.rating,
+        description: additional.description,
+        camera: exif.camera,
+        aperture: exif.aperture,
+        exposure_time: exif.exposure_time,
+        focal_length: exif.focal_length,
+        iso: exif.iso,
+        lens: exif.lens,
+        duration: video.duration,
+        framerate: video.framerate,
+        video_codec: video.video_codec,
+        container_type: video.container_type,
+        latitude: gps.latitude,
+        longitude: gps.longitude,
+    })
 }
 
 /// `SYNO.Foto.Search.Search`, `method=list_item`. Personal space only (no
