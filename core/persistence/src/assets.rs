@@ -144,6 +144,35 @@ fn row_to_asset(r: &rusqlite::Row) -> rusqlite::Result<Asset> {
 /// the `day_start` of a real day, including day 0 (1970-01-01 UTC).
 pub(crate) const UNKNOWN_DATE_DAY_START: i64 = i64::MIN;
 
+/// The grid's windowed read for `fetch_assets`. Kept as a function so the
+/// query plan test checks the exact SQL the grid runs.
+///
+/// SQLite sorts NULL below every value, so `taken_at DESC` already puts
+/// undated rows last. Do not add a `(taken_at IS NULL)` term: it does not
+/// match `idx_assets_space_taken`, and the planner then sorts the whole space
+/// into a temp b-tree on every page.
+fn fetch_assets_sql() -> String {
+    format!(
+        "SELECT {ASSET_SELECT_COLUMNS}
+             FROM assets
+             WHERE space = ?1 AND in_trash = 0
+             ORDER BY taken_at DESC, server_id DESC
+             LIMIT ?2 OFFSET ?3"
+    )
+}
+
+/// The Quick Filter windowed read, for a `WHERE` clause built by
+/// `build_filter_where`. Same order as `fetch_assets_sql`.
+fn filter_assets_sql(where_clause: &str) -> String {
+    format!(
+        "SELECT {ASSET_SELECT_COLUMNS}
+             FROM assets
+             WHERE {where_clause}
+             ORDER BY taken_at DESC, server_id DESC
+             LIMIT ? OFFSET ?"
+    )
+}
+
 impl Store {
     /// Inserts a new asset row or updates it in place, keyed on `(space, server_id)`.
     /// Re-crawling the same server item never duplicates a row.
@@ -305,8 +334,9 @@ impl Store {
 
     /// Returns a window of assets for `space`, newest-first by `taken_at` with
     /// `server_id` as a tiebreak (NULLs last). The ORDER BY matches
-    /// `idx_assets_space_taken` exactly, so this stays an index-only scan as the
-    /// library grows, and the tiebreak guarantees paging by offset/limit never
+    /// `idx_assets_space_taken` exactly, so the planner walks that index in
+    /// order with no sort as the library grows (pinned by
+    /// `grid_reads_walk_the_taken_index_without_a_sort`), and the tiebreak guarantees paging by offset/limit never
     /// skips or duplicates a row when two assets share the same `taken_at`.
     pub fn fetch_assets(
         &self,
@@ -314,13 +344,7 @@ impl Store {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<Asset>, CoreError> {
-        let sql = format!(
-            "SELECT {ASSET_SELECT_COLUMNS}
-                 FROM assets
-                 WHERE space = ?1 AND in_trash = 0
-                 ORDER BY (taken_at IS NULL) ASC, taken_at DESC, server_id DESC
-                 LIMIT ?2 OFFSET ?3"
-        );
+        let sql = fetch_assets_sql();
         let mut stmt = self.conn.prepare(&sql).map_err(map_sql)?;
         let rows = stmt
             .query_map(
@@ -384,13 +408,7 @@ impl Store {
     ) -> Result<Vec<Asset>, CoreError> {
         let (where_clause, mut params) =
             build_filter_where(space, media_kind, taken_after, taken_before, min_rating);
-        let sql = format!(
-            "SELECT {ASSET_SELECT_COLUMNS}
-                 FROM assets
-                 WHERE {where_clause}
-                 ORDER BY (taken_at IS NULL) ASC, taken_at DESC, server_id DESC
-                 LIMIT ? OFFSET ?"
-        );
+        let sql = filter_assets_sql(&where_clause);
         params.push(Box::new(limit as i64));
         params.push(Box::new(offset as i64));
         let mut stmt = self.conn.prepare(&sql).map_err(map_sql)?;
@@ -647,6 +665,50 @@ mod tests {
         assert_eq!(page[0].cache_key, "ck1-new");
         assert_eq!(page[0].taken_at, Some(555));
         assert_eq!(page[0].server_version, Some(2));
+    }
+
+    /// The full query plan of `sql`, one detail line per row.
+    fn query_plan(store: &Store, sql: &str, params: &[&dyn rusqlite::ToSql]) -> String {
+        let mut stmt = store
+            .conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap();
+        let rows = stmt
+            .query_map(params, |r| r.get::<_, String>(3))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect::<Vec<_>>();
+        rows.join("\n")
+    }
+
+    /// The grid pages with `fetch_assets` and `filter_assets` on every
+    /// scroll. Their order must be served by `idx_assets_space_taken`, or
+    /// SQLite sorts every row of the space into a temp b-tree per page.
+    #[test]
+    fn grid_reads_walk_the_taken_index_without_a_sort() {
+        let store = Store::open_in_memory().unwrap();
+        for id in 1..=50 {
+            let taken = if id % 7 == 0 { None } else { Some(id * 1000) };
+            store
+                .upsert_asset(&asset(Space::Personal, id, taken, Some(1)))
+                .unwrap();
+        }
+        let fetch_plan = query_plan(&store, &super::fetch_assets_sql(), &[&0i64, &200i64, &0i64]);
+        assert!(
+            !fetch_plan.contains("TEMP B-TREE") && fetch_plan.contains("idx_assets_space_taken"),
+            "fetch_assets plan must use the taken index without a sort:\n{fetch_plan}"
+        );
+
+        let (clause, _) = super::build_filter_where(Space::Personal, None, None, None, None);
+        let filter_plan = query_plan(
+            &store,
+            &super::filter_assets_sql(&clause),
+            &[&0i64, &200i64, &0i64],
+        );
+        assert!(
+            !filter_plan.contains("TEMP B-TREE") && filter_plan.contains("idx_assets_space_taken"),
+            "unfiltered filter_assets plan must use the taken index without a sort:\n{filter_plan}"
+        );
     }
 
     #[test]
