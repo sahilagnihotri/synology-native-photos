@@ -25,3 +25,12 @@
 - design: `delete_assets` calls `synology_api::recycle_bin_status` under `trash_lock`, after the session check and before `permanent_delete`, and returns `CoreError::CapabilityUnavailable` on Disabled. A Network or Auth error from the status read fails the delete closed. No UniFFI change (existing variant).
 - changed tests: none. Existing delete tests have no User.Home mock; mockito answers 501, which `recycle_bin_status` maps to Unknown, so they still exercise the delete.
 - NEEDS RULING (Unknown): the Mac `DeleteController.requestDelete` deliberately raises the confirm for `.unknown` with "may be permanent" wording, and `confirmDelete` sends the delete. Refusing Unknown in the core would make delete impossible for a non-admin account. Options: (a) keep as is; (b) refuse Unknown too and accept that non-admin accounts cannot delete; (c) add an exported `delete_assets_confirmed_permanent` style flag (FFI change, needs ruling).
+
+### R2-5: FIXED
+- commit: 5ec9f7e
+- tests: `core_tests::restore_session_with_auth_failure_reports_expired_without_error` (mock now answers SYNO.API.Info with success anonymously, like DSM, and the authenticated Browse.Item list for `SID-STALE` with error 119) and `core_tests::restore_session_with_valid_probe_populates_live` (now asserts the authenticated list carrying the saved sid was sent once)
+- failed before the fix: `panicked at core/photoscore/src/lib.rs:1680:9: got Valid` for the stale sid; the Valid test failed on the unhit authenticated list mock
+- passes after: `cargo test -p photoscore`: 70 passed, 0 failed, 0 ignored (lib)
+- design: after `probe_capabilities`, `restore_session` calls `list_items_page(Personal, offset 0, limit 1)` with the saved sid and SynoToken at the pinned Browse.Item version. Auth or OtpRequired from either call gives `Expired`; any other error propagates. No UniFFI change.
+- changed tests: the two restore tests' fixtures (the old expired fixture failed Info itself, which DSM never does).
+- left open: a personal space that answers 801 (not enabled) would now make restore return an error rather than Valid. Not seen on the real NAS (Personal is the working space); unmeasured for other accounts.
