@@ -448,18 +448,18 @@ pub struct CrawlProgress {
 ///
 /// `day_start` is the unix second at the start of the day the bucket covers,
 /// using the same UTC-day bucketing the histogram groups by (the day boundary
-/// falls at multiples of 86400 seconds). `count` is the number of non-trashed
+/// falls at multiples of 86400 seconds, floored, so a pre-1970 timestamp such
+/// as -1 lands in the day starting at -86400). `count` is the number of non-trashed
 /// assets in that day. Buckets are returned newest day first, and their
 /// concatenation reproduces `fetch_assets`' global ordering exactly, so the
 /// grid can map a (section, row) coordinate to a flat absolute index purely
 /// from these counts without loading any asset.
 ///
 /// Assets with no `taken_at` are collected into a single trailing bucket with
-/// `day_start = 0` ("Unknown Date"), which sorts last to match `fetch_assets`
-/// putting NULL-`taken_at` rows at the end. A real photo timestamped at the
-/// unix epoch (1970-01-01) would share `day_start = 0` with that bucket; such
-/// timestamps do not occur in practice, so the UI treats `day_start == 0` as
-/// the Unknown Date bucket by convention.
+/// `day_start = i64::MIN` (`Int64.min` in Swift), the "Unknown Date" bucket,
+/// which sorts last to match `fetch_assets` putting NULL-`taken_at` rows at
+/// the end. `i64::MIN` is not a multiple of 86400, so it never collides with a
+/// real day; `day_start == 0` is the real day 1970-01-01 UTC.
 #[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
 pub struct DayCount {
     pub day_start: i64,

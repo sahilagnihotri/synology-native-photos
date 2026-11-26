@@ -139,6 +139,11 @@ fn row_to_asset(r: &rusqlite::Row) -> rusqlite::Result<Asset> {
     })
 }
 
+/// `day_start` of the trailing "Unknown Date" histogram bucket (NULL
+/// `taken_at`). `i64::MIN` is not a multiple of 86400, so it can never equal
+/// the `day_start` of a real day, including day 0 (1970-01-01 UTC).
+pub(crate) const UNKNOWN_DATE_DAY_START: i64 = i64::MIN;
+
 impl Store {
     /// Inserts a new asset row or updates it in place, keyed on `(space, server_id)`.
     /// Re-crawling the same server item never duplicates a row.
@@ -430,26 +435,30 @@ impl Store {
     /// and the counts within each, exactly reproduces `fetch_assets`' global
     /// ordering, so section `s`, row `r` maps to the flat absolute index
     /// `(sum of counts of all newer buckets) + r`. This holds because the
-    /// bucketing key (`taken_at / 86400`, the UTC day index) is monotonic with
+    /// bucketing key (the UTC day start, `taken_at` floored to a multiple of
+    /// 86400) is monotonic with
     /// `taken_at`: every row of a newer day has a strictly larger `taken_at`
     /// than every row of an older day, so `fetch_assets`' `taken_at DESC`
     /// order visits whole days in the same newest-first order this returns,
     /// and within a day the counts line up regardless of the intra-day
-    /// `server_id DESC` tiebreak. (Integer division assumes `taken_at >= 0`,
-    /// true for every real photo timestamp.)
+    /// `server_id DESC` tiebreak. The floor is computed as
+    /// `taken_at - ((taken_at % 86400) + 86400) % 86400` because SQLite's `/`
+    /// and `%` truncate toward zero: plain division would fold the day before
+    /// the epoch (-86400..=-1) into day 0.
     ///
     /// Assets with a NULL `taken_at` are collected into a single trailing
-    /// bucket with `day_start = 0`, matching `fetch_assets` sorting NULL rows
-    /// last. The bucket is omitted entirely when the space has no such rows.
+    /// bucket with `day_start = UNKNOWN_DATE_DAY_START` (`i64::MIN`), a key no
+    /// real day can have, matching `fetch_assets` sorting NULL rows last. The bucket is omitted entirely when the space has no such rows.
     /// The returned counts sum to `asset_count(space)` (same filters).
     pub fn date_histogram(&self, space: Space) -> Result<Vec<DayCount>, CoreError> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT (taken_at / 86400) * 86400 AS day_start, COUNT(*) AS n
+                "SELECT taken_at - (((taken_at % 86400) + 86400) % 86400) AS day_start,
+                        COUNT(*) AS n
                      FROM assets
                      WHERE space = ?1 AND in_trash = 0 AND taken_at IS NOT NULL
-                     GROUP BY taken_at / 86400
+                     GROUP BY day_start
                      ORDER BY day_start DESC",
             )
             .map_err(map_sql)?;
@@ -477,7 +486,7 @@ impl Store {
             .map_err(map_sql)?;
         if null_count > 0 {
             out.push(DayCount {
-                day_start: 0,
+                day_start: UNKNOWN_DATE_DAY_START,
                 count: null_count as u32,
             });
         }
@@ -534,8 +543,9 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
+    use super::UNKNOWN_DATE_DAY_START;
     use crate::Store;
-    use models::{Asset, MediaKind, Space};
+    use models::{Asset, DayCount, MediaKind, Space};
 
     /// Test-only: flags a Personal row as trashed, the way an older build did.
     /// No production code sets the flag any more.
@@ -1688,7 +1698,8 @@ mod tests {
     }
 
     /// NULL-`taken_at` rows collapse into one trailing bucket with
-    /// `day_start = 0`, appearing after every dated bucket, mirroring
+    /// `day_start = UNKNOWN_DATE_DAY_START` (`i64::MIN`), appearing after
+    /// every dated bucket, mirroring
     /// `fetch_assets` ordering those rows last.
     #[test]
     fn date_histogram_puts_null_taken_at_in_trailing_zero_bucket() {
@@ -1710,10 +1721,61 @@ mod tests {
         assert!(hist[0].day_start > 0);
         assert_eq!(
             hist.last().unwrap().day_start,
-            0,
+            UNKNOWN_DATE_DAY_START,
             "Unknown Date bucket is last"
         );
         assert_eq!(hist.last().unwrap().count, 2);
+    }
+
+    /// Pre-1970 and epoch-adjacent timestamps bucket by floor division, so
+    /// -86400..=-1 is the day before the epoch rather than sharing bucket 0
+    /// with 1970-01-01, and the Unknown Date bucket never shares a key with
+    /// any real day, including day 0.
+    #[test]
+    fn date_histogram_floors_negative_days_and_keeps_unknown_distinct_from_day_zero() {
+        let store = Store::open_in_memory().unwrap();
+        for (id, taken) in [
+            (1, Some(-1)),
+            (2, Some(-86_400)),
+            (3, Some(0)),
+            (4, Some(100)),
+            (5, Some(86_399)),
+            (6, Some(-86_401)),
+            (7, None),
+        ] {
+            store
+                .upsert_asset(&asset(Space::Personal, id, taken, Some(1)))
+                .unwrap();
+        }
+
+        let hist = store.date_histogram(Space::Personal).unwrap();
+
+        assert_eq!(
+            hist,
+            vec![
+                DayCount {
+                    day_start: 0,
+                    count: 3
+                },
+                DayCount {
+                    day_start: -86_400,
+                    count: 2
+                },
+                DayCount {
+                    day_start: -172_800,
+                    count: 1
+                },
+                DayCount {
+                    day_start: UNKNOWN_DATE_DAY_START,
+                    count: 1
+                },
+            ]
+        );
+        let total: u32 = hist.iter().map(|b| b.count).sum();
+        assert_eq!(
+            u64::from(total),
+            store.asset_count(Space::Personal).unwrap()
+        );
     }
 
     /// An empty (or all-dated) space produces no Unknown Date bucket, and an
@@ -1728,7 +1790,7 @@ mod tests {
         let hist = store.date_histogram(Space::Personal).unwrap();
         assert_eq!(hist.len(), 1);
         assert!(
-            hist.iter().all(|b| b.day_start != 0),
+            hist.iter().all(|b| b.day_start != UNKNOWN_DATE_DAY_START),
             "no Unknown Date bucket when every row is dated"
         );
     }
@@ -1807,13 +1869,13 @@ mod tests {
             for r in 0..bucket.count {
                 let absolute = (prefix + r) as usize;
                 let a = &all[absolute];
-                if bucket.day_start == 0 {
+                if bucket.day_start == UNKNOWN_DATE_DAY_START {
                     assert!(
                         a.taken_at.is_none(),
                         "Unknown bucket row must have NULL taken_at"
                     );
                 } else {
-                    let row_day = (a.taken_at.unwrap() / day) * day;
+                    let row_day = a.taken_at.unwrap().div_euclid(day) * day;
                     assert_eq!(
                         row_day, bucket.day_start,
                         "row at absolute {absolute} must fall in the bucket's day"
