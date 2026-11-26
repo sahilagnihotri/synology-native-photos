@@ -418,6 +418,16 @@ pub fn ensure_recycle_photos_path(path: &str) -> Result<(), CoreError> {
     {
         return Err(refuse());
     }
+    // Defence in depth for the comma: if a server ever split the path on
+    // commas, no piece after the first may be an absolute path. A segment
+    // ending in a comma is the only way to get ",/", so refuse it.
+    if rest.contains(",/") {
+        return Err(CoreError::UnexpectedResponse {
+            message: format!(
+                "refusing a recycle path with a folder name ending in a comma: {path:?}"
+            ),
+        });
+    }
     Ok(())
 }
 

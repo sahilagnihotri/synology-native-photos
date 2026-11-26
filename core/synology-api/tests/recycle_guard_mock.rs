@@ -33,6 +33,10 @@ const ROOT: &str = "/home/#recycle/Photos";
 #[test]
 fn guard_refuses_ambiguous_paths() {
     for bad in [
+        // a comma followed by an absolute path: a naive split on commas
+        // would hand File Station a second, live path
+        "/home/#recycle/Photos/a.jpg,/home/Photos/b.jpg",
+        "/home/#recycle/Photos/x,/home/Photos/b.jpg",
         // backslash separators
         "/home/#recycle/Photos/x\\..\\..\\Photos\\a.jpg",
         // control characters
