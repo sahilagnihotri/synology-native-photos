@@ -1,6 +1,6 @@
 use mockito::Matcher;
 use models::{Connection, MediaKind, Space};
-use synology_api::browse::{list_albums, list_items};
+use synology_api::browse::{list_albums, list_items, list_items_filtered, CollectionFilter};
 use synology_api::transport::Transport;
 
 fn transport_for(server: &mockito::ServerGuard) -> Transport {
@@ -486,6 +486,10 @@ async fn list_albums_detects_smart_and_shared_markers() {
     assert_eq!(albums[0].cover_unit_id, None);
 }
 
+/// Display paths (here a collection browse) stay tolerant: a bad element is
+/// skipped and the rest of the page is shown. The unfiltered `list_items`
+/// that the crawl pages through fails instead, see
+/// `list_items_page_with_an_undecodable_element_fails_naming_it`.
 #[tokio::test]
 async fn one_malformed_item_is_skipped_others_still_decode() {
     let mut server = mockito::Server::new_async().await;
@@ -507,7 +511,7 @@ async fn one_malformed_item_is_skipped_others_still_decode() {
         .create_async()
         .await;
     let t = transport_for(&server);
-    let assets = list_items(&t, "SID", Space::Personal, 0, 100, 1, None)
+    let assets = list_items_filtered(&t, "SID", CollectionFilter::Favorites, 0, 100, 1, None)
         .await
         .expect("list ok despite bad items");
     // Only the two well-formed items with both id and cache_key survive;
@@ -633,4 +637,44 @@ async fn list_items_omits_syno_token_header_when_absent() {
         .expect("list ok without token header");
     assert!(assets.is_empty());
     _m.assert_async().await;
+}
+
+/// R1-3: the crawl pages `list_items` with `offset += fetched` and treats a
+/// page shorter than `limit` as the last one, then drops every local asset it
+/// did not see. A full server page of 3 that came back as 2 would therefore
+/// end the crawl early. A page holding an unusable element must fail, naming
+/// the element, rather than look like a short page.
+#[tokio::test]
+async fn list_items_page_with_an_undecodable_element_fails_naming_it() {
+    for bad in [
+        r#"{"identifier":"not-an-id","additional":{"thumbnail":{"cache_key":"CKX"}}}"#,
+        r#"{"id":902,"filename":"no-cache-key.jpg","type":"photo"}"#,
+    ] {
+        let body = format!(
+            r#"{{"success":true,"data":{{"list":[
+            {{"id":901,"type":"photo","additional":{{"thumbnail":{{"cache_key":"CK901","unit_id":1}}}}}},
+            {bad},
+            {{"id":903,"type":"photo","additional":{{"thumbnail":{{"cache_key":"CK903","unit_id":3}}}}}}
+        ]}}}}"#
+        );
+        let mut server = mockito::Server::new_async().await;
+        let _m = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let t = transport_for(&server);
+        let result = list_items(&t, "SID", Space::Personal, 0, 3, 1, None).await;
+        match result {
+            Err(models::CoreError::Decode { message }) => {
+                assert!(
+                    message.contains("element 1"),
+                    "should name the element: {message}"
+                );
+            }
+            other => panic!("a full page must not come back short, got {other:?}"),
+        }
+    }
 }

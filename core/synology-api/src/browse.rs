@@ -526,7 +526,45 @@ async fn list_items_inner(
         query.push(filter.query_param());
     }
     let body = get_body(transport, &query, syno_token).await?;
+    if filter.is_none() {
+        // The unfiltered list is what the sync crawl pages to exhaustion. It
+        // advances by the number of items returned and treats a short page
+        // as the last, so a dropped element must fail the page rather than
+        // end the crawl early and misalign every later offset.
+        ensure_every_item_usable(&body, "browse item")?;
+    }
     decode_item_list(&body, space, "browse item")
+}
+
+/// Fail with `Decode`, naming the element index, if any element of an item
+/// list page would be skipped by `decode_item_list` (it does not decode into
+/// `RawItem`, or it has no non-empty `cache_key`). Used only on the crawl
+/// path, where a silently shorter page is read as the end of the library.
+fn ensure_every_item_usable(body: &str, kind_label: &str) -> Result<(), CoreError> {
+    let parsed: ItemList = decode_envelope(body)?;
+    let total = parsed.list.len();
+    for (index, raw) in parsed.list.iter().enumerate() {
+        let reason = match serde_json::from_value::<RawItem>(raw.clone()) {
+            Err(e) => Some(format!("failed to decode: {e}")),
+            Ok(item) => {
+                let has_cache_key = item
+                    .additional
+                    .as_ref()
+                    .and_then(|a| a.thumbnail.as_ref())
+                    .is_some_and(|t| !t.cache_key.is_empty());
+                (!has_cache_key).then(|| format!("id {} has no cache_key", item.id))
+            }
+        };
+        if let Some(reason) = reason {
+            return Err(CoreError::Decode {
+                message: format!(
+                    "{kind_label} list: element {index} of {total} is unusable ({reason}); \
+                     refusing a short page"
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// `SYNO.Foto.Browse.Item` / `SYNO.FotoTeam.Browse.Item`, `method=list` with
