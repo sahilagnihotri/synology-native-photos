@@ -40,7 +40,7 @@ Open risk: a restored photo gets a NEW Photos id, so album, favorite and tag lin
 - Swift unit tests: 498 passed, 0 failed, 0 skipped. Run with
   `xcodebuild test -project platforms/macos/MySynologyPhotos.xcodeproj -scheme MySynologyPhotos -destination 'platform=macOS' -only-testing:MySynologyPhotosTests`
   or `scripts/test.sh macos`. Use `ADHOC_SIGN=1 scripts/test.sh macos` in a shell that cannot see the login keychain (for example a sandboxed agent). Run unit tests only: the UI test target triggers a System Events automation prompt.
-- The xcframework self heal runs on every Xcode build and rebuilds `build/macos/PhotosCore.xcframework` when any Rust source, `Cargo.toml`, `Cargo.lock` or `.udl` is newer than the lib. `make xcframework` forces it.
+- The xcframework self heal runs on every Xcode build and rebuilds `build/macos/PhotosCore.xcframework` when any Rust source, `Cargo.toml`, `Cargo.lock`, `uniffi.toml`, `rust-toolchain.toml`, `.cargo/config*` or the `Makefile` is newer than the lib, or a core source file was added or removed. `make xcframework` forces it.
 - Falsify new tests: revert the fix, watch the test fail, restore.
 
 ## Real NAS probing workflow
