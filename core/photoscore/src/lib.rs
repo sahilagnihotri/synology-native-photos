@@ -1316,10 +1316,6 @@ fn write_cache_file_atomically(
     })
 }
 
-/// The `store` mutex briefly holds `None` only while a crawl/reconcile has
-/// taken the `Store` out to run on its blocking thread. Any other caller
-/// landing in that window gets a clear, fail-closed error rather than a
-/// panic on `Option::unwrap`.
 /// Adds "{verb} {done} of {total} item(s) before failing" to `e` when a batch
 /// stopped part way, KEEPING its variant so the UI still reacts to the kind
 /// (an Auth failure sends the user to sign in, a Network one can be retried).
@@ -1354,6 +1350,10 @@ fn with_partial_progress(e: CoreError, verb: &str, done: usize, total: usize) ->
     }
 }
 
+/// The `store` mutex briefly holds `None` only while a crawl/reconcile has
+/// taken the `Store` out to run on its blocking thread. Any other caller
+/// landing in that window gets a clear, fail-closed error rather than a
+/// panic on `Option::unwrap`.
 fn store_busy_err() -> CoreError {
     CoreError::Storage {
         message: "store busy: a crawl or reconcile is in progress".into(),
