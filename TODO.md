@@ -2,7 +2,7 @@
 
 Only pending work. Completed items live in `Fixed.md`. Live scratch progress in `.superpowers/sdd/progress.md` (gitignored).
 
-Last Updated: 2026-11-26 (review fixes landed: Rust 449/0/1, Swift 518/0/0, Windows cross check passes; adversarial pass on the core fixes in flight)
+Last Updated: 2026-11-26 (review fixes and the adversarial pass landed: Rust 452/0/1, Swift 518/0/0, Windows cross check passes)
 
 ## 2026-11-26: full-repo review, release build break, Windows core check
 
@@ -72,6 +72,37 @@ Dispatch state and owned paths are in `tasks.md`.
   Disabled (`8ab1b83`). Options: keep, refuse Unknown too (non admin accounts
   could then not delete), or add an explicit "confirmed permanent" flag to the
   FFI. Running assumption: keep.
+- [ ] AV-2026-11: adversarial review of the core fixes, open items. Detail,
+  locations and suggested tests are in
+  `documentation/reviews/2026-11-26-full-repo-review/fixes/av-core-diff.md`.
+  AV-1 is fixed (`61dbe05`); AV-2 is REV-F2 above. All below were found by reading,
+  none reproduced by execution.
+  - [ ] AV-3 (medium, touches delete): a Shared space delete checks the user
+    home recycle bin setting, not the photo share's own. Shared space is off on
+    this NAS (error 801), so it cannot be measured here.
+  - [ ] AV-4 (medium): login binds the index after the network login. If a
+    crawl holds the store, the OTP is already spent, the server session is left
+    open and the user sees "store busy". `restore_session` fails the same way.
+  - [ ] AV-5 (medium): the account identity includes the host, so moving between
+    the LAN address and the Tailscale name clears the index and thumbnails and
+    forces a full crawl each time. Fix: bind to a NAS id (serial or pinned
+    certificate) plus the user.
+  - [ ] AV-6 (medium to low, part of SYNC-1): the sweep confirmation needs two
+    identical listings, so it never confirms while a phone keeps uploading, and
+    a stable truncated listing is confirmed on the second Refresh.
+  - [ ] AV-7 (low): `sign_out` does not clear queued local deletes or cached
+    originals. A queued id can drop an unrelated row in the next account's
+    index (local only, healed by a reconcile).
+  - [ ] AV-8 (low): a local row removal that fails after a successful NAS delete
+    reports the delete as failed.
+  - [ ] AV-9 (low): crawl and reconcile loop forever if the server ignores
+    `offset`.
+  - [ ] AV-10 (low): a `taken_at` within a day of `i64::MIN` overflows the day
+    arithmetic and the whole date histogram fails.
+  - [ ] AV-11 (low): the `list_items` doc comment is stale after `ee27208`.
+  - [ ] AV-12: a comma inside a JSON path array is unverified on the real NAS
+    (restore and delete of a file under a folder such as "Paris, France"). A
+    wrong split fails with a File Station error, it cannot reach another file.
 - [ ] SYNC-1 (decision for Sahil): since `05240b6` a reconcile never applies an
   EMPTY server listing as deletions, and applies a drop of more than 20 percent
   of a space with 100 or more rows only when the same listing comes back twice

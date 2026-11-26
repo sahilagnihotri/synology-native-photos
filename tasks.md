@@ -11,11 +11,10 @@ Baseline at `1c2c107` (2026-11-26, this Mac now on macOS 27.0 and Xcode 27.2):
 Xcode test run passes with 498 tests, 0 failed, 0 skipped.
 
 The review and the five fix batches are finished and verified by the
-orchestrator (see `Fixed.md`). In flight:
+orchestrator (see `Fixed.md`), and the adversarial pass is done (open items: AV-2026-11 in `TODO.md`). Remaining:
 
 | ID | Goal | Owned paths (write) | Status | Closes |
 |----|------|---------------------|--------|--------|
-| AV | Adversarial review of the core fix commits (`git diff 1c2c107..HEAD -- core/`), read only | `agent-notes/av-core-diff.md` | in-progress | project rule for delete and sync changes |
 | W1 | Windows: PowerShell scripts still unexecuted | `scripts/windows/`, `scripts/ci/ci.ps1` | blocked on the user (see WIN-1) | WIN-1 |
 
 Blocked on the user: DSM password change, `photosclient` user, a test album for album verification.

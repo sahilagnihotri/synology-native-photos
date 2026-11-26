@@ -65,6 +65,11 @@ real NAS or in the running app.
   no longer plays after the viewer closes (`1e86fdd`); R5-4 section identifiers
   stay unique (`1016098`) and the app uses the core's undated key (`d2aa0c1`);
   R5-12 unplottable map coordinates are dropped (`80363c0`).
+- Adversarial pass on the core fixes (11 findings, notes in the `fixes/`
+  folder): AV-1 the tightened recycle guard refused any path with a comma and
+  any name without an extension, which blocked a whole restore or empty batch.
+  Fixed in `61dbe05` (three tests failed first). The rest are open under AV-2026-11
+  in `TODO.md`.
 - Scripts and docs: R6-7 `setup.sh` rejects unknown arguments (`d2758a0`); R6-6
   `test.sh` and `test-app.sh` fail closed (`ad4d57d`); R6-5 the core gate uses
   `--locked` and fails on zero tests, and the `ci.sh` swift FAIL path is now
