@@ -45,6 +45,10 @@ struct ApiPageSource {
     sid: String,
     version: u32,
     syno_token: Option<String>,
+    /// The account identity of the session these pages come from (see
+    /// `account_identity`). `run_with_store` refuses to let a source write
+    /// into an index bound to a different account.
+    account: String,
 }
 
 #[async_trait::async_trait]
@@ -118,6 +122,9 @@ struct Live {
     session: Session,
     connection: Connection,
     capabilities: Vec<ApiCapability>,
+    /// `account_identity` of this session, the same value the index was
+    /// bound to just before this `Live` was set.
+    account: String,
 }
 
 /// The single UniFFI-exported facade. Swift holds one instance per app run.
@@ -219,13 +226,14 @@ impl PhotosCore {
             device_token.as_deref(),
         )
         .await?;
-        self.bind_index_to_account(&transport, &username)?;
+        let account = self.bind_index_to_account(&transport, &username)?;
         let mut guard = self.live.lock().expect("live mutex poisoned");
         *guard = Some(Live {
             transport,
             session: session.clone(),
             connection,
             capabilities: Vec::new(),
+            account,
         });
         Ok(session)
     }
@@ -286,13 +294,14 @@ impl PhotosCore {
         };
         match probed {
             Ok(caps) => {
-                self.bind_index_to_account(&transport, &session.username)?;
+                let account = self.bind_index_to_account(&transport, &session.username)?;
                 let mut guard = self.live.lock().expect("live mutex poisoned");
                 *guard = Some(Live {
                     transport,
                     session,
                     connection,
                     capabilities: caps,
+                    account,
                 });
                 Ok(SessionState::Valid)
             }
@@ -373,21 +382,15 @@ impl PhotosCore {
         observer: Box<dyn FfiCrawlObserver>,
     ) -> Result<CrawlProgress, CoreError> {
         let source = self.page_source_for(space)?;
-        let sink = ObserverSink { observer };
-        self.run_with_store(move |store| {
-            Box::pin(async move {
-                let crawler = Crawler::new(store, &source, 200);
-                crawler.crawl_space(space, &sink).await
-            })
-        })
-        .await
+        self.crawl_with_source(space, source, observer).await
     }
 
     /// Runs delta reconciliation (new/changed/deleted) for `space` against
     /// the live session. Same auth and lock discipline as `crawl_space`.
     pub async fn reconcile_delta(&self, space: Space) -> Result<CrawlProgress, CoreError> {
         let source = self.page_source_for(space)?;
-        self.run_with_store(move |store| {
+        let account = source.account.clone();
+        self.run_with_store(account, move |store| {
             Box::pin(async move {
                 let reconciler = DeltaReconciler::new(store, &source, 200);
                 reconciler.reconcile(space).await
@@ -1350,6 +1353,16 @@ fn with_partial_progress(e: CoreError, verb: &str, done: usize, total: usize) ->
     }
 }
 
+/// The identity the local index is bound to: the normalized base URL plus
+/// the username, both lowercased (DSM user names ignore case).
+fn account_identity(transport: &Transport, username: &str) -> String {
+    format!(
+        "{}|{}",
+        transport.base_url().to_ascii_lowercase(),
+        username.to_lowercase()
+    )
+}
+
 /// The `store` mutex briefly holds `None` only while a crawl/reconcile has
 /// taken the `Store` out to run on its blocking thread. Any other caller
 /// landing in that window gets a clear, fail-closed error rather than a
@@ -1385,7 +1398,27 @@ impl PhotosCore {
             sid: live.session.sid.clone(),
             version,
             syno_token: live.session.syno_token.clone(),
+            account: live.account.clone(),
         })
+    }
+
+    /// The crawl body of `crawl_space`, split out so a test can hand it a
+    /// source built from an earlier session.
+    async fn crawl_with_source(
+        &self,
+        space: Space,
+        source: ApiPageSource,
+        observer: Box<dyn FfiCrawlObserver>,
+    ) -> Result<CrawlProgress, CoreError> {
+        let account = source.account.clone();
+        let sink = ObserverSink { observer };
+        self.run_with_store(account, move |store| {
+            Box::pin(async move {
+                let crawler = Crawler::new(store, &source, 200);
+                crawler.crawl_space(space, &sink).await
+            })
+        })
+        .await
     }
 
     /// Builds the `(transport, sid, version, syno_token)` tuple every
@@ -1471,6 +1504,51 @@ impl PhotosCore {
         ))
     }
 
+    /// Ties the local index to the account being signed in to: the
+    /// normalized base URL plus the username, both lowercased (DSM user
+    /// names ignore case). When the index belonged to another account, the
+    /// store clears every mirrored row and the crawl barrier (so the next
+    /// crawl starts fresh) and the thumbnail cache is emptied too, because
+    /// `cache_key` values from another NAS can collide. Fails closed with
+    /// store busy if a crawl holds the store, before any `Live` is set.
+    fn bind_index_to_account(
+        &self,
+        transport: &Transport,
+        username: &str,
+    ) -> Result<String, CoreError> {
+        let identity = account_identity(transport, username);
+        let reset = {
+            let guard = self.store.lock().expect("store mutex poisoned");
+            let store = guard.as_ref().ok_or_else(store_busy_err)?;
+            store.bind_account(&identity)?
+        };
+        if reset {
+            let thumbs = std::path::Path::new(&self.cache_dir).join("thumbs");
+            if thumbs.exists() {
+                let _ = std::fs::remove_dir_all(&thumbs);
+            }
+        }
+        Ok(identity)
+    }
+
+    /// Puts the `Store` back after `run_with_store`, first applying every
+    /// local row removal `delete_assets` queued while it was out. Done under
+    /// the store guard, which `delete_assets` also takes before it queues,
+    /// so no removal can be queued after the drain and then be missed. A
+    /// removal that fails stays queued for the next hand back; the rows it
+    /// names are already gone from the NAS, so the next reconcile drops them
+    /// either way.
+    fn return_store(&self, store: Store) {
+        let mut guard = self.store.lock().expect("store mutex poisoned");
+        let mut pending = self
+            .pending_local_deletes
+            .lock()
+            .expect("pending deletes mutex poisoned");
+        pending.retain(|(space, ids)| store.delete_assets(*space, ids).is_err());
+        drop(pending);
+        *guard = Some(store);
+    }
+
     /// Runs `work` (the sync-engine crawl or reconcile call) against an
     /// owned `Store` without ever holding the `store` mutex guard across an
     /// `.await`.
@@ -1505,56 +1583,16 @@ impl PhotosCore {
     /// the core stays usable for every call afterward - it never permanently
     /// bricks the store. The mutex is locked twice, once for the initial
     /// take and once for the final swap-back, never across an `.await`.
-    /// Ties the local index to the account being signed in to: the
-    /// normalized base URL plus the username, both lowercased (DSM user
-    /// names ignore case). When the index belonged to another account, the
-    /// store clears every mirrored row and the crawl barrier (so the next
-    /// crawl starts fresh) and the thumbnail cache is emptied too, because
-    /// `cache_key` values from another NAS can collide. Fails closed with
-    /// store busy if a crawl holds the store, before any `Live` is set.
-    fn bind_index_to_account(
-        &self,
-        transport: &Transport,
-        username: &str,
-    ) -> Result<(), CoreError> {
-        let identity = format!(
-            "{}|{}",
-            transport.base_url().to_ascii_lowercase(),
-            username.to_lowercase()
-        );
-        let reset = {
-            let guard = self.store.lock().expect("store mutex poisoned");
-            let store = guard.as_ref().ok_or_else(store_busy_err)?;
-            store.bind_account(&identity)?
-        };
-        if reset {
-            let thumbs = std::path::Path::new(&self.cache_dir).join("thumbs");
-            if thumbs.exists() {
-                let _ = std::fs::remove_dir_all(&thumbs);
-            }
-        }
-        Ok(())
-    }
-
-    /// Puts the `Store` back after `run_with_store`, first applying every
-    /// local row removal `delete_assets` queued while it was out. Done under
-    /// the store guard, which `delete_assets` also takes before it queues,
-    /// so no removal can be queued after the drain and then be missed. A
-    /// removal that fails stays queued for the next hand back; the rows it
-    /// names are already gone from the NAS, so the next reconcile drops them
-    /// either way.
-    fn return_store(&self, store: Store) {
-        let mut guard = self.store.lock().expect("store mutex poisoned");
-        let mut pending = self
-            .pending_local_deletes
-            .lock()
-            .expect("pending deletes mutex poisoned");
-        pending.retain(|(space, ids)| store.delete_assets(*space, ids).is_err());
-        drop(pending);
-        *guard = Some(store);
-    }
-
-    async fn run_with_store<F>(&self, work: F) -> Result<CrawlProgress, CoreError>
+    ///
+    /// ACCOUNT CHECK: `account` is the identity of the session the work's
+    /// pages come from. It is compared with the index's recorded identity
+    /// under the same store lock that takes the store out, and a mismatch
+    /// fails with `Storage` before anything is written. Once taken, the store
+    /// stays out for the whole run, so no sign in can rebind it meanwhile
+    /// (`bind_index_to_account` fails with store busy). Together this closes
+    /// the window between a sign in's bind and its `Live` swap: a crawl whose
+    /// source was built from the previous session is refused.
+    async fn run_with_store<F>(&self, account: String, work: F) -> Result<CrawlProgress, CoreError>
     where
         F: for<'a> FnOnce(
                 &'a Store,
@@ -1565,6 +1603,17 @@ impl PhotosCore {
     {
         let store = {
             let mut guard = self.store.lock().expect("store mutex poisoned");
+            let bound = guard
+                .as_ref()
+                .ok_or_else(store_busy_err)?
+                .account_identity()?;
+            if bound.as_deref() != Some(account.as_str()) {
+                return Err(CoreError::Storage {
+                    message: "the signed in account changed before this sync could start; \
+                              nothing was written, sync again"
+                        .into(),
+                });
+            }
             guard.take().ok_or_else(store_busy_err)?
         };
 
@@ -3778,6 +3827,61 @@ mod core_tests {
             vec![2],
             "the queued removal is applied when the store comes back"
         );
+    }
+
+    /// A crawl whose source was built from alice's session, but which only
+    /// reaches the store after bob signed in, must write nothing into the
+    /// index now bound to bob and must not read a single page.
+    #[tokio::test]
+    async fn a_crawl_from_the_previous_account_writes_nothing_after_a_sign_in() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let list = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "list".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"success":true,"data":{"list":[{"id":1,"filename":"alice.jpg","type":"photo","time":1,"indexed_time":1,"additional":{"thumbnail":{"cache_key":"1_1","unit_id":1}}}]}}"#,
+            )
+            .expect(0)
+            .create_async()
+            .await;
+        let conn = || Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        struct Quiet;
+        impl FfiCrawlObserver for Quiet {
+            fn on_progress(&self, _progress: CrawlProgress) {}
+        }
+        let core = core_at("account-race");
+        core.login(conn(), "alice".into(), "p".into(), None, None)
+            .await
+            .expect("login alice");
+        let alices_source = core.page_source_for(Space::Personal).unwrap();
+        core.login(conn(), "bob".into(), "p".into(), None, None)
+            .await
+            .expect("login bob");
+
+        let result = core
+            .crawl_with_source(Space::Personal, alices_source, Box::new(Quiet))
+            .await;
+        assert!(
+            matches!(result, Err(CoreError::Storage { .. })),
+            "a crawl from the previous account must be refused, got {result:?}"
+        );
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
+        assert!(!core.crawl_progress(Space::Personal).unwrap().complete);
+        list.assert_async().await;
     }
 
     /// An index written before the account identity existed (the first
