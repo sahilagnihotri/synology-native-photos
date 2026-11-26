@@ -92,9 +92,15 @@ impl<'a> Crawler<'a> {
         let mut expected_total;
 
         loop {
-            let page = self.source.list_items(space, offset, limit).await?;
+            let page = self.source.list_page(space, offset, limit).await?;
             expected_total = page.total;
             let fetched = page.assets.len() as u32;
+            // Paging and the end-of-space test use the RAW count: an item
+            // listed but not decodable yet still occupies its slot, so a page
+            // with one skipped item is full and the next page must be read.
+            // The skipped item is picked up by a later reconcile once it
+            // decodes.
+            let listed = page.raw_count;
 
             if fetched > 0 {
                 self.store.upsert_assets(&page.assets)?;
@@ -103,7 +109,7 @@ impl<'a> Crawler<'a> {
                 self.store.set_highest_version(space, max_version)?;
             }
 
-            offset += fetched;
+            offset += listed;
             self.store
                 .save_cursor(space, offset, limit, expected_total)?;
 
@@ -112,7 +118,7 @@ impl<'a> Crawler<'a> {
             // whether `expected_total` under- or over-counts the real total,
             // and it is what fires on the request past an exact multiple of
             // `limit`.
-            let short_page = fetched < limit;
+            let short_page = listed < limit;
 
             if short_page {
                 self.reconcile(space, offset, expected_total)?;
@@ -587,5 +593,41 @@ mod tests {
         assert_eq!(p.done, 0);
         assert_eq!(p.total, 0);
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
+    }
+
+    /// R1-3c: a full page in which one item cannot be decoded yet (a phone
+    /// backup still generating its thumbnail) is still a FULL page. The
+    /// crawl must advance by the raw count and fetch the next page instead
+    /// of taking the shorter decoded list as the end of the space.
+    #[tokio::test]
+    async fn full_page_with_a_skipped_item_does_not_end_the_crawl() {
+        use crate::test_support::SkippingSource;
+        let store = Store::open_in_memory().unwrap();
+        let src = SkippingSource::new((1..=5).map(|id| asset(id, 1)).collect(), &[2]);
+        let sink = CountingSink {
+            events: Mutex::new(vec![]),
+        };
+        let crawler = Crawler::new(&store, &src, 2);
+        let p = crawler.crawl_space(Space::Personal, &sink).await.unwrap();
+
+        assert_eq!(
+            src.calls.lock().unwrap().as_slice(),
+            &[0, 2, 4],
+            "every page must be fetched"
+        );
+        let ids: Vec<i64> = store
+            .fetch_assets(Space::Personal, 0, u32::MAX)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, vec![1, 3, 4, 5]);
+        assert!(p.complete, "the end of the space was reached");
+        assert_eq!(
+            store.load_sync_state(Space::Personal).unwrap().last_offset,
+            5
+        );
     }
 }

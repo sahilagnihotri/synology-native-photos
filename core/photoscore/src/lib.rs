@@ -11,7 +11,7 @@ use models::{
 use persistence::Store;
 use sync_engine::crawl::{Crawler, ProgressSink};
 use sync_engine::delta::DeltaReconciler;
-use sync_engine::{AssetPage, PageSource};
+use sync_engine::{AssetPage, ListedPage, PageSource};
 use synology_api::browse::CollectionFilter;
 use synology_api::namespace::browse_item_api;
 use synology_api::Transport;
@@ -37,7 +37,7 @@ pub trait FfiCrawlObserver: Send + Sync {
     fn on_progress(&self, progress: CrawlProgress);
 }
 
-/// Adapts synology-api's `list_items` onto the sync-engine `PageSource`
+/// Adapts synology-api's `list_items_page` onto the sync-engine `PageSource`
 /// trait for one fixed transport/session/API-version triple. sync-engine
 /// only ever sees this trait, never the HTTP client directly.
 struct ApiPageSource {
@@ -55,7 +55,25 @@ impl PageSource for ApiPageSource {
         offset: u32,
         limit: u32,
     ) -> Result<AssetPage, CoreError> {
-        let assets = synology_api::list_items(
+        let page = self.list_page(space, offset, limit).await?;
+        Ok(AssetPage {
+            assets: page.assets,
+            total: page.total,
+        })
+    }
+
+    /// Pages through `synology_api::list_items_page`, which keeps an item
+    /// that cannot be decoded yet (no cache_key while DSM builds its
+    /// thumbnail) as a skipped id instead of failing the whole page. The
+    /// crawl and the reconcile page on `raw_count`, so such an item neither
+    /// blocks them nor ends the listing early.
+    async fn list_page(
+        &self,
+        space: Space,
+        offset: u32,
+        limit: u32,
+    ) -> Result<ListedPage, CoreError> {
+        let page = synology_api::list_items_page(
             &self.transport,
             &self.sid,
             space,
@@ -67,13 +85,19 @@ impl PageSource for ApiPageSource {
         .await?;
         // The Browse.Item list does not return a grand total on every DSM build; when
         // absent we treat a short page as the end. Report the running count as total so
-        // the barrier still flips on the final short page (offset >= total holds).
-        let total = if (assets.len() as u32) < limit {
-            (offset as u64) + assets.len() as u64
+        // the barrier still flips on the final short page (offset >= total holds). The
+        // raw count decides this, never the number of decoded assets.
+        let total = if page.raw_count < limit {
+            (offset as u64) + page.raw_count as u64
         } else {
             (offset as u64) + limit as u64 + 1
         };
-        Ok(AssetPage { assets, total })
+        Ok(ListedPage {
+            assets: page.assets,
+            total,
+            raw_count: page.raw_count,
+            skipped_ids: page.skipped_ids,
+        })
     }
 }
 
@@ -1945,6 +1969,110 @@ mod core_tests {
             .expect("reconcile ok");
         assert_eq!(progress.done, 1);
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
+    }
+
+    /// One Browse.Item list element: decodable with a cache_key, or still
+    /// waiting for its thumbnail (no cache_key), as during a phone backup.
+    fn list_element(id: i64, decodable: bool) -> String {
+        if decodable {
+            format!(
+                r#"{{"id":{id},"filename":"IMG_{id}.jpg","type":"photo","additional":{{"thumbnail":{{"cache_key":"CK{id}","unit_id":{id}}}}}}}"#
+            )
+        } else {
+            format!(r#"{{"id":{id},"filename":"IMG_{id}.jpg","type":"photo","additional":{{}}}}"#)
+        }
+    }
+
+    fn list_body(elements: &[String]) -> String {
+        format!(
+            r#"{{"success":true,"data":{{"list":[{}]}}}}"#,
+            elements.join(",")
+        )
+    }
+
+    async fn mock_list_page(
+        server: &mut mockito::ServerGuard,
+        offset: u32,
+        body: String,
+    ) -> mockito::Mock {
+        server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("method".into(), "list".into()),
+                mockito::Matcher::UrlEncoded("offset".into(), offset.to_string()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body)
+            .create_async()
+            .await
+    }
+
+    struct NoopCrawlObserver;
+    impl FfiCrawlObserver for NoopCrawlObserver {
+        fn on_progress(&self, _p: CrawlProgress) {}
+    }
+
+    /// R1-3c through the real facade path: a full page of 200 in which one
+    /// item has no cache_key yet must neither fail the crawl nor end it
+    /// early; the next page is fetched and every decodable item lands.
+    #[tokio::test]
+    async fn crawl_reads_past_a_full_page_with_an_item_missing_its_cache_key() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let first: Vec<String> = (1..=200).map(|id| list_element(id, id != 50)).collect();
+        let page0 = mock_list_page(&mut server, 0, list_body(&first)).await;
+        let page1 = mock_list_page(&mut server, 200, list_body(&[list_element(201, true)])).await;
+        let core = logged_in_core("crawl-skipped-item", &server).await;
+
+        let progress = core
+            .crawl_space(Space::Personal, Box::new(NoopCrawlObserver))
+            .await
+            .expect("one undecodable item must not fail the crawl");
+        page0.assert_async().await;
+        page1.assert_async().await;
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 200);
+        assert!(progress.complete);
+    }
+
+    /// R1-3c: a reconcile where a known local id comes back without a
+    /// cache_key keeps that row (the server still has it).
+    #[tokio::test]
+    async fn reconcile_keeps_a_local_row_whose_id_was_skipped() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let elements = vec![
+            list_element(1, true),
+            list_element(2, true),
+            list_element(5, false),
+        ];
+        let _page0 = mock_list_page(&mut server, 0, list_body(&elements)).await;
+        let core = logged_in_core("reconcile-skipped-id", &server).await;
+        seed_asset(&core, Space::Personal, 5);
+
+        core.reconcile_delta(Space::Personal)
+            .await
+            .expect("one undecodable item must not fail the reconcile");
+        let mut ids: Vec<i64> = core
+            .fetch_assets(Space::Personal, 0, 100)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![1, 2, 5]);
     }
 
     #[tokio::test]

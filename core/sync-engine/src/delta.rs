@@ -105,12 +105,16 @@ impl<'a> DeltaReconciler<'a> {
         let mut seen_ids: HashSet<i64> = HashSet::with_capacity(local.len());
 
         loop {
-            let page = self.source.list_items(space, offset, limit).await?;
-            let fetched = page.assets.len() as u32;
+            let page = self.source.list_page(space, offset, limit).await?;
+            // Paging uses the RAW count (see `ListedPage`), and an id the
+            // server listed but that does not decode yet counts as present:
+            // its local row, if any, must survive the deletion mirror.
+            let listed = page.raw_count;
 
             for a in &page.assets {
                 seen_ids.insert(a.id);
             }
+            seen_ids.extend(page.skipped_ids.iter().copied());
 
             // Keyed strictly on (server_id, server_version): a row with no
             // local entry is NEW, a row whose stored version differs is
@@ -137,8 +141,8 @@ impl<'a> DeltaReconciler<'a> {
                 self.store.set_highest_version(space, v)?;
             }
 
-            offset += fetched;
-            if fetched < limit {
+            offset += listed;
+            if listed < limit {
                 break;
             }
         }
@@ -470,6 +474,49 @@ mod tests {
             .collect();
         assert!(!ids.contains(&1));
         assert!(ids.contains(&40_001));
+    }
+
+    fn local_ids(store: &Store) -> Vec<i64> {
+        let mut ids: Vec<i64> = store
+            .fetch_assets(Space::Personal, 0, u32::MAX)
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// R1-3c: an id the server lists but that cannot be decoded right now is
+    /// still PRESENT on the server. A reconcile must keep its local row, and
+    /// a full page holding it must not end the listing early (which would
+    /// also sweep every row on the later pages).
+    #[tokio::test]
+    async fn skipped_id_keeps_its_local_row_and_later_pages_are_read() {
+        use crate::test_support::SkippingSource;
+        let store = Store::open_in_memory().unwrap();
+        seed(&store, 1..=5);
+        let src = SkippingSource::new((1..=5).map(|id| asset_v(id, 1, Some(id))).collect(), &[3]);
+        let rec = DeltaReconciler::new(&store, &src, 2);
+        rec.reconcile(Space::Personal).await.unwrap();
+        assert_eq!(src.calls.lock().unwrap().as_slice(), &[0, 2, 4]);
+        assert_eq!(local_ids(&store), vec![1, 2, 3, 4, 5]);
+    }
+
+    /// R1-3c: an item skipped on one run is picked up by a later run once it
+    /// decodes, as a NEW row.
+    #[tokio::test]
+    async fn skipped_item_is_picked_up_once_it_decodes() {
+        use crate::test_support::SkippingSource;
+        let store = Store::open_in_memory().unwrap();
+        let src = SkippingSource::new((1..=5).map(|id| asset_v(id, 1, Some(id))).collect(), &[3]);
+        let rec = DeltaReconciler::new(&store, &src, 2);
+        rec.reconcile(Space::Personal).await.unwrap();
+        assert_eq!(local_ids(&store), vec![1, 2, 4, 5]);
+
+        src.undecodable.lock().unwrap().clear();
+        rec.reconcile(Space::Personal).await.unwrap();
+        assert_eq!(local_ids(&store), vec![1, 2, 3, 4, 5]);
     }
 
     /// A successful but empty listing for a populated space must never be
