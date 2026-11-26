@@ -24,11 +24,11 @@ A native macOS app (Apple Photos-like: browse, view, edit, delete, albums, searc
 - **Adversarial review when it matters.** Before finalizing architecture decisions or shipping risky changes (anything touching delete, edit, or sync), run an adversarial review (skeptic sub-agents or `/ultrareview`) rather than trusting the first design.
 - **Quality bar: catch bugs before deployment.** For a client app this means unit tests on the core, integration tests against a real/mocked DSM, UI tests for the grid and destructive actions, and a security pass on auth/secrets handling. Suggest additional test types proactively.
 
-## Technical direction (from research, to be confirmed in the plan)
+## Technical direction
 
 - **UI:** SwiftUI app shell with an AppKit `NSCollectionView` (via `NSViewRepresentable`) for the photo grid, because `LazyVGrid` stutters at the 20k-100k library size. QuickLook for detail/preview.
-- **Local index:** GRDB (SQLite) mirroring NAS state; scroll from the local DB so remote latency never blocks the UI. Two-tier thumbnail cache (memory + on-disk, keyed by Synology `cache_key`).
-- **Shared core:** decision pending between Rust+UniFFI (max Windows flexibility) and a pure-Swift SwiftPM core (one language). Keep the core boundary clean from day one regardless.
+- **Local index:** SQLite (via `rusqlite` in the Rust core) mirroring NAS state; scroll from the local DB so remote latency never blocks the UI. Two-tier thumbnail cache (memory + on-disk, keyed by Synology `cache_key`).
+- **Shared core:** Rust, exposed to Swift through UniFFI (max Windows flexibility). Keep the core boundary clean regardless.
 - **API:** Synology `SYNO.Foto.*` (personal) / `SYNO.FotoTeam.*` (shared) Web API, auth via `SYNO.API.Auth`. Unofficial/undocumented; version-guard against DSM releases and verify against the user's own NAS.
 - **Connectivity:** LAN + Tailscale first (direct IP works for both). QuickConnect/DDNS is on the TODO for later.
 - **Secrets:** DSM session/token in the macOS Keychain, never in UserDefaults.

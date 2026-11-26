@@ -24,8 +24,9 @@ build/macos/
 - Open `platforms/macos/MySynologyPhotos.xcodeproj` and build. The PhotosCore
   target's first build phase (`scripts/macos/xcodegen/ensure-xcframework.sh`)
   runs on every build and rebuilds the xcframework through `make xcframework`
-  when it is missing or older than any Rust source, `Cargo.toml`, `Cargo.lock`
-  or `.udl` file.
+  when it is missing or older than any Rust source, `Cargo.toml`, `Cargo.lock`,
+  `uniffi.toml`, `rust-toolchain.toml`, `.cargo/config*` or the `Makefile`, or when a
+  source file was added, removed or renamed under `core/`.
 - After editing `project.yml`, regenerate: `cd platforms/macos && xcodegen generate`,
   and commit both files.
 - `make bindings` regenerates the Swift bindings into `platforms/macos/Generated/`.
@@ -43,6 +44,8 @@ Never run the UI test target unattended: it raises an automation prompt.
 ## Package
 
 `make dmg` (or `scripts/macos/package/dmg.sh`) builds the Release app and writes
-`build/macos/dist/MySynologyPhotos-<version>.dmg`. The Xcode `Installer` scheme
+`build/macos/dist/MySynologyPhotos-<version>.dmg`, where the version is the built
+app's `CFBundleShortVersionString` plus the short commit hash when HEAD is not on a
+tag. A tree with uncommitted tracked changes is refused unless `DMG_ALLOW_DIRTY=1`. The Xcode `Installer` scheme
 does the same through `scripts/macos/package/dmg-from-app.sh`. Packaging refuses
 an app that is not signed with the expected team.
