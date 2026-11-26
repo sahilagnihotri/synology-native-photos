@@ -20,7 +20,7 @@ Review workers are READ-ONLY on source. Each owns only its notes file.
 | R4 | Review app auth, session, caches, detail, trash, settings | `agent-notes/r4-app-auth-detail.md` | `platforms/macos/MySynologyPhotos/{Auth,Session,CoreBridge,Thumbnails,Detail,Trash,Settings,Reachability}/` and their tests | in-progress | REV-2026-11 |
 | R5 | Review app grid, root, map, discovery, search, filter, menu, sidebar | `agent-notes/r5-app-grid-root.md` | `platforms/macos/MySynologyPhotos/{Grid,Map,Discovery,Search,Filter,Menu,Sidebar,About}/`, `RootView.swift`, app entry, their tests | in-progress | REV-2026-11 |
 | R6 | Review scripts, Makefile, project.yml, bindings freshness, docs drift, repo hygiene | `agent-notes/r6-build-infra.md` | `scripts/{shared,macos,ci,tests}/`, `Makefile`, `platforms/macos/project.yml`, root docs | in-progress | REV-2026-11 |
-| W1 | Windows core: run the cross check, fix the scripts and any core breakage | `scripts/windows/`, `scripts/ci/ci.ps1`, `rust-toolchain.toml`, `.gitattributes` | whole core | queued (main) | WIN-1 |
+| W1 | Windows core: run the cross check, fix the scripts and any core breakage | `scripts/windows/`, `scripts/ci/ci.ps1`, `rust-toolchain.toml`, `.gitattributes` | whole core | in-progress (main): cross check passes, ps1 scripts not executed | WIN-1 |
 
 Fix tasks are added below once the findings are synthesized and verified.
 

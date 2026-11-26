@@ -16,6 +16,21 @@ Completed work with commit hashes. Newest at top.
   test run passes: 498 tests (492 Swift Testing in 52 suites plus 6 XCTest),
   0 failed, 0 skipped.
 
+- WIN-1, core cross check: `scripts/windows/check-core.sh` ran for the first
+  time. The whole workspace with all targets type checks for
+  `x86_64-pc-windows-msvc` with 0 warnings, from a fresh target directory too
+  (so the C code in ring and the bundled SQLite compiles), and clippy with
+  `-D warnings` is clean for the target. No core change was needed. The script
+  now runs that clippy step as well (`5362d54`). Falsified both: a `cfg(windows)`
+  type error made the check exit 1, and a `cfg(windows)` lint made the clippy
+  step exit 1, each restored afterwards.
+- `scripts/windows/setup.ps1` (`7705f48`): installs the pinned toolchain with
+  clippy and rustfmt instead of stable, checks for the MSVC toolset through
+  vswhere, looks for the bindgen where it really is, and the first check no
+  longer parses as `Have("rustc" -and ...)`. Not executed, see WIN-1.
+- `.gitattributes` (`2140744`): LF in the repository and for shell scripts in
+  the working tree. `git add --renormalize .` changed no tracked file.
+
 ## Session 2026-10-16: platform layout, local CI, recycle errors, albums API
 
 - Platform layout (plan `documentation/plans/done/2026-10-16-platform-layout-restructure.md`):

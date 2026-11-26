@@ -16,9 +16,27 @@ Dispatch state and owned paths are in `tasks.md`.
   profile and measure the app size change first.
 - [ ] REV-2026-11: full-repo review by six read-only reviewers against
   `1c2c107`, then one commit per verified finding with a falsified test.
-- [ ] WIN-1: run `scripts/windows/check-core.sh` for real (needs cargo-xwin,
-  LLVM and the Windows rust-std), fix what it finds, and fix `ci.ps1` and
-  `setup.ps1` as far as they can be exercised from a Mac.
+- [ ] WIN-1 (partly done): `scripts/windows/check-core.sh` now runs for real
+  and passes (see `Fixed.md`). Still open: `scripts/ci/ci.ps1` and
+  `scripts/windows/setup.ps1` have never been EXECUTED. `setup.ps1` was fixed by
+  reading only (`7705f48`). PowerShell 7.7.0 for macOS is unpacked at
+  `~/.cache/claude-sandbox/pwsh/pwsh`, but running it from the agent session was
+  refused by the permission classifier. To exercise them on the Mac:
+  `~/.cache/claude-sandbox/pwsh/pwsh -NoProfile -File scripts/ci/ci.ps1 core` and
+  `... -File scripts/windows/setup.ps1 -Verify` (the MSVC check is expected to
+  fail off Windows). Tests have also never RUN on Windows: the cross check type
+  checks and lints, it does not link or execute.
+- [ ] WIN-2: the winget branch of `scripts/windows/setup.ps1` that installs the
+  Visual Studio Build Tools has never run. Exercise it on a Windows machine
+  without Visual Studio.
+- [ ] WIN-3: the cross check prerequisites live only in the agent sandbox cache
+  on this Mac (`~/.cache/claude-sandbox`: a second rustup home with the
+  `x86_64-pc-windows-msvc` rust-std, and cargo-xwin 0.24.2 rebuilt to verify TLS
+  against the bundled Mozilla roots because the macOS trust service is not
+  reachable from the sandbox). For a normal terminal run:
+  `rustup target add x86_64-pc-windows-msvc` and
+  `cargo install --locked cargo-xwin`. Homebrew `llvm` was installed system
+  wide on 2026-11-26; the check also passed without it on PATH.
 - [ ] HOUSEKEEPING-1: this Mac's checkout had sat 57 commits behind
   `origin/main` since 2026-07-26. Leftovers of the old layout are still on disk
   and untracked: `app/`, `PhotosCore.xcframework/`, `dist/` (holds
@@ -32,8 +50,6 @@ Layout is now `core/`, `platforms/macos`, `platforms/windows`, `build/`, `script
 Windows work continues on the Windows machine from `documentation/platforms/windows-handover.md`.
 
 - [ ] `scripts/macos/ffi-smoke.sh` is broken (predates the move): its embedded Swift calls `Connection(...)` without `allowUntrustedTls`, and a `|| true` hides the compile error, so it reports success while testing nothing. Fix the call and drop the `|| true`.
-- [ ] `scripts/ci/ci.ps1` and `scripts/windows/setup.ps1` have never run (no PowerShell on the Mac). First job on the Windows machine.
-- [ ] `scripts/windows/check-core.sh` has never run: cargo-xwin and the `x86_64-pc-windows-msvc` rust-std are not installed on the Mac (script exits 3 or 4 with the install command).
 - [ ] `.github/workflows/ci.yml` (manual, `stable` only) is untested; the Xcode on `macos-latest` may be older than the macOS 26 deployment target. Creating `stable` is Sahil's call.
 - [ ] The `ci.sh` swift stage FAIL path was not falsified (fmt, clippy, test and unknown stage were, via `scripts/tests/test-ci.sh`).
 - [ ] The Recently Deleted restore loop's "restored N of M" message has no test (loop reworked to `enumerate` in `375c156`).
