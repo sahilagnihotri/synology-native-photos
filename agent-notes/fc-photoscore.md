@@ -16,3 +16,12 @@
 - design: new `sync_engine::ListedPage { assets, total, raw_count, skipped_ids }` and a `PageSource::list_page` method with a default that wraps `list_items` (raw_count = decoded count, no skips), so every existing test source keeps working unchanged. `Crawler` and `DeltaReconciler` call `list_page`, advance the offset by `raw_count` and stop when `raw_count < limit`; the reconcile adds `skipped_ids` to the seen set before the deletion mirror and the sweep guard. `ApiPageSource::list_page` uses `synology_api::list_items_page` and synthesizes `total` from `raw_count`. Page errors still fail the crawl. Plain Rust, no UniFFI change.
 - changed tests: none
 - left open: a crawl whose only gap is a skipped item still flips the completion barrier (the end of the space was reached); the skipped item enters the index at the next Refresh (reconcile), not at the next crawl, because a completed crawl is a no-op.
+
+### R2-2: FIXED (Disabled); Unknown is NEEDS RULING
+- commit: 8ab1b83
+- tests: `core_tests::delete_assets_refuses_when_the_recycle_bin_is_disabled` (localhost mockito, delete mock `expect(0)` asserted, User.Home mock asserted, local row stays) and `core_tests::delete_assets_proceeds_when_the_recycle_bin_is_enabled`
+- failed before the fix: `panicked at core/photoscore/src/lib.rs:3568:14` (`a delete with the recycle bin off must be refused`, delete_assets returned Ok after sending the delete); the Enabled test failed on the unhit User.Home mock
+- passes after: `cargo test -p photoscore`: 70 passed, 0 failed, 0 ignored (lib)
+- design: `delete_assets` calls `synology_api::recycle_bin_status` under `trash_lock`, after the session check and before `permanent_delete`, and returns `CoreError::CapabilityUnavailable` on Disabled. A Network or Auth error from the status read fails the delete closed. No UniFFI change (existing variant).
+- changed tests: none. Existing delete tests have no User.Home mock; mockito answers 501, which `recycle_bin_status` maps to Unknown, so they still exercise the delete.
+- NEEDS RULING (Unknown): the Mac `DeleteController.requestDelete` deliberately raises the confirm for `.unknown` with "may be permanent" wording, and `confirmDelete` sends the delete. Refusing Unknown in the core would make delete impossible for a non-admin account. Options: (a) keep as is; (b) refuse Unknown too and accept that non-admin accounts cannot delete; (c) add an exported `delete_assets_confirmed_permanent` style flag (FFI change, needs ruling).
