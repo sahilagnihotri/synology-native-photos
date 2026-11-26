@@ -3,6 +3,7 @@
 # against a fake git repo and a fake .app under $TMPDIR. codesign and hdiutil
 # are stubs earlier on PATH, so nothing is signed and no disk image is built.
 # DMG_SCRIPT lets a mutated copy be checked against these cases.
+# shellcheck disable=SC2319  # $? after an && list is the intended result here
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
