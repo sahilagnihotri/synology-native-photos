@@ -980,10 +980,10 @@ impl PhotosCore {
     /// folder makes it plainly an ADDED asset, not a changed one.
     ///
     /// FAIL CLOSED on either step: if the upload fails, the re-index is never
-    /// sent (there is nothing new to index) and the error propagates; if the
-    /// re-index fails, the file is already safely uploaded and the error still
-    /// surfaces so the caller can retry (a later crawl/reindex also picks it
-    /// up). There is no local index row to write here: the new photo only
+    /// sent (there is nothing new to index) and the error propagates. If only
+    /// the re-index fails, the file is already safely uploaded, so the save
+    /// still succeeds (a retry could only collide with or duplicate the
+    /// upload) and the failure is logged; a later re-index picks it up. There is no local index row to write here: the new photo only
     /// enters the local mirror when a subsequent crawl re-reads the library.
     ///
     /// Reuses `recycle_call_context` for the session basics (transport + sid +
@@ -1006,7 +1006,15 @@ impl PhotosCore {
             &jpeg,
         )
         .await?;
-        synology_api::trigger_reindex(&transport, &sid, syno_token.as_deref()).await
+        // The edit is now safely on the NAS. A failed re-index must not fail
+        // the save: a retry would re-upload the same name (refused, since
+        // overwrite=false) or add a duplicate. The next re-index (a restore
+        // or the NAS's own indexing) picks the file up.
+        if let Err(e) = synology_api::trigger_reindex(&transport, &sid, syno_token.as_deref()).await
+        {
+            tracing::warn!("edited photo {filename} uploaded, but the re-index failed: {e}");
+        }
+        Ok(())
     }
 
     // --- Phase 2b: real delete + DSM recycle bin ------------------------
@@ -4399,6 +4407,47 @@ mod core_tests {
         .expect("save_edited_photo ok");
         _upload.assert_async().await;
         _reindex.assert_async().await;
+    }
+
+    /// Once the upload succeeded the edit is safely on the NAS. A failing
+    /// re-index must not report the save as failed: a retry would upload
+    /// the same name again and fail (overwrite=false) or add a duplicate.
+    #[tokio::test]
+    async fn save_edited_photo_succeeds_when_only_the_reindex_fails() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let upload = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::Any)
+            .match_body(mockito::Matcher::Regex("SYNO.FileStation.Upload".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let reindex = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=reindex".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":false,"error":{"code":119}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("save-edited-reindex-fails", &server).await;
+        core.save_edited_photo("x-edited.jpg".into(), b"JPEG".to_vec())
+            .await
+            .expect("an uploaded edit is saved even if the re-index fails");
+        upload.assert_async().await;
+        reindex.assert_async().await;
     }
 
     #[tokio::test]
