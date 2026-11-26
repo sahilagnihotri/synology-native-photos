@@ -102,7 +102,8 @@ Dispatch state and owned paths are in `tasks.md`.
   - [ ] AV-11 (low): the `list_items` doc comment is stale after `ee27208`.
   - [ ] AV-12: a comma inside a JSON path array is unverified on the real NAS
     (restore and delete of a file under a folder such as "Paris, France"). A
-    wrong split fails with a File Station error, it cannot reach another file.
+    wrong split fails with a File Station error: a folder name ending in a
+    comma is refused, so no piece after a comma can be an absolute path.
 - [ ] SYNC-1 (decision for Sahil): since `05240b6` a reconcile never applies an
   EMPTY server listing as deletions, and applies a drop of more than 20 percent
   of a space with 100 or more rows only when the same listing comes back twice
