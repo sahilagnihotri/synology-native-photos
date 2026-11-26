@@ -50,6 +50,10 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     var recycleBinStatusResult: Result<RecycleBinStatus, CoreError> = .success(.enabled)
     var restoreRecentlyDeletedResult: Result<Void, CoreError> = .success(())
     var emptyRecentlyDeletedResult: Result<Void, CoreError> = .success(())
+    /// Recycle paths the fake bin loses before a scripted restore or empty
+    /// failure is thrown, modelling the core's partial progress (it stops at
+    /// the first failing path after earlier ones already moved or went).
+    var recycleOpRemovesBeforeFailing: Set<String> = []
     /// Result for `recycleThumbnail`. Defaults to a tiny non-empty payload so
     /// a test that never scripts it still gets bytes rather than an error.
     var recycleThumbnailResult: Result<Data, CoreError> = .success(Data([0xFF, 0xD8, 0xFF]))
@@ -489,12 +493,18 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     func restoreRecentlyDeleted(recyclePaths: [String]) async throws {
         restoreRecentlyDeletedCallCount += 1
         lastRestoreRecentlyDeletedPaths = recyclePaths
+        if case .failure = restoreRecentlyDeletedResult {
+            recentlyDeleted.removeAll { recycleOpRemovesBeforeFailing.contains($0.recyclePath) }
+        }
         try restoreRecentlyDeletedResult.get()
     }
 
     func emptyRecentlyDeleted(recyclePaths: [String]) async throws {
         emptyRecentlyDeletedCallCount += 1
         lastEmptyRecentlyDeletedPaths = recyclePaths
+        if case .failure = emptyRecentlyDeletedResult {
+            recentlyDeleted.removeAll { recycleOpRemovesBeforeFailing.contains($0.recyclePath) }
+        }
         try emptyRecentlyDeletedResult.get()
     }
 

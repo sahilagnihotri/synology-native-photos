@@ -68,6 +68,48 @@ struct RecentlyDeletedModelTests {
         #expect(libraryRefreshed, "restore should ask the library to refresh")
     }
 
+    /// R4-5: the core stops at the first failing path after earlier ones
+    /// already moved. The list must reload so those rows leave it, the message
+    /// ("restored N of M") must survive the reload, and a retry must not
+    /// resend the path that already went.
+    @Test func partialRestoreFailureReloadsKeepsTheMessageAndRetriesOnlyTheRest() async {
+        let (model, fake) = makeModel([item("#recycle/a"), item("#recycle/b"), item("#recycle/c")])
+        await model.load()
+        model.selection = ["#recycle/a", "#recycle/b", "#recycle/c"]
+        fake.restoreRecentlyDeletedResult = .failure(
+            .UnexpectedResponse(message: "restored 1 of 3 item(s) before failing: boom"))
+        fake.recycleOpRemovesBeforeFailing = ["#recycle/a"]
+
+        var libraryRefreshed = false
+        await model.restoreSelected { libraryRefreshed = true }
+
+        #expect(model.items.map(\.recyclePath) == ["#recycle/b", "#recycle/c"], "the restored row must leave the list")
+        #expect(model.selection == ["#recycle/b", "#recycle/c"])
+        #expect(model.errorMessage?.contains("restored 1 of 3") == true, "the partial progress message must be shown")
+        #expect(libraryRefreshed, "the restored item is back in the library, which must refresh")
+
+        fake.restoreRecentlyDeletedResult = .success(())
+        await model.restoreSelected {}
+        #expect(fake.lastRestoreRecentlyDeletedPaths == ["#recycle/b", "#recycle/c"], "retry must not resend the restored path")
+    }
+
+    /// R4-5, permanent delete flavour.
+    @Test func partialPermanentDeleteFailureReloadsAndKeepsTheMessage() async {
+        let (model, fake) = makeModel([item("#recycle/a"), item("#recycle/b")])
+        await model.load()
+        model.selection = ["#recycle/a", "#recycle/b"]
+        fake.emptyRecentlyDeletedResult = .failure(
+            .UnexpectedResponse(message: "deleted 1 of 2 item(s) before failing: boom"))
+        fake.recycleOpRemovesBeforeFailing = ["#recycle/a"]
+
+        model.requestEmpty()
+        await model.confirmEmpty()
+
+        #expect(model.items.map(\.recyclePath) == ["#recycle/b"])
+        #expect(model.selection == ["#recycle/b"])
+        #expect(model.errorMessage?.contains("deleted 1 of 2") == true)
+    }
+
     @Test func restoreWithEmptySelectionMakesNoCall() async {
         let (model, fake) = makeModel([item("#recycle/a")])
         await model.load()

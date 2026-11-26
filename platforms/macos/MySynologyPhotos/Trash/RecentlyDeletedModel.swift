@@ -123,7 +123,14 @@ final class RecentlyDeletedModel {
             await load()
             await onDone()
         } catch {
-            errorMessage = (error as? CoreError)?.userMessage ?? "Could not restore the selected items."
+            let message = (error as? CoreError)?.userMessage ?? "Could not restore the selected items."
+            // The core stops at the first failing path, after earlier ones
+            // already moved. Reload so those rows leave the list (a retry must
+            // not resend them), and refresh the library for the ones that
+            // came back. `load` clears the message, so set it afterwards.
+            await load()
+            await onDone()
+            errorMessage = message
         }
     }
 
@@ -151,7 +158,10 @@ final class RecentlyDeletedModel {
             selection.removeAll()
             await load()
         } catch {
-            errorMessage = (error as? CoreError)?.userMessage ?? "Could not permanently delete the selected items."
+            let message = (error as? CoreError)?.userMessage ?? "Could not permanently delete the selected items."
+            // Partial progress: rows already deleted must leave the list.
+            await load()
+            errorMessage = message
         }
     }
 
