@@ -68,3 +68,11 @@
 - passes after: `cargo test -p photoscore`: 75 passed, 0 failed, 0 ignored (lib)
 - design: the reindex error is logged with `tracing::warn!` and the save returns Ok. Upload failures still propagate and still send no reindex (existing test). No UniFFI change.
 - left open: the UI is not told the reindex failed (that needs a new return type, an FFI change), so the edited copy may take until the next reindex (a restore, or DSM's own indexing; unverified how soon DSM indexes on its own) to appear in the library.
+
+### R2-12: FIXED
+- commit: 6bc245f
+- test: `core_tests::concurrent_atomic_cache_writes_never_collide_on_the_temp_name` (256 threads behind a barrier, each writing its own final file in one temp directory)
+- failed before the fix, three runs: `8 of 256 writes failed: Some(Storage { message: "File exists (os error 17)" })`, then 30 of 256, then 16 of 256
+- passes after: three runs green; `cargo test -p photoscore`: 76 passed, 0 failed, 0 ignored (lib)
+- design: a function local `static AtomicU64` counter appended to the temp name (`.tmp-{pid}-{clock digest}-{seq}`). No UniFFI change.
+- left open: none. Two processes sharing a pid cannot run at once, and the clock part still separates runs.
