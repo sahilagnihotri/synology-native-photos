@@ -141,3 +141,52 @@ async fn download_omits_syno_token_header_when_absent() {
     assert_eq!(bytes, b"BYTES".to_vec());
     _m.assert_async().await;
 }
+
+/// R1-7: a proxy or a restarting DSM answering 503 with a text/plain body
+/// must never come back as the original's bytes. The editor would otherwise
+/// duplicate and upload "Service Unavailable" as the edited copy.
+#[tokio::test]
+async fn download_non_2xx_text_body_is_an_error_not_file_bytes() {
+    for (status, body) in [
+        (503, "Service Unavailable"),
+        (502, "Bad Gateway"),
+        (404, "nope"),
+    ] {
+        let mut server = mockito::Server::new_async().await;
+        let _m = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(Matcher::Any)
+            .with_status(status)
+            .with_header("content-type", "text/plain")
+            .with_body(body)
+            .create_async()
+            .await;
+        let t = transport_for(&server);
+        let result = download_original(&t, "SID", Space::Personal, 101, "CK101", 2, None).await;
+        assert!(
+            result.is_err(),
+            "HTTP {status} must be an error, got Ok({:?})",
+            result.map(|b| String::from_utf8_lossy(&b).into_owned())
+        );
+    }
+}
+
+/// A non-2xx reply that still carries a DSM JSON error envelope keeps its
+/// specific mapping (here 400, bad credentials, which maps to Auth).
+#[tokio::test]
+async fn download_non_2xx_json_envelope_keeps_its_error_mapping() {
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(500)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"success":false,"error":{"code":400}}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let err = download_original(&t, "SID", Space::Personal, 101, "CK101", 2, None)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, models::CoreError::Auth { .. }), "got {err:?}");
+}

@@ -87,6 +87,7 @@ pub async fn download_original(
         .send()
         .await
         .map_err(|e| crate::transport::network_error("download request failed", e))?;
+    let status = response.status();
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -96,5 +97,14 @@ pub async fn download_original(
         .bytes()
         .await
         .map_err(|e| crate::transport::network_error("reading download body failed", e))?;
+    if !status.is_success() {
+        // A non-2xx body is never the original: a proxy's "Service
+        // Unavailable" page must not reach duplicate-before-edit as file
+        // bytes. A DSM JSON error envelope keeps its specific mapping.
+        map_binary_or_error(content_type.as_deref(), &bytes)?;
+        return Err(CoreError::UnexpectedResponse {
+            message: format!("download failed (HTTP {})", status.as_u16()),
+        });
+    }
     map_binary_or_error(content_type.as_deref(), &bytes)
 }
