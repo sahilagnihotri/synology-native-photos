@@ -68,6 +68,11 @@ final class MapModel {
             let assets = try await client.locatedAssets(space: space)
             annotations = assets.compactMap { asset in
                 guard let latitude = asset.latitude, let longitude = asset.longitude else { return nil }
+                // A (0,0) "no fix" default, NaN or an out of range value is not a
+                // real place and would zoom the map out around one stray pin.
+                guard latitude.isFinite, longitude.isFinite,
+                      (-90...90).contains(latitude), (-180...180).contains(longitude),
+                      !(latitude == 0 && longitude == 0) else { return nil }
                 return PhotoAnnotationData(asset: asset, latitude: latitude, longitude: longitude)
             }
             errorMessage = nil

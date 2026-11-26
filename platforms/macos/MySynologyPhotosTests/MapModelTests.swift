@@ -59,6 +59,23 @@ struct MapModelTests {
         #expect(fake.lastLocatedAssetsSpace == .personal)
     }
 
+    /// R5-12: (0,0), NaN and out of range coordinates are not plottable.
+    @Test func dropsNullIslandNaNAndOutOfRangeCoordinates() async {
+        let fake = FakePhotosCore()
+        fake.locatedAssetsResult = .success([
+            asset(id: 1, latitude: 0, longitude: 0),
+            asset(id: 2, latitude: 91, longitude: 10),
+            asset(id: 3, latitude: .nan, longitude: 5),
+            asset(id: 4, latitude: 10, longitude: 181),
+            asset(id: 5, latitude: 59.91, longitude: 10.75),
+        ])
+        let model = MapModel(client: PhotosCoreClient(core: fake))
+
+        await model.load(space: .personal)
+
+        #expect(model.annotations.map(\.asset.id) == [5])
+    }
+
     @Test func exposesEachLocatedAssetAsAnAnnotationCarryingItsCoordinate() async {
         let fake = FakePhotosCore()
         fake.locatedAssetsResult = .success([
