@@ -3523,6 +3523,26 @@ mod core_tests {
             .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
             .create_async()
             .await;
+        // The delete first confirms the entry is a listed FILE (one listing
+        // that shows a.jpg), then polls until it is gone (the empty listing).
+        // mockito serves the earlier mock until its expected hit is used up.
+        let _present = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+                mockito::Matcher::UrlEncoded(
+                    "folder_path".into(),
+                    "/home/#recycle/Photos".into(),
+                ),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r##"{"success":true,"data":{"files":[{"isdir":false,"name":"a.jpg","path":"/home/#recycle/Photos/a.jpg"}]}}"##,
+            )
+            .expect(1)
+            .create_async()
+            .await;
         let _src = mock_empty_fs_folder(&mut server, "/home/#recycle/Photos").await;
         let _del = server
             .mock("POST", "/webapi/entry.cgi")
@@ -3541,6 +3561,7 @@ mod core_tests {
         core.empty_recently_deleted(vec!["/home/#recycle/Photos/a.jpg".into()])
             .await
             .expect("empty ok");
+        _present.assert_async().await;
         _del.assert_async().await;
     }
 
