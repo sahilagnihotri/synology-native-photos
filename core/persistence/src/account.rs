@@ -32,9 +32,11 @@ impl Store {
     /// to a DIFFERENT account and was cleared.
     ///
     /// - Same identity: nothing changes.
-    /// - No identity stored yet: the existing rows are adopted as this
-    ///   account's (a database from before this check was written by the one
-    ///   account the app was used with) and the identity is recorded.
+    /// - No identity stored yet and an empty index: the identity is
+    ///   recorded, nothing is cleared.
+    /// - No identity stored yet but rows present (a database from before
+    ///   this check): treated like a different account and cleared, because
+    ///   nothing says whose rows they are. Costs one fresh crawl.
     /// - Different identity: every NAS mirrored table is emptied (assets,
     ///   albums, per space app state such as owned album ids and the
     ///   reconcile sweep fingerprint, and the crawl cursor and barrier), so
@@ -45,7 +47,10 @@ impl Store {
         if stored.as_deref() == Some(identity) {
             return Ok(false);
         }
-        let reset = stored.is_some();
+        // No stored identity means nobody can say whose rows these are (a
+        // database from before this check, or the first launch after the
+        // upgrade). Fail closed: adopt only an empty index, clear otherwise.
+        let reset = stored.is_some() || self.index_has_rows()?;
         let tx = self.conn.unchecked_transaction().map_err(map_sql)?;
         if reset {
             tx.execute_batch(
@@ -64,6 +69,27 @@ impl Store {
         .map_err(map_sql)?;
         tx.commit().map_err(map_sql)?;
         Ok(reset)
+    }
+
+    /// True when any NAS mirrored table holds data. Default `sync_state`
+    /// rows (created on first read, no progress recorded) do not count.
+    fn index_has_rows(&self) -> Result<bool, CoreError> {
+        self.conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM assets)
+                     OR EXISTS (SELECT 1 FROM albums)
+                     OR EXISTS (SELECT 1 FROM app_state)
+                     OR EXISTS (SELECT 1 FROM sync_state
+                                WHERE initial_crawl_complete != 0
+                                   OR expected_total != 0
+                                   OR last_offset != 0
+                                   OR highest_seen_version IS NOT NULL
+                                   OR last_crawl_at IS NOT NULL
+                                   OR last_reconcile_at IS NOT NULL)",
+                [],
+                |r| r.get::<_, bool>(0),
+            )
+            .map_err(map_sql)
     }
 }
 
@@ -85,8 +111,19 @@ mod tests {
         }
     }
 
-    fn seeded() -> Store {
+    /// An index bound to `identity` while empty, then filled.
+    fn owned_by(identity: &str) -> Store {
         let store = Store::open_in_memory().unwrap();
+        assert!(!store.bind_account(identity).unwrap());
+        seed(store)
+    }
+
+    /// Rows with no recorded owner (a database from before the check).
+    fn seeded() -> Store {
+        seed(Store::open_in_memory().unwrap())
+    }
+
+    fn seed(store: Store) -> Store {
         store.upsert_assets(&[asset(1), asset(2)]).unwrap();
         store
             .upsert_album(&Album {
@@ -107,11 +144,40 @@ mod tests {
         store
     }
 
+    /// A database written before the identity existed (or on the first
+    /// launch after the upgrade) cannot say whose rows it holds, so they
+    /// must not be shown to whoever signs in: fail closed and clear.
     #[test]
-    fn first_bind_adopts_the_existing_rows() {
+    fn first_bind_over_unowned_rows_clears_them() {
         let store = seeded();
+        assert!(store.bind_account("https://nas-a:5001|alice").unwrap());
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
+        assert!(store.fetch_albums(Space::Personal).unwrap().is_empty());
+        assert_eq!(
+            store
+                .get_app_state(Space::Personal, "owned_album_id")
+                .unwrap(),
+            None
+        );
+        assert!(
+            !store
+                .load_sync_state(Space::Personal)
+                .unwrap()
+                .initial_crawl_complete
+        );
+        assert_eq!(
+            store.account_identity().unwrap().as_deref(),
+            Some("https://nas-a:5001|alice")
+        );
+    }
+
+    /// An empty index (a fresh install, even one whose default sync_state
+    /// rows were already created by a read) is adopted without a reset.
+    #[test]
+    fn first_bind_over_an_empty_index_adopts_it() {
+        let store = Store::open_in_memory().unwrap();
+        let _ = store.load_sync_state(Space::Personal).unwrap();
         assert!(!store.bind_account("https://nas-a:5001|alice").unwrap());
-        assert_eq!(store.asset_count(Space::Personal).unwrap(), 2);
         assert_eq!(
             store.account_identity().unwrap().as_deref(),
             Some("https://nas-a:5001|alice")
@@ -120,8 +186,7 @@ mod tests {
 
     #[test]
     fn same_account_keeps_the_index() {
-        let store = seeded();
-        store.bind_account("https://nas-a:5001|alice").unwrap();
+        let store = owned_by("https://nas-a:5001|alice");
         assert!(!store.bind_account("https://nas-a:5001|alice").unwrap());
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 2);
         assert!(
@@ -134,8 +199,7 @@ mod tests {
 
     #[test]
     fn a_different_account_clears_the_index_and_the_crawl_barrier() {
-        let store = seeded();
-        store.bind_account("https://nas-a:5001|alice").unwrap();
+        let store = owned_by("https://nas-a:5001|alice");
         assert!(store.bind_account("https://nas-a:5001|bob").unwrap());
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
         assert!(store.fetch_albums(Space::Personal).unwrap().is_empty());
@@ -158,8 +222,7 @@ mod tests {
 
     #[test]
     fn a_different_host_with_the_same_username_also_clears() {
-        let store = seeded();
-        store.bind_account("https://nas-a:5001|alice").unwrap();
+        let store = owned_by("https://nas-a:5001|alice");
         assert!(store.bind_account("https://nas-b:5001|alice").unwrap());
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 0);
     }

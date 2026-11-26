@@ -3780,6 +3780,43 @@ mod core_tests {
         );
     }
 
+    /// An index written before the account identity existed (the first
+    /// launch after the upgrade) has no recorded owner, so the first sign in
+    /// clears it rather than adopting it.
+    #[tokio::test]
+    async fn first_login_over_an_unowned_index_clears_rows_and_thumbnails() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let core = core_at("account-unowned");
+        // Rows and thumbnails written before the identity existed.
+        seed_asset(&core, Space::Personal, 1);
+        let thumbs = std::path::Path::new(&core.cache_dir).join("thumbs");
+        std::fs::create_dir_all(&thumbs).unwrap();
+        std::fs::write(thumbs.join("ck1"), b"someone's thumb").unwrap();
+
+        let conn = Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        core.login(conn, "bob".into(), "p".into(), None, None)
+            .await
+            .expect("login bob");
+        assert_eq!(
+            core.asset_count(Space::Personal).unwrap(),
+            0,
+            "rows with no recorded owner must not be shown"
+        );
+        assert!(!thumbs.join("ck1").exists(), "nor their thumbnails");
+    }
+
     /// The index belongs to one host plus username. Signing in as someone
     /// else must not show the previous account's rows; signing in again as
     /// the same account keeps them. Same rule for a restored session.
