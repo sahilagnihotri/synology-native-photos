@@ -25,3 +25,11 @@
 - passes after: `cargo test -p persistence`: `test result: ok. 64 passed; 0 failed; 0 ignored`
 - changed tests: none (the existing Shared all-zero row assertion still holds)
 - left open: the private function keeps its name `reset_crawl_barrier_for_completed_spaces` (no renames rule); its doc comment now says it resets every space.
+
+### R3-6: FIXED
+- commit: 0719051
+- test: `database_from_a_newer_version_is_refused_untouched` in core/persistence/src/schema.rs (user_version = latest + 1, a pre-existing schema_meta mirror value)
+- failed before the fix: `a newer database must be refused, got Ok(())`
+- passes after: `cargo test -p persistence`: `test result: ok. 65 passed; 0 failed; 0 ignored`
+- changed tests: none
+- left open: the refusal is `CoreError::Storage` with the message "the local database is from a newer version of the app (schema N, this build supports up to M); update the app to open it". The Mac app already shows store open failures as a terminal screen (`.storeFailed(error.userMessage)`), so no Swift change is needed for it to be visible. The check runs before BASE_DDL, so nothing at all is written to the newer file.
