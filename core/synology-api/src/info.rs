@@ -91,7 +91,8 @@ pub async fn probe_capabilities(transport: &Transport) -> Result<Vec<ApiCapabili
 /// 2 on the real NAS while every other Foto API goes to 7), and a desired
 /// version below the advertised min is pushed up to the min.
 ///
-/// FAIL CLOSED: if `api` is absent from `caps` entirely, this returns
+/// FAIL CLOSED: if `api` is absent from `caps` entirely, or advertises an
+/// inverted window (min above max), this returns
 /// `CoreError::CapabilityUnavailable` rather than silently picking a
 /// default version and risking a request against an endpoint that does
 /// not exist on this DSM.
@@ -102,5 +103,12 @@ pub fn pin_version(caps: &[ApiCapability], api: &str, desired: u32) -> Result<u3
             .ok_or_else(|| CoreError::CapabilityUnavailable {
                 api: api.to_string(),
             })?;
+    // An inverted window (min above max) is nonsense from the NAS, and
+    // `clamp` would panic on it across the FFI. Fail closed instead.
+    if cap.min_version > cap.max_version {
+        return Err(CoreError::CapabilityUnavailable {
+            api: api.to_string(),
+        });
+    }
     Ok(desired.clamp(cap.min_version, cap.max_version))
 }

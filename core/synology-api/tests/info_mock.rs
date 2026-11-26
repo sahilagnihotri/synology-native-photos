@@ -140,3 +140,22 @@ fn pin_version_missing_api_is_capability_unavailable() {
         "got {err:?}"
     );
 }
+
+/// R1-10: an inverted window (min above max) comes straight from the NAS's
+/// `SYNO.API.Info` reply. `u32::clamp` panics on it, and a panic across the
+/// FFI aborts the Mac app. It must fail closed as an unusable capability.
+#[test]
+fn pin_version_inverted_window_is_capability_unavailable_not_a_panic() {
+    let caps = vec![ApiCapability {
+        name: "SYNO.Foto.Browse.Item".into(),
+        path: "entry.cgi".into(),
+        min_version: 3,
+        max_version: 2,
+    }];
+    let result = std::panic::catch_unwind(|| pin_version(&caps, "SYNO.Foto.Browse.Item", 7));
+    let pinned = result.expect("pin_version must not panic on min > max");
+    assert!(
+        matches!(pinned, Err(CoreError::CapabilityUnavailable { ref api }) if api == "SYNO.Foto.Browse.Item"),
+        "got {pinned:?}"
+    );
+}
