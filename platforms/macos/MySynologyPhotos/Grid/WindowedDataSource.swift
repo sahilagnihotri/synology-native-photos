@@ -278,6 +278,13 @@ final class WindowedDataSource {
     /// large library).
     func residentItem(at index: Int) -> Asset? { resident[index] }
 
+    /// True when the data source is currently windowing `space`'s plain
+    /// library, as opposed to a search, collection, filter or fixed set.
+    func isShowingSpace(_ space: Space) -> Bool {
+        if case .space(let current) = source { return current == space }
+        return false
+    }
+
     /// Switches the active space, drops every cached row and page marker
     /// from the previous source, and re-queries count/readiness for the new
     /// one. Grid indices are meaningless across a source switch, so nothing

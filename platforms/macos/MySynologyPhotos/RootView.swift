@@ -292,6 +292,11 @@ struct LibraryView: View {
         .focusedSceneValue(\.libraryCommands, libraryCommandActions)
         .task {
             wireGridCallbacks()
+            // A re-login re-creates this view over a data source that may
+            // still be pointed at a search or collection from the last session.
+            if !env.dataSource.isShowingSpace(env.spaceSelection.current) {
+                await env.dataSource.setSpace(env.spaceSelection.current)
+            }
             await env.crawl.startCrawl(space: env.spaceSelection.current)
             await env.dataSource.refreshCount()
             await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)

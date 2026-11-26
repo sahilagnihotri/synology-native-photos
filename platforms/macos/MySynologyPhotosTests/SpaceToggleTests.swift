@@ -36,4 +36,27 @@ struct SpaceToggleTests {
         #expect(sel.current == .personal)
         #expect(ds.totalCount == 10)
     }
+
+    /// R5-1: returning to the library after a search must put the data source
+    /// back on the space, even though the space selection itself never changed.
+    @Test func toggleToCurrentSpaceAfterASearchRestoresTheSpaceSource() async {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0), .personal) }
+        fake.assetsForKeyword["dog"] = (0..<3).map { asset(Int64($0) + 9000, .personal) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.refreshCount()
+        let sel = SpaceSelection(current: .personal)
+
+        await ds.setSearch("dog")
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.totalCount == 3)
+
+        await sel.toggle(to: .personal, on: ds)
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+
+        #expect(ds.totalCount == 10, "the library, not the search results, must be showing")
+        #expect(ds.dateSections != nil, "the library is date sectioned")
+        #expect(ds.item(at: 0)?.id == 0)
+    }
 }
