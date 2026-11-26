@@ -239,7 +239,23 @@ fn set_user_version(conn: &Connection, version: i64) -> Result<(), CoreError> {
 /// `user_version` unchanged and the whole batch rolls back rather than
 /// landing half-applied. Safe to call on every open: a database already at
 /// `latest_version()` finds no pending steps and is a no-op.
+///
+/// A database whose `user_version` is above `latest_version()` was written by
+/// a newer build and may hold columns this build cannot fill (a NOT NULL one
+/// would break every upsert). It is refused before anything is written, so
+/// the newer build can still open it unchanged.
 pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CoreError> {
+    let found = user_version(conn)?;
+    if found > latest_version() {
+        return Err(CoreError::Storage {
+            message: format!(
+                "the local database is from a newer version of the app (schema {found}, \
+                 this build supports up to {}); update the app to open it",
+                latest_version()
+            ),
+        });
+    }
+
     conn.execute_batch(BASE_DDL).map_err(map_sql)?;
 
     let current = user_version(conn)?;
@@ -886,6 +902,49 @@ mod tests {
             "an in-progress crawl must restart from the beginning to backfill the new columns"
         );
         assert_eq!(limit, 0);
+    }
+
+    /// A database written by a newer app version may carry columns this
+    /// build does not know (a NOT NULL one breaks every upsert). Opening it
+    /// must fail with a storage error and must not write anything: neither
+    /// `user_version` nor the `schema_meta` mirror may be touched.
+    #[test]
+    fn database_from_a_newer_version_is_refused_untouched() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO schema_meta (key, value) VALUES ('schema_version', 'newer');",
+        )
+        .unwrap();
+        let newer = latest_version() + 1;
+        set_user_version(&conn, newer).unwrap();
+
+        let result = run_migrations(&conn);
+
+        match result {
+            Err(CoreError::Storage { message }) => assert!(
+                message.contains("newer"),
+                "the error should say the database is from a newer version: {message}"
+            ),
+            other => panic!("a newer database must be refused, got {other:?}"),
+        }
+        assert_eq!(user_version(&conn).unwrap(), newer);
+        let mirror: String = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(mirror, "newer");
+        let assets_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'assets'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(assets_tables, 0, "no DDL may run on a refused database");
     }
 
     /// A v4 database holding a row an older build flagged as trashed must,
