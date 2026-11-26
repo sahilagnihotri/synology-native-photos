@@ -52,3 +52,11 @@
 - passes after: `cargo test -p persistence`: 74 passed, 0 failed, 0 ignored; `cargo test -p photoscore`: 72 passed, 0 failed, 0 ignored (lib)
 - design: identity `"{base_url lowercased}|{username lowercased}"` stored in the existing `schema_meta` key/value table under `account_identity`, so there is no schema change and no migration step (a migration test is therefore not applicable; the legacy case, a database with rows and no identity, is covered by `first_bind_adopts_the_existing_rows`). `Store::bind_account` runs in one transaction. `PhotosCore::bind_index_to_account` runs on `login` after DSM accepts the credentials and on `restore_session` once the session validates, both before `Live` is set. No UniFFI change.
 - left open, for a ruling if wanted: (1) the old rows are DELETED, not hidden, so switching back to the first account costs a full re crawl (originals untouched; the index is a cache). Hiding would need an owner column on every mirrored table and a migration. (2) The same NAS reached by two names (LAN IP and MagicDNS) counts as two accounts and re crawls on each switch; the safe direction. (3) A legacy database is adopted by whichever account signs in first. (4) Login while a crawl holds the store fails with store busy.
+
+### R2-10: FIXED
+- commit: 1572682
+- tests: `core_tests::restore_recently_deleted_partial_failure_keeps_the_kind_and_the_count` and `core_tests::empty_recently_deleted_partial_failure_keeps_the_kind_and_the_count` (localhost mockito; item 1 succeeds, item 2 fails with DSM 119)
+- failed before the fix: restore `got UnexpectedResponse { message: "restored 1 of 2 item(s) before failing: authentication failed: synology session expired (code 119)" }`; empty `count missing: synology session expired (code 119)`
+- passes after: `cargo test -p photoscore`: 74 passed, 0 failed, 0 ignored (lib)
+- design: private `with_partial_progress(e, verb, done, total)` keeps the variant and prefixes the message for Auth, Network, Decode, UnexpectedResponse and Storage. No UniFFI change.
+- left open: OtpRequired and WriteRefused have no text field, so a partial failure of those kinds keeps the kind but loses the count (adding a field is an FFI change); CapabilityUnavailable is left unchanged because its field names an API. A failure on the first item is returned unchanged (count 0).
