@@ -18,6 +18,40 @@ struct RootRouter {
     }
 }
 
+/// The active search keyword plus a generation token. Typing begins a run and
+/// takes a token; clearing the box or changing the sidebar cancels, which
+/// invalidates every outstanding token. A run commits its keyword only if its
+/// token is still current, so a slow older search can never set an active
+/// search after the user cleared it or typed something newer.
+@MainActor
+@Observable
+final class SearchSession {
+    private(set) var activeKeyword: String?
+    private var generation = 0
+
+    /// Starts a new run and invalidates every earlier one.
+    func begin() -> Int {
+        generation += 1
+        return generation
+    }
+
+    func isCurrent(_ token: Int) -> Bool { token == generation }
+
+    /// Records `keyword` as the active search if `token` is still current.
+    @discardableResult
+    func commit(_ keyword: String, token: Int) -> Bool {
+        guard isCurrent(token) else { return false }
+        activeKeyword = keyword
+        return true
+    }
+
+    /// Drops the active search and invalidates every in-flight run.
+    func cancel() {
+        generation += 1
+        activeKeyword = nil
+    }
+}
+
 /// Pure debounce gate for the activation auto-sync, kept out of the SwiftUI
 /// view so the "do not reconcile on every trivial focus change" rule is
 /// unit-testable without a scene. A sync is allowed when none has run yet, or
@@ -243,7 +277,8 @@ struct LibraryView: View {
     /// search is active. Kept separate from `searchQuery` so keystrokes
     /// never fire a request on every character; `searchTask` below commits
     /// this once the user pauses typing.
-    @State private var activeSearch: String?
+    @State private var searchSession = SearchSession()
+    private var activeSearch: String? { searchSession.activeKeyword }
     @State private var searchTask: Task<Void, Never>?
     /// The Quick Filter currently applied to the library grid, or `nil` when
     /// none is active. Set by Apply in the filter popover; when non-nil the
@@ -313,6 +348,14 @@ struct LibraryView: View {
             // from; leaving that grid (to another space, discovery, or the
             // recycle bin) drops it so it never lingers over an unrelated view.
             activeFilter = nil
+            // An active search overlays every route, so leaving for another
+            // sidebar row must drop it (and any run still in flight).
+            if activeSearch != nil || !searchQuery.isEmpty {
+                searchTask?.cancel()
+                searchSession.cancel()
+                searchQuery = ""
+                env.searchFilters.clear()
+            }
             switch newValue.route(currentSpace: env.spaceSelection.current) {
             case .grid(let space):
                 tilesModel = nil
@@ -349,6 +392,10 @@ struct LibraryView: View {
             searchTask?.cancel()
             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
+                // Invalidate any run already past its debounce, even when no
+                // search is active yet, so it cannot commit after the clear.
+                let hadActiveSearch = activeSearch != nil
+                searchSession.cancel()
                 // Empty query: drop straight back to whatever the sidebar is
                 // already routed to, no debounce needed for clearing. Only
                 // do this if a search was actually active, so clearing an
@@ -358,16 +405,16 @@ struct LibraryView: View {
                 // ("clearing filters + keyword returns to the current
                 // sidebar view") -- a filter left over from a previous
                 // search should not silently apply to whatever comes next.
-                guard activeSearch != nil else { return }
-                activeSearch = nil
+                guard hadActiveSearch else { return }
                 env.searchFilters.clear()
                 Task { await restoreCurrentRoute() }
                 return
             }
+            let token = searchSession.begin()
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
-                await runSearch(trimmed)
+                await runSearch(trimmed, token: token)
             }
         }
         .onChange(of: detailIndex) { _, newValue in
@@ -1099,15 +1146,29 @@ struct LibraryView: View {
     /// empty keyword is rejected outright, so there is no way to run a
     /// date-only search), which is why the filter popover only lets Apply
     /// be pressed while a keyword is already active.
-    private func runSearch(_ keyword: String) async {
+    private func runSearch(_ keyword: String, token: Int? = nil) async {
+        let token = token ?? searchSession.begin()
+        guard searchSession.isCurrent(token) else { return }
         controller.clearSelection()
         // Search and the Quick Filter are mutually exclusive overlays; a
         // search takes over, so drop any active filter first.
         activeFilter = nil
         await env.dataSource.setSearch(keyword, filters: env.searchFilters.currentFilters)
+        guard searchSession.isCurrent(token) else { await abandonStaleSearch(); return }
         await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+        // The user may have cleared or retyped while the NAS was answering.
+        guard searchSession.isCurrent(token) else { await abandonStaleSearch(); return }
         await controller.applySnapshot()
-        activeSearch = keyword
+        searchSession.commit(keyword, token: token)
+    }
+
+    /// A search run that was superseded after it had already pointed the data
+    /// source at its keyword. If the user ended up with an empty box (no newer
+    /// run will take over), put the data source back on the current route.
+    private func abandonStaleSearch() async {
+        guard searchSession.activeKeyword == nil,
+              searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        await restoreCurrentRoute()
     }
 
     /// Applies the current Quick Filter selection to the library grid: switches

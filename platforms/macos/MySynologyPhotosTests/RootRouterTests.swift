@@ -156,3 +156,38 @@ struct RootLaunchDecisionTests {
         #expect(try KeychainSID.load(host: host, username: "signouttest") == nil)
     }
 }
+
+/// R5-5 and R5-7: the active search and its debounce token live in one small
+/// model so the sidebar can drop a search and an in-flight run can be refused.
+@MainActor
+struct SearchSessionTests {
+    /// R5-7: clearing the box while a run is in flight must stop that run from
+    /// committing an active search afterwards.
+    @Test func aRunCancelledMidFlightCannotCommit() {
+        let session = SearchSession()
+        let token = session.begin()
+        session.cancel()
+        #expect(session.commit("dog", token: token) == false)
+        #expect(session.activeKeyword == nil)
+    }
+
+    /// R5-7: a newer keystroke supersedes an older run, whichever finishes last.
+    @Test func anOlderRunCannotOverwriteANewerOne() {
+        let session = SearchSession()
+        let old = session.begin()
+        let new = session.begin()
+        #expect(session.commit("dogs", token: new))
+        #expect(session.commit("do", token: old) == false)
+        #expect(session.activeKeyword == "dogs")
+    }
+
+    /// R5-5: cancelling (what a sidebar change does) drops an active search.
+    @Test func cancelDropsTheActiveSearch() {
+        let session = SearchSession()
+        let token = session.begin()
+        #expect(session.commit("beach", token: token))
+        #expect(session.activeKeyword == "beach")
+        session.cancel()
+        #expect(session.activeKeyword == nil)
+    }
+}
