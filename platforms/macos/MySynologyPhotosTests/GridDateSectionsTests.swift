@@ -17,6 +17,18 @@ struct GridDateSectionsTests {
         #expect(s.sections.map(\.dayStart) == [300, 200, 100])
     }
 
+    /// R5-4: two histogram buckets that share a dayStart (an epoch adjacent
+    /// photo and the undated bucket are both 0) must not become two sections
+    /// with one identifier, which NSDiffableDataSourceSnapshot rejects.
+    @Test func adjacentBucketsWithTheSameDayStartMergeIntoOneSection() {
+        let s = GridDateSections(histogram: [day(300, 2), day(0, 2), day(0, 1)])
+        #expect(s.sections.map(\.dayStart) == [300, 0])
+        #expect(s.sections.map(\.count) == [2, 3])
+        #expect(s.sections.map(\.base) == [0, 2])
+        #expect(s.totalCount == 5)
+        #expect(Set(s.sections.map(\.dayStart)).count == s.sections.count)
+    }
+
     @Test func absoluteIndexWalksSectionsInOrder() {
         let s = GridDateSections(histogram: [day(300, 2), day(200, 3), day(100, 1)])
         #expect(s.absoluteIndex(section: 0, item: 0) == 0)

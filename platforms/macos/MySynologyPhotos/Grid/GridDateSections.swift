@@ -51,7 +51,14 @@ struct GridDateSections: Equatable {
         var running = 0
         for bucket in histogram {
             let count = Int(bucket.count)
-            built.append(Section(dayStart: bucket.dayStart, count: count, base: running))
+            // Section identifiers are the dayStart, so two buckets with the
+            // same one (an epoch adjacent photo and the undated bucket both
+            // report 0) must be one section whatever the core returns.
+            if let last = built.last, last.dayStart == bucket.dayStart {
+                built[built.count - 1] = Section(dayStart: last.dayStart, count: last.count + count, base: last.base)
+            } else {
+                built.append(Section(dayStart: bucket.dayStart, count: count, base: running))
+            }
             running += count
         }
         self.sections = built
