@@ -377,21 +377,54 @@ pub(crate) fn original_parent_folder(recycle_path: &str) -> Result<String, CoreE
 /// Requires the exact `RECYCLE_PHOTOS_ROOT/` prefix and rejects empty, `.` and
 /// `..` segments, so a path such as `/home/#recycle/Photos/../../Photos/a.jpg`
 /// cannot climb back out of the recycle bin.
+///
+/// Refuses when in doubt: control and invisible formatting characters,
+/// backslashes, commas (a File Station `path` may be read as a comma list),
+/// Unicode dot and slash lookalikes, and a last segment without a
+/// `name.ext` shape, so a bare recycle folder never reaches Delete. A folder
+/// that is NAMED like a file still passes; see the R1-9 notes.
 pub fn ensure_recycle_photos_path(path: &str) -> Result<(), CoreError> {
     let refuse = || CoreError::UnexpectedResponse {
-        message: format!("refusing a path outside {RECYCLE_PHOTOS_ROOT}: {path}"),
+        message: format!("refusing a path outside {RECYCLE_PHOTOS_ROOT}: {path:?}"),
     };
     let rest = path
         .strip_prefix(RECYCLE_PHOTOS_ROOT)
         .and_then(|r| r.strip_prefix('/'))
         .ok_or_else(refuse)?;
+    if rest.chars().any(is_refused_path_char) {
+        return Err(refuse());
+    }
     if rest
         .split('/')
         .any(|seg| seg.is_empty() || seg == "." || seg == "..")
     {
         return Err(refuse());
     }
+    let last = rest.rsplit('/').next().unwrap_or_default();
+    let has_extension = last.rsplit_once('.').is_some_and(|(stem, ext)| {
+        !stem.is_empty()
+            && (1..=10).contains(&ext.len())
+            && ext.chars().all(|c| c.is_ascii_alphanumeric())
+    });
+    if !has_extension {
+        return Err(refuse());
+    }
     Ok(())
+}
+
+/// Characters a recycle path must never contain.
+fn is_refused_path_char(c: char) -> bool {
+    const LOOKALIKES: &[char] = &[
+        // dots
+        '\u{2024}', '\u{2025}', '\u{2026}', '\u{FE52}', '\u{FF0E}', '\u{3002}', '\u{FF61}',
+        // slashes and backslashes
+        '\u{2044}', '\u{2215}', '\u{2216}', '\u{29F8}', '\u{FE68}', '\u{FF0F}', '\u{FF3C}',
+        // invisible formatting and direction overrides
+        '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}',
+        '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+        '\u{FEFF}',
+    ];
+    c.is_control() || c == '\\' || c == ',' || LOOKALIKES.contains(&c)
 }
 
 /// JSON-encode a single path as the one-element array string File Station
@@ -699,6 +732,7 @@ pub async fn recycle_thumbnail(
     recycle_path: &str,
     size: &str,
 ) -> Result<Vec<u8>, CoreError> {
+    ensure_recycle_photos_path(recycle_path)?;
     transport.throttle().await;
     let query: Vec<(&str, String)> = vec![
         ("api", "SYNO.FileStation.Thumb".to_string()),
