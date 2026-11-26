@@ -31,16 +31,8 @@ fn fast() -> TaskPolling {
 const ROOT: &str = "/home/#recycle/Photos";
 
 #[test]
-fn guard_refuses_ambiguous_or_non_file_paths() {
+fn guard_refuses_ambiguous_paths() {
     for bad in [
-        // a bare folder inside the bin: delete would wipe the subtree
-        "/home/#recycle/Photos/iPhone",
-        "/home/#recycle/Photos/iPhone/2016",
-        // no usable extension
-        "/home/#recycle/Photos/a.",
-        "/home/#recycle/Photos/.jpg",
-        // a comma could split into a second path
-        "/home/#recycle/Photos/a.jpg,/home/Photos/b.jpg",
         // backslash separators
         "/home/#recycle/Photos/x\\..\\..\\Photos\\a.jpg",
         // control characters
@@ -71,6 +63,30 @@ fn guard_still_accepts_ordinary_media_files() {
     ] {
         assert!(ensure_recycle_photos_path(ok).is_ok(), "{ok:?}");
     }
+}
+
+/// Real names the guard must not block: one refused path fails a whole
+/// restore or empty batch. A comma is safe because the path travels as one
+/// JSON string, and "is it a file" is answered by File Station before a
+/// delete, not guessed from the name.
+#[test]
+fn guard_accepts_commas_and_names_without_an_extension() {
+    for ok in [
+        "/home/#recycle/Photos/Paris, France/IMG_0001.JPG",
+        "/home/#recycle/Photos/Smith, John.jpg",
+        "/home/#recycle/Photos/scan/README",
+        "/home/#recycle/Photos/scan/.DS_Store",
+    ] {
+        assert!(ensure_recycle_photos_path(ok).is_ok(), "{ok:?}");
+    }
+}
+
+#[test]
+fn guard_names_the_real_reason_for_a_refused_character() {
+    let err = ensure_recycle_photos_path("/home/#recycle/Photos/a\n.jpg").unwrap_err();
+    let text = format!("{err}");
+    assert!(!text.contains("outside"), "{text}");
+    assert!(text.contains("character"), "{text}");
 }
 
 async fn delete_trap(server: &mut mockito::ServerGuard) -> mockito::Mock {
@@ -159,10 +175,8 @@ async fn delete_refuses_an_entry_it_cannot_find() {
 }
 
 #[tokio::test]
-async fn restore_refuses_a_comma_joined_path_without_any_write() {
+async fn restore_sends_a_path_with_a_comma_as_one_json_element() {
     let mut server = mockito::Server::new_async().await;
-    // Every listing answers "empty folder", so nothing but the guard stands
-    // between this path and the move.
     let _any_list = server
         .mock("GET", "/webapi/entry.cgi")
         .match_query(Matcher::Any)
@@ -171,18 +185,49 @@ async fn restore_refuses_a_comma_joined_path_without_any_write() {
         .with_body(r#"{"success":true,"data":{"files":[]}}"#)
         .create_async()
         .await;
-    let trap = delete_trap(&mut server).await;
+    let path = "/home/#recycle/Photos/Paris, France/a.jpg";
+    let mv = server
+        .mock("POST", "/webapi/entry.cgi")
+        .match_body(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("api".into(), "SYNO.FileStation.CopyMove".into()),
+            Matcher::UrlEncoded("path".into(), format!(r#"["{path}"]"#)),
+            Matcher::UrlEncoded(
+                "dest_folder_path".into(),
+                "/home/Photos/Paris, France".into(),
+            ),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"success":true,"data":{"taskid":"t"}}"#)
+        .expect(1)
+        .create_async()
+        .await;
     let t = transport_for(&server);
-    let result = restore_recycle_item_with_polling(
+    let result = restore_recycle_item_with_polling(&t, "SID", None, path, fast()).await;
+    assert!(result.is_ok(), "got {result:?}");
+    mv.assert_async().await;
+}
+
+#[tokio::test]
+async fn recycle_thumbnail_refuses_a_comma_because_its_path_is_not_json() {
+    let mut server = mockito::Server::new_async().await;
+    let get = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .expect(0)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let result = recycle_thumbnail(
         &t,
         "SID",
         None,
         "/home/#recycle/Photos/a.jpg,/home/Photos/b.jpg",
-        fast(),
+        "small",
     )
     .await;
     assert!(result.is_err(), "got {result:?}");
-    trap.assert_async().await;
+    get.assert_async().await;
 }
 
 #[tokio::test]

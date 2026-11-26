@@ -390,12 +390,15 @@ pub(crate) fn original_parent_folder(recycle_path: &str) -> Result<String, CoreE
 /// `..` segments, so a path such as `/home/#recycle/Photos/../../Photos/a.jpg`
 /// cannot climb back out of the recycle bin.
 ///
-/// Refuses when in doubt: control and invisible formatting characters,
-/// backslashes, commas (a File Station `path` may be read as a comma list),
-/// Unicode dot and slash lookalikes, and a last segment without a
-/// `name.ext` shape, so a bare recycle folder never reaches Delete. Delete
-/// also confirms with File Station that the entry is a file
-/// (`ensure_is_recycled_file`), since a folder can be named like a file.
+/// Also refuses control and invisible formatting characters, backslashes
+/// and Unicode dot and slash lookalikes.
+///
+/// It does NOT judge the name itself. A comma is allowed, because restore and
+/// delete send the path as one JSON string (`json_path_array`), and a name
+/// without an extension is allowed, because one refused path fails a whole
+/// restore or empty batch. Whether the entry is a file is a fact File Station
+/// answers before a delete (`ensure_is_recycled_file`), not a guess from the
+/// name.
 pub fn ensure_recycle_photos_path(path: &str) -> Result<(), CoreError> {
     let refuse = || CoreError::UnexpectedResponse {
         message: format!("refusing a path outside {RECYCLE_PHOTOS_ROOT}: {path:?}"),
@@ -405,21 +408,14 @@ pub fn ensure_recycle_photos_path(path: &str) -> Result<(), CoreError> {
         .and_then(|r| r.strip_prefix('/'))
         .ok_or_else(refuse)?;
     if rest.chars().any(is_refused_path_char) {
-        return Err(refuse());
+        return Err(CoreError::UnexpectedResponse {
+            message: format!("refusing a recycle path with an unsafe character: {path:?}"),
+        });
     }
     if rest
         .split('/')
         .any(|seg| seg.is_empty() || seg == "." || seg == "..")
     {
-        return Err(refuse());
-    }
-    let last = rest.rsplit('/').next().unwrap_or_default();
-    let has_extension = last.rsplit_once('.').is_some_and(|(stem, ext)| {
-        !stem.is_empty()
-            && (1..=10).contains(&ext.len())
-            && ext.chars().all(|c| c.is_ascii_alphanumeric())
-    });
-    if !has_extension {
         return Err(refuse());
     }
     Ok(())
@@ -437,7 +433,7 @@ fn is_refused_path_char(c: char) -> bool {
         '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
         '\u{FEFF}',
     ];
-    c.is_control() || c == '\\' || c == ',' || LOOKALIKES.contains(&c)
+    c.is_control() || c == '\\' || LOOKALIKES.contains(&c)
 }
 
 /// Confirm with File Station that `recycle_path` is a FILE in its recycle
@@ -784,6 +780,13 @@ pub async fn recycle_thumbnail(
     size: &str,
 ) -> Result<Vec<u8>, CoreError> {
     ensure_recycle_photos_path(recycle_path)?;
+    // This call sends the bare path, not a JSON array, so a comma could be
+    // read as a second path. The caller shows a placeholder on an error.
+    if recycle_path.contains(',') {
+        return Err(CoreError::UnexpectedResponse {
+            message: format!("no recycle thumbnail for a path with a comma: {recycle_path:?}"),
+        });
+    }
     transport.throttle().await;
     let query: Vec<(&str, String)> = vec![
         ("api", "SYNO.FileStation.Thumb".to_string()),
