@@ -1017,6 +1017,18 @@ impl PhotosCore {
         ids.dedup();
         let (transport, sid, version, syno_token) =
             self.write_call_context(browse_item_api(space), 7)?;
+        // With the home recycle bin off, the Foto delete is permanent. Refuse
+        // here, not only in the UI, so no caller can lose an original. Read
+        // live every call (the user can flip it in DSM). `Unknown` (a
+        // non-admin account) still proceeds: the UI warns before it.
+        let bin = synology_api::recycle_bin_status(&transport, &sid, syno_token.as_deref()).await?;
+        if bin == RecycleBinStatus::Disabled {
+            return Err(CoreError::CapabilityUnavailable {
+                api: "the DSM home recycle bin (it is off, so a delete would be permanent; \
+                      nothing was deleted)"
+                    .to_string(),
+            });
+        }
         synology_api::permanent_delete(
             &transport,
             &sid,
@@ -3517,6 +3529,93 @@ mod core_tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    /// Serves the DSM home recycle bin setting with `enable_recycle_bin`.
+    async fn mock_recycle_setting(server: &mut mockito::Server, enabled: bool) -> mockito::Mock {
+        server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api".into(), "SYNO.Core.User.Home".into()),
+                mockito::Matcher::UrlEncoded("method".into(), "get".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(
+                r#"{{"success":true,"data":{{"enable":true,"enable_recycle_bin":{enabled}}}}}"#
+            ))
+            .create_async()
+            .await
+    }
+
+    /// With the recycle bin off, the Foto delete would be permanent, so the
+    /// core refuses before sending it, whatever the UI did. No delete
+    /// request reaches the (localhost) server and the local row stays.
+    #[tokio::test]
+    async fn delete_assets_refuses_when_the_recycle_bin_is_disabled() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let home = mock_recycle_setting(&mut server, false).await;
+        let delete = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=delete".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .expect(0)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("delete-bin-off", &server).await;
+        seed_asset(&core, Space::Personal, 1);
+
+        let err = core
+            .delete_assets(Space::Personal, vec![1])
+            .await
+            .expect_err("a delete with the recycle bin off must be refused");
+        assert!(
+            matches!(err, CoreError::CapabilityUnavailable { .. }),
+            "got {err:?}"
+        );
+        delete.assert_async().await;
+        home.assert_async().await;
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 1);
+    }
+
+    /// The check does not block the everyday delete when the bin is on.
+    #[tokio::test]
+    async fn delete_assets_proceeds_when_the_recycle_bin_is_enabled() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let home = mock_recycle_setting(&mut server, true).await;
+        let delete = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=delete".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("delete-bin-on", &server).await;
+        seed_asset(&core, Space::Personal, 1);
+        core.delete_assets(Space::Personal, vec![1])
+            .await
+            .expect("delete with the recycle bin on");
+        delete.assert_async().await;
+        home.assert_async().await;
+        assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
     }
 
     #[tokio::test]
