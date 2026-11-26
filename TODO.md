@@ -2,7 +2,38 @@
 
 Only pending work. Completed items live in `Fixed.md`. Live scratch progress in `.superpowers/sdd/progress.md` (gitignored).
 
-Last Updated: 2026-10-16 (platform layout restructure done, local CI green)
+Last Updated: 2026-11-26 (full-repo review in flight, release build fix, Windows check)
+
+## 2026-11-26: full-repo review, release build break, Windows core check
+
+Dispatch state and owned paths are in `tasks.md`.
+
+- [ ] BUILD-1 (in progress): the release build of the core fails on this Mac
+  since it moved to macOS 27.0 and Xcode 27.2, so the app cannot be built or
+  tested (`can't find crate for time_macros`, Xcode phase "Ensure
+  PhotosCore.xcframework"). Measured cause: with `MACOSX_DEPLOYMENT_TARGET` set
+  (the Makefile exports 26.0) the release profile's `strip=debuginfo` leaves
+  `libtime_macros-*.dylib` with a mis-aligned LINKEDIT string pool and dyld
+  refuses to load it. Matched pair: same build with
+  `CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP=false` passes; without the
+  deployment target it also passes. Fix: `[profile.release.build-override]
+  strip = false` in `Cargo.toml`.
+- [ ] BUILD-2: the same strip defect also leaves the release
+  `libphotoscore.dylib` (the `cdylib` output) unloadable on macOS 27
+  (`dlopen`: mis-aligned LINKEDIT string pool). Nothing loads it today (the app
+  links the static `libphotoscore.a`), so it is only recorded here. If anything
+  ever needs the dylib on macOS, set `strip = false` for the whole release
+  profile and measure the app size change first.
+- [ ] REV-2026-11: full-repo review by six read-only reviewers against
+  `1c2c107`, then one commit per verified finding with a falsified test.
+- [ ] WIN-1: run `scripts/windows/check-core.sh` for real (needs cargo-xwin,
+  LLVM and the Windows rust-std), fix what it finds, and fix `ci.ps1` and
+  `setup.ps1` as far as they can be exercised from a Mac.
+- [ ] HOUSEKEEPING-1: this Mac's checkout had sat 57 commits behind
+  `origin/main` since 2026-07-26. Leftovers of the old layout are still on disk
+  and untracked: `app/`, `PhotosCore.xcframework/`, `dist/` (holds
+  `MySynologyPhotos-1.0.1.dmg`). Delete them by hand once nothing in them is
+  wanted.
 
 ## 2026-10-16: after the platform layout restructure
 
