@@ -155,7 +155,17 @@ fn bare_host(base_url: &str) -> &str {
 pub fn build_client(connection: &Connection) -> Result<reqwest::Client, CoreError> {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
-        .connect_timeout(Duration::from_secs(10));
+        .connect_timeout(Duration::from_secs(10))
+        // Never follow a redirect. A 307 or 308 would replay the POST body
+        // (password, OTP, `_sid`) and the `X-SYNO-TOKEN` header to whatever
+        // host `Location` names, and the leaf pin only covers the first
+        // handshake. DSM's entry.cgi never redirects, so any 3xx is refused
+        // with an error naming the status. The Location URL is left out of
+        // the message on purpose.
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let status = attempt.status();
+            attempt.error(format!("refusing to follow a redirect (HTTP {status})"))
+        }));
 
     if let Some(der) = &connection.pinned_cert_der {
         let config = pinned_rustls_config(der)?;
