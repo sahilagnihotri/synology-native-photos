@@ -6,6 +6,4 @@ license.workspace = true
 
 [dependencies]
 models = { path = "../models" }
-thiserror.workspace = true
 rusqlite.workspace = true
-tracing.workspace = true

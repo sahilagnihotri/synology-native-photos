@@ -1006,7 +1006,6 @@ dependencies = [
 name = "models"
 version = "0.1.0"
 dependencies = [
- "serde",
  "thiserror 1.0.69",
  "uniffi",
 ]
@@ -1115,8 +1114,6 @@ version = "0.1.0"
 dependencies = [
  "models",
  "rusqlite",
- "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -1132,7 +1129,6 @@ dependencies = [
  "rustls-pki-types",
  "sync-engine",
  "synology-api",
- "thiserror 1.0.69",
  "tokio",
  "tokio-rustls",
  "tracing",
@@ -1721,7 +1717,6 @@ dependencies = [
  "models",
  "persistence",
  "synology-api",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -1748,11 +1743,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "thiserror 1.0.69",
  "tokio",
  "tokio-rustls",
  "tracing",
- "webpki-roots",
  "x509-parser",
 ]
 

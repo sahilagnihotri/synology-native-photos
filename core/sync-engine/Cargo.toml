@@ -8,7 +8,6 @@ license.workspace = true
 models = { path = "../models" }
 synology-api = { path = "../synology-api" }
 persistence = { path = "../persistence" }
-thiserror.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
 
