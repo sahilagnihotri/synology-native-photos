@@ -2,6 +2,20 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-11-26: review, release build, Windows core check
+
+- BUILD-1: the release build of the core failed on macOS 27.0 with Xcode 27.2
+  (`can't find crate for time_macros`), so the app could not be built or
+  tested. With `MACOSX_DEPLOYMENT_TARGET` set, the release profile's
+  `strip=debuginfo` left the proc-macro dylib with a mis-aligned LINKEDIT string
+  pool and dyld refused to load it. `[profile.release.build-override] strip =
+  false` in `Cargo.toml` (`a911257`). Matched pair, clean rebuild of
+  `time-macros` each time: deployment target 26.0 with default strip exits 101,
+  the same with the override exits 0, and no deployment target exits 0. After
+  the fix `make bindings` exits 0 with an empty bindings diff, and the Xcode
+  test run passes: 498 tests (492 Swift Testing in 52 suites plus 6 XCTest),
+  0 failed, 0 skipped.
+
 ## Session 2026-10-16: platform layout, local CI, recycle errors, albums API
 
 - Platform layout (plan `documentation/plans/done/2026-10-16-platform-layout-restructure.md`):

@@ -2,22 +2,12 @@
 
 Only pending work. Completed items live in `Fixed.md`. Live scratch progress in `.superpowers/sdd/progress.md` (gitignored).
 
-Last Updated: 2026-11-26 (full-repo review in flight, release build fix, Windows check)
+Last Updated: 2026-11-26 (release build fixed, Swift 498/0/0, full-repo review in flight)
 
 ## 2026-11-26: full-repo review, release build break, Windows core check
 
 Dispatch state and owned paths are in `tasks.md`.
 
-- [ ] BUILD-1 (in progress): the release build of the core fails on this Mac
-  since it moved to macOS 27.0 and Xcode 27.2, so the app cannot be built or
-  tested (`can't find crate for time_macros`, Xcode phase "Ensure
-  PhotosCore.xcframework"). Measured cause: with `MACOSX_DEPLOYMENT_TARGET` set
-  (the Makefile exports 26.0) the release profile's `strip=debuginfo` leaves
-  `libtime_macros-*.dylib` with a mis-aligned LINKEDIT string pool and dyld
-  refuses to load it. Matched pair: same build with
-  `CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP=false` passes; without the
-  deployment target it also passes. Fix: `[profile.release.build-override]
-  strip = false` in `Cargo.toml`.
 - [ ] BUILD-2: the same strip defect also leaves the release
   `libphotoscore.dylib` (the `cdylib` output) unloadable on macOS 27
   (`dlopen`: mis-aligned LINKEDIT string pool). Nothing loads it today (the app

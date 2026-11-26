@@ -7,13 +7,13 @@ Status: queued, in-progress, awaiting-verification, verified, abandoned.
 
 Baseline at `1c2c107` (2026-11-26, this Mac now on macOS 27.0 and Xcode 27.2):
 `scripts/ci/ci.sh core` PASS (fmt, clippy, Rust 385 passed, 0 failed, 1 ignored,
-2 script tests). The Swift stage could NOT build: see B1.
+2 script tests). The Swift stage could not build until `a911257`; after it the
+Xcode test run passes with 498 tests, 0 failed, 0 skipped.
 
 Review workers are READ-ONLY on source. Each owns only its notes file.
 
 | ID | Goal | Owned paths (write) | Reviews (read) | Status | Closes |
 |----|------|---------------------|----------------|--------|--------|
-| B1 | Release core build fails on macOS 27 with Xcode 27.2 | `Cargo.toml` | build scripts | in-progress (main) | BUILD-1 |
 | R1 | Review the DSM API client | `agent-notes/r1-synology-api.md` | `core/synology-api/` | in-progress | REV-2026-11 |
 | R2 | Review the FFI facade and sync engine | `agent-notes/r2-photoscore-sync.md` | `core/photoscore/`, `core/sync-engine/` | in-progress | REV-2026-11 |
 | R3 | Review the local index and models | `agent-notes/r3-persistence-models.md` | `core/persistence/`, `core/models/` | in-progress | REV-2026-11 |
