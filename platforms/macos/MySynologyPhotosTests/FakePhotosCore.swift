@@ -343,7 +343,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
             .map { DayCount(dayStart: $0.key, count: $0.value) }
             .sorted { $0.dayStart > $1.dayStart }
         if nullCount > 0 {
-            buckets.append(DayCount(dayStart: 0, count: nullCount))
+            buckets.append(DayCount(dayStart: Int64.min, count: nullCount))
         }
         return buckets
     }

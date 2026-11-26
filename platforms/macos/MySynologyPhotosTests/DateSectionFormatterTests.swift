@@ -12,16 +12,17 @@ struct DateSectionFormatterTests {
         #expect(DateSectionFormatter.headerTitle(dayStart: nov25_2016) == "25 November 2016")
     }
 
-    @Test func headerTitleForZeroIsUnknownDate() {
-        #expect(DateSectionFormatter.headerTitle(dayStart: 0) == "Unknown Date")
+    @Test func headerTitleForTheUnknownSentinelIsUnknownDate() {
+        #expect(DateSectionFormatter.headerTitle(dayStart: Int64.min) == "Unknown Date")
+        #expect(DateSectionFormatter.headerTitle(dayStart: 0) == "1 January 1970", "0 is a real day now")
     }
 
     @Test func scrubberLabelIsYearThenMonth() {
         #expect(DateSectionFormatter.scrubberLabel(dayStart: nov25_2016) == "2016 / 11")
     }
 
-    @Test func scrubberLabelForZeroIsUnknownDate() {
-        #expect(DateSectionFormatter.scrubberLabel(dayStart: 0) == "Unknown Date")
+    @Test func scrubberLabelForTheUnknownSentinelIsUnknownDate() {
+        #expect(DateSectionFormatter.scrubberLabel(dayStart: Int64.min) == "Unknown Date")
     }
 
     /// A `taken_at` a few seconds past midnight still names that same day (the

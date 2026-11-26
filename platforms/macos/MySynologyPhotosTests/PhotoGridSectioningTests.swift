@@ -80,7 +80,7 @@ struct PhotoGridSectioningTests {
         let (controller, ds) = await makeSpaceController(assets)
         // 3 dated days + 1 Unknown Date bucket.
         #expect(ds.dateSections?.sections.count == 4)
-        #expect(ds.dateSections?.sections.last?.dayStart == 0)
+        #expect(ds.dateSections?.sections.last?.dayStart == Int64.min)
         #expect(ds.dateSections?.sections.last?.count == 2)
         #expect(controller.collectionView.numberOfSections == 4)
         #expect(controller.snapshotItemCount() == 8)

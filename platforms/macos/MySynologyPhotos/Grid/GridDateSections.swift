@@ -110,7 +110,7 @@ struct GridDateSections: Equatable {
     }
 }
 
-/// Formats a histogram `dayStart` (unix seconds at UTC midnight, or 0 for the
+/// Formats a histogram `dayStart` (unix seconds at UTC midnight, or `Int64.min` for the
 /// Unknown Date bucket) for the date-section header and the scroll scrubber.
 ///
 /// Rendering is done in UTC to match the histogram's own UTC-day bucketing, so
@@ -120,18 +120,20 @@ struct GridDateSections: Equatable {
 /// stable and testable rather than varying with the run's locale.
 enum DateSectionFormatter {
     static let unknownDateTitle = "Unknown Date"
+    /// The core's day_start for the NULL taken_at bucket. 0 is the real day 1970-01-01.
+    static let unknownDayStart = Int64.min
 
-    /// A full header title, e.g. "25 November 2016". A `dayStart` of 0 is the
+    /// A full header title, e.g. "25 November 2016". A `dayStart` of `Int64.min` is the
     /// Unknown Date bucket.
     static func headerTitle(dayStart: Int64) -> String {
-        guard dayStart != 0 else { return unknownDateTitle }
+        guard dayStart != unknownDayStart else { return unknownDateTitle }
         return headerFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(dayStart)))
     }
 
     /// The compact scrubber label, year then month, e.g. "2016 / 11". A
     /// `dayStart` of 0 is the Unknown Date bucket.
     static func scrubberLabel(dayStart: Int64) -> String {
-        guard dayStart != 0 else { return unknownDateTitle }
+        guard dayStart != unknownDayStart else { return unknownDateTitle }
         return scrubberFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(dayStart)))
     }
 

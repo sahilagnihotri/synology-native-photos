@@ -15,7 +15,7 @@ enum GridAccessibility {
         case .video: kind = "Video"
         case .unknown: kind = "Item"
         }
-        var parts = [kind, DateSectionFormatter.headerTitle(dayStart: asset.takenAt ?? 0)]
+        var parts = [kind, DateSectionFormatter.headerTitle(dayStart: asset.takenAt ?? DateSectionFormatter.unknownDayStart)]
         if !asset.filename.isEmpty { parts.append(asset.filename) }
         if isSelected { parts.append("selected") }
         return parts.joined(separator: ", ")
