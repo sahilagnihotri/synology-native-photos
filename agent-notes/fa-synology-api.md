@@ -77,3 +77,19 @@ Scope: `core/synology-api/`. Findings from
 - passes after: whole crate 239 passed, 0 failed, 3 ignored
 - changed tests: none
 - left open: only `data.blSkip == true` is detected, the marker community clients document. The real skip response shape on this NAS is unverified, and any other per-file skip field DSM may use is not handled. Picking a unique name instead of failing (so a second edit of the same photo is kept) is a product choice left to photoscore or the app.
+
+### R1-5: FIXED
+- commit: 2cdae7a
+- test: `list_recycle_photos_keeps_the_newest_deletion_past_the_file_cap` in `core/synology-api/tests/recycle_mock.rs` (folder B with 5000 old files walked first, folder A with `NEW.JPG`)
+- failed before the fix: `the newest deletion must be first, got RecycleItem { recycle_path: "/home/#recycle/Photos/B/F4999.JPG", ... }`
+- passes after: whole crate 240 passed, 0 failed, 3 ignored
+- changed tests: none
+- left open: the walk now visits the whole tree to `MAX_DEPTH` instead of stopping at 5000 files, trimming to the newest 5000 whenever it holds 10 000. The number of folders walked is still bounded only by depth and the R1-6 per-folder page cap. No "truncated" flag is surfaced, because `Vec<RecycleItem>` has no room for one and adding it is a signature change.
+
+### R1-11: FIXED
+- commit: b443f66
+- test: `restore_timeout_after_failed_polls_names_the_poll_error` and `delete_timeout_after_failed_polls_names_the_poll_error` in `core/synology-api/tests/recycle_mock.rs`
+- failed before the fix: `no poll ever saw the file, so do not claim it is still there: unexpected server response: restore did not complete: a.jpg is still in the recycle bin` (and the same for permanent delete)
+- passes after: whole crate 242 passed, 0 failed, 3 ignored
+- changed tests: none. The two existing "still in the recycle bin" tests still pass, because there the last poll did see the file.
+- left open: session expiry (106, 107, 119) already aborts the loop through R1-4's mapping to `Auth`. The error stays `UnexpectedResponse`; a distinct "unconfirmed" variant would be a UniFFI change.
