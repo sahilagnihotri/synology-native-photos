@@ -1,0 +1,24 @@
+# Line endings. The repo is worked on from macOS and Windows.
+# Text files are stored with LF in the repository on every machine.
+* text=auto
+
+# Shell scripts must keep LF in the working tree, or bash on macOS and the
+# Git Bash on Windows fail with "bad interpreter" and "\r: command not found".
+*.sh text eol=lf
+Makefile text eol=lf
+
+# Generated and lock files: LF everywhere so a Windows checkout produces no diff.
+*.rs text eol=lf
+*.toml text eol=lf
+Cargo.lock text eol=lf
+*.swift text eol=lf
+*.yml text eol=lf
+*.pbxproj text eol=lf
+
+# PowerShell reads either ending. Keep LF so the Mac and Windows copies match.
+*.ps1 text eol=lf
+
+*.png binary
+*.jpg binary
+*.icns binary
+*.dmg binary
