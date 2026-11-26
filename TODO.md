@@ -89,6 +89,13 @@ Dispatch state and owned paths are in `tasks.md`.
   - [ ] R6-9 (low): declared dependencies that no source file uses. [queued for worker FD]
   - [ ] R6-10 (low): no advisory check, and the bundled SQLite is old. [DEFER(R6-10): not scheduled in this pass]
   - [ ] R6-11 (low): docs drift. [queued for worker FD]
+- [ ] SYNC-1 (decision for Sahil): since `05240b6` a reconcile never applies an
+  EMPTY server listing as deletions, and applies a drop of more than 20 percent
+  of a space with 100 or more rows only when the same listing comes back twice
+  in a row. Consequence: a library emptied on purpose on the NAS keeps its rows
+  in the local index. Options: keep it, apply an empty listing on the second
+  identical one, or add a "rebuild local index" action in the app. Running
+  assumption: keep it (the conservative choice).
 - [ ] WIN-1 (partly done): `scripts/windows/check-core.sh` now runs for real
   and passes (see `Fixed.md`). Still open: `scripts/ci/ci.ps1` and
   `scripts/windows/setup.ps1` have never been EXECUTED. `setup.ps1` was fixed by
