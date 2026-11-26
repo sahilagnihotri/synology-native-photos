@@ -759,8 +759,11 @@ final class PhotoGridController: NSViewController, NSCollectionViewPrefetching, 
         guard let minIndex = indexPaths.map({ absoluteIndex(for: $0) }).min() else { return }
         let offset = (minIndex / dataSource.pageSize) * dataSource.pageSize
         Task {
+            let countBefore = dataSource.totalCount
             let rows = await dataSource.loadWindow(offset: offset, limit: dataSource.pageSize)
-            guard !rows.isEmpty else { return }
+            // A live source also changes its total as pages arrive (the spare
+            // trailing cell appears or disappears), even for an empty page.
+            guard !rows.isEmpty || dataSource.totalCount != countBefore else { return }
             await applySnapshot()
         }
     }

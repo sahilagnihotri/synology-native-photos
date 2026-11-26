@@ -183,15 +183,75 @@ struct WindowedDataSourceTests {
         #expect(ds.totalCount == 5)
     }
 
-    @Test func collectionWindowStaysNotReadyOnAFullPage() async {
+    /// R5-2: this used to assert `isReady == false` on a full page, which is
+    /// exactly what left the spinner up forever. A live source is displayable
+    /// once its first page has come back, and keeps paging until a short page.
+    @Test func collectionWindowIsReadyOnAFullPageAndKeepsPagingToTheEnd() async {
         let fake = FakePhotosCore()
         let tagId = DiscoveryCollection.tag(id: 5)
-        fake.assetsForCollection[tagId] = (0..<50).map { asset(Int64($0) + 3000) }
+        fake.assetsForCollection[tagId] = (0..<120).map { asset(Int64($0) + 3000) }
         let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
         await ds.setCollection(tagId)
         _ = await ds.loadWindow(offset: 0, limit: 50)
-        #expect(ds.isReady == false, "a full page (50 rows for a 50-row ask) means there may be more")
-        #expect(ds.totalCount == 50)
+        #expect(ds.isReady == true, "a full first page must be displayable")
+        #expect(ds.totalCount > 50, "a full page means more may follow, so the grid must be able to ask for the next one")
+
+        _ = await ds.loadWindow(offset: 50, limit: 50)
+        #expect(ds.totalCount > 100)
+        let last = await ds.loadWindow(offset: 100, limit: 50)
+        #expect(last.count == 20)
+        #expect(ds.isReady == true)
+        #expect(ds.totalCount == 120, "a short page fixes the total exactly")
+    }
+
+    /// R5-2: a search and a server side filter behave the same on a full page.
+    @Test func searchAndRemoteFilterAreReadyOnAFullPage() async {
+        let fake = FakePhotosCore()
+        fake.assetsForKeyword["dog"] = (0..<80).map { asset(Int64($0) + 7000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setSearch("dog")
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.isReady == true)
+        #expect(ds.totalCount > 50)
+    }
+
+    /// R5-6: after rows disappear on the NAS, a reload must not keep the old
+    /// total (the blank placeholder cells at the end of the grid).
+    @Test func reloadOfALiveSourceDropsTheStaleTotal() async {
+        let fake = FakePhotosCore()
+        let tagId = DiscoveryCollection.tag(id: 9)
+        fake.assetsForCollection[tagId] = (0..<5).map { asset(Int64($0) + 8000) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+        await ds.setCollection(tagId)
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.totalCount == 5)
+
+        fake.assetsForCollection[tagId] = Array(fake.assetsForCollection[tagId]!.dropFirst(2))
+        await ds.reload()
+        _ = await ds.loadWindow(offset: 0, limit: 50)
+        #expect(ds.totalCount == 3)
+        #expect(ds.item(at: 2) != nil)
+    }
+
+    /// R5-6 with a full first page: the old, larger total must not survive a
+    /// reload either.
+    @Test func reloadWithAFullPageDoesNotKeepAnOversizedTotal() async {
+        let fake = FakePhotosCore()
+        let tagId = DiscoveryCollection.tag(id: 10)
+        fake.assetsForCollection[tagId] = (0..<75).map { asset(Int64($0) + 8500) }
+        let ds = WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 25)
+        await ds.setCollection(tagId)
+        _ = await ds.loadWindow(offset: 0, limit: 25)
+        _ = await ds.loadWindow(offset: 25, limit: 25)
+        _ = await ds.loadWindow(offset: 50, limit: 25)
+        _ = await ds.loadWindow(offset: 75, limit: 25)
+        #expect(ds.totalCount == 75)
+
+        fake.assetsForCollection[tagId] = Array(fake.assetsForCollection[tagId]!.prefix(30))
+        await ds.reload()
+        _ = await ds.loadWindow(offset: 0, limit: 25)
+        _ = await ds.loadWindow(offset: 25, limit: 25)
+        #expect(ds.totalCount == 30)
     }
 
     @Test func setCollectionResetsResidentFromAPriorSpace() async {

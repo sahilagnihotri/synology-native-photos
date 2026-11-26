@@ -118,6 +118,9 @@ final class WindowedDataSource {
     /// re-fetched just because a second cell in the same page is queried.
     private var loadedPages: Set<Int> = []
     private var pagesInFlight: Set<Int> = []
+    /// Set by `reload()` for a live source: its total came from before the
+    /// reload and must be replaced, not raised, by the first page 0 read.
+    private var totalIsStale = false
 
     init(client: PhotosCoreClient, space: Space, pageSize: Int = 200) {
         self.client = client
@@ -206,14 +209,12 @@ final class WindowedDataSource {
                 // ApiPageSource does for the initial crawl. A full page
                 // means there may be more rows beyond it; a short page
                 // (fewer rows than asked for) means this was the last one.
-                isReady = rows.count < limit
-                totalCount = max(totalCount, offset + rows.count)
+                noteLivePage(offset: offset, rows: rows.count, limit: limit)
             case .search(let keyword, let filters):
                 rows = try await client.searchAssetsFiltered(keyword: keyword, filters: filters, offset: UInt32(offset), limit: UInt32(limit))
                 // Same live-fetch, no-local-index estimate as `.collection`
                 // above: a search has no crawl barrier or grand total either.
-                isReady = rows.count < limit
-                totalCount = max(totalCount, offset + rows.count)
+                noteLivePage(offset: offset, rows: rows.count, limit: limit)
             case .filter(let space, let query):
                 // Like `.space`, a local read whose count/readiness are owned
                 // by `refreshCount` (from `filterCount`), so this only fetches
@@ -238,8 +239,7 @@ final class WindowedDataSource {
                 // Same live-fetch, no-local-index estimate as `.collection`/
                 // `.search`: a full page means there may be more, a short page
                 // means this was the last one.
-                isReady = rows.count < limit
-                totalCount = max(totalCount, offset + rows.count)
+                noteLivePage(offset: offset, rows: rows.count, limit: limit)
             case .fixed(_, let assets):
                 // Served straight from the in-memory array; count/readiness are
                 // owned by `refreshCount` (from the array length), so this only
@@ -304,6 +304,10 @@ final class WindowedDataSource {
     /// those indices. Callers `loadWindow` + re-apply the snapshot after this.
     func reload() async {
         resetResident()
+        switch source {
+        case .collection, .search, .remoteFilter: totalIsStale = true
+        default: break
+        }
         await refreshCount()
     }
 
@@ -389,7 +393,28 @@ final class WindowedDataSource {
         await refreshCount()
     }
 
+    /// Bookkeeping for a page of a live source (collection, search, server
+    /// side filter), which has no local count. The source is displayable as
+    /// soon as any page has come back. A full page means more may follow, so
+    /// the total is held one row past what is known: that spare cell is what
+    /// the grid scrolls onto to request the next page. A short page is the
+    /// end, and fixes the total exactly (also after rows were removed).
+    private func noteLivePage(offset: Int, rows: Int, limit: Int) {
+        if totalIsStale && offset == 0 {
+            totalCount = 0
+            totalIsStale = false
+        }
+        let known = offset + rows
+        if rows >= limit {
+            totalCount = max(totalCount, known + 1)
+        } else {
+            totalCount = known
+        }
+        isReady = true
+    }
+
     private func resetResident() {
+        totalIsStale = false
         resident.removeAll()
         loadedPages.removeAll()
         pagesInFlight.removeAll()
