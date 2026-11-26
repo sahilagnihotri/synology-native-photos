@@ -138,12 +138,14 @@ async fn get_body(
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request.send().await.map_err(|e| CoreError::Network {
-        message: format!("discovery request failed: {e}"),
-    })?;
-    response.text().await.map_err(|e| CoreError::Network {
-        message: format!("reading discovery response body failed: {e}"),
-    })
+    let response = request
+        .send()
+        .await
+        .map_err(|e| crate::transport::network_error("discovery request failed", e))?;
+    response
+        .text()
+        .await
+        .map_err(|e| crate::transport::network_error("reading discovery response body failed", e))
 }
 
 fn base_query<'a>(

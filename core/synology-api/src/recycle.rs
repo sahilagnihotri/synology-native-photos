@@ -141,11 +141,12 @@ async fn fs_get_body(
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request.send().await.map_err(|e| CoreError::Network {
-        message: format!("file station request failed: {e}"),
-    })?;
-    response.text().await.map_err(|e| CoreError::Network {
-        message: format!("reading file station response body failed: {e}"),
+    let response = request
+        .send()
+        .await
+        .map_err(|e| crate::transport::network_error("file station request failed", e))?;
+    response.text().await.map_err(|e| {
+        crate::transport::network_error("reading file station response body failed", e)
     })
 }
 
@@ -658,17 +659,19 @@ pub async fn recycle_thumbnail(
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request.send().await.map_err(|e| CoreError::Network {
-        message: format!("recycle thumbnail request failed: {e}"),
-    })?;
+    let response = request
+        .send()
+        .await
+        .map_err(|e| crate::transport::network_error("recycle thumbnail request failed", e))?;
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let bytes = response.bytes().await.map_err(|e| CoreError::Network {
-        message: format!("reading recycle thumbnail body failed: {e}"),
-    })?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| crate::transport::network_error("reading recycle thumbnail body failed", e))?;
     map_binary_or_error(content_type.as_deref(), &bytes)
 }
 

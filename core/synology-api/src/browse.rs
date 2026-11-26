@@ -424,12 +424,14 @@ async fn get_body(
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request.send().await.map_err(|e| CoreError::Network {
-        message: format!("browse request failed: {e}"),
-    })?;
-    response.text().await.map_err(|e| CoreError::Network {
-        message: format!("reading browse response body failed: {e}"),
-    })
+    let response = request
+        .send()
+        .await
+        .map_err(|e| crate::transport::network_error("browse request failed", e))?;
+    response
+        .text()
+        .await
+        .map_err(|e| crate::transport::network_error("reading browse response body failed", e))
 }
 
 /// `SYNO.Foto.Browse.Item` / `SYNO.FotoTeam.Browse.Item`, `method=list`.

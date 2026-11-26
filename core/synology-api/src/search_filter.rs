@@ -121,11 +121,12 @@ async fn get_body(
     if let Some(token) = syno_token {
         request = request.header("X-SYNO-TOKEN", token);
     }
-    let response = request.send().await.map_err(|e| CoreError::Network {
-        message: format!("search filter request failed: {e}"),
-    })?;
-    response.text().await.map_err(|e| CoreError::Network {
-        message: format!("reading search filter response body failed: {e}"),
+    let response = request
+        .send()
+        .await
+        .map_err(|e| crate::transport::network_error("search filter request failed", e))?;
+    response.text().await.map_err(|e| {
+        crate::transport::network_error("reading search filter response body failed", e)
     })
 }
 

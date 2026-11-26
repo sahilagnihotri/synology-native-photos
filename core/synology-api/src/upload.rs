@@ -65,9 +65,7 @@ pub async fn upload_file(
     let file_part = reqwest::multipart::Part::bytes(bytes.to_vec())
         .file_name(filename.to_string())
         .mime_str("application/octet-stream")
-        .map_err(|e| CoreError::Network {
-            message: format!("could not build upload file part: {e}"),
-        })?;
+        .map_err(|e| crate::transport::network_error("could not build upload file part", e))?;
     let form = reqwest::multipart::Form::new()
         .text("api", "SYNO.FileStation.Upload")
         .text("version", "2")
@@ -92,12 +90,14 @@ pub async fn upload_file(
         request = request.header("X-SYNO-TOKEN", token);
     }
 
-    let response = request.send().await.map_err(|e| CoreError::Network {
-        message: format!("upload request failed: {e}"),
-    })?;
-    let body = response.text().await.map_err(|e| CoreError::Network {
-        message: format!("reading upload response body failed: {e}"),
-    })?;
+    let response = request
+        .send()
+        .await
+        .map_err(|e| crate::transport::network_error("upload request failed", e))?;
+    let body = response
+        .text()
+        .await
+        .map_err(|e| crate::transport::network_error("reading upload response body failed", e))?;
     decode_write_success(&body)
 }
 

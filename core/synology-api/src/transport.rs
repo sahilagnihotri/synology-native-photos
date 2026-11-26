@@ -572,8 +572,17 @@ impl Transport {
 /// travel in the body or as query values, never in the fixed path this
 /// strips down to, can leak through an error message.
 fn scrub_reqwest_error(e: reqwest::Error) -> CoreError {
+    network_error("request failed", e)
+}
+
+/// `CoreError::Network` for a reqwest failure, prefixed with `context`, with
+/// the request URL stripped. Every GET path carries `_sid` (and upload also
+/// `SynoToken`) in its query string, which reqwest's `Display` would print in
+/// full, so every module formats reqwest errors through this and never with
+/// a bare `{e}`.
+pub(crate) fn network_error(context: &str, e: reqwest::Error) -> CoreError {
     CoreError::Network {
-        message: format!("request failed: {}", e.without_url()),
+        message: format!("{context}: {}", e.without_url()),
     }
 }
 

@@ -64,12 +64,11 @@ pub async fn probe_capabilities(transport: &Transport) -> Result<Vec<ApiCapabili
         .query(&query)
         .send()
         .await
-        .map_err(|e| CoreError::Network {
-            message: format!("capability probe request failed: {e}"),
-        })?;
-    let body = response.text().await.map_err(|e| CoreError::Network {
-        message: format!("failed to read capability probe body: {e}"),
-    })?;
+        .map_err(|e| crate::transport::network_error("capability probe request failed", e))?;
+    let body = response
+        .text()
+        .await
+        .map_err(|e| crate::transport::network_error("failed to read capability probe body", e))?;
 
     let map: HashMap<String, CapEntry> = decode_envelope(&body)?;
     Ok(map
