@@ -109,6 +109,14 @@ final class RecentlyDeletedModel {
 
     func isSelected(_ recyclePath: String) -> Bool { selection.contains(recyclePath) }
 
+    /// Prepares the selection for a context menu action on `recyclePath`,
+    /// matching the Finder and Apple Photos: a right click on a selected entry
+    /// acts on the whole selection, on an unselected one acts on that entry
+    /// alone (never on top of an off screen selection).
+    func selectForContextMenu(_ recyclePath: String) {
+        if !selection.contains(recyclePath) { selection = [recyclePath] }
+    }
+
     // MARK: - Restore (no confirm: fully reversible, non-destructive)
 
     /// Restores the selected entries back into the library, reloads the

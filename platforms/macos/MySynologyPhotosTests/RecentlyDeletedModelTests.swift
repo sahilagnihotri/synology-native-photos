@@ -110,6 +110,27 @@ struct RecentlyDeletedModelTests {
         #expect(model.errorMessage?.contains("deleted 1 of 2") == true)
     }
 
+    /// R4-6: a right click on an unselected entry acts on that entry alone,
+    /// like the Finder and Apple Photos, never on an off screen selection.
+    @Test func contextMenuOnAnUnselectedItemTargetsOnlyThatItem() async {
+        let (model, _) = makeModel([item("#recycle/a"), item("#recycle/b"), item("#recycle/c")])
+        await model.load()
+        model.selection = ["#recycle/a", "#recycle/b"]
+        model.selectForContextMenu("#recycle/c")
+        #expect(model.selection == ["#recycle/c"])
+        model.requestEmpty()
+        #expect(model.pendingEmptyCount == 1)
+    }
+
+    /// R4-6: a right click on a selected entry keeps the whole selection.
+    @Test func contextMenuOnASelectedItemKeepsTheSelection() async {
+        let (model, _) = makeModel([item("#recycle/a"), item("#recycle/b"), item("#recycle/c")])
+        await model.load()
+        model.selection = ["#recycle/a", "#recycle/b"]
+        model.selectForContextMenu("#recycle/b")
+        #expect(model.selection == ["#recycle/a", "#recycle/b"])
+    }
+
     @Test func restoreWithEmptySelectionMakesNoCall() async {
         let (model, fake) = makeModel([item("#recycle/a")])
         await model.load()
