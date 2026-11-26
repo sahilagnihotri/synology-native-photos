@@ -34,3 +34,12 @@
 - design: after `probe_capabilities`, `restore_session` calls `list_items_page(Personal, offset 0, limit 1)` with the saved sid and SynoToken at the pinned Browse.Item version. Auth or OtpRequired from either call gives `Expired`; any other error propagates. No UniFFI change.
 - changed tests: the two restore tests' fixtures (the old expired fixture failed Info itself, which DSM never does).
 - left open: a personal space that answers 801 (not enabled) would now make restore return an error rather than Valid. Not seen on the real NAS (Personal is the working space); unmeasured for other accounts.
+
+### R2-6: FIXED (queue the local removal)
+- commit: 1974d3f
+- test: `core_tests::delete_assets_while_the_store_is_busy_queues_the_local_removal` (localhost mockito; takes the store out as `run_with_store` does, deletes, then returns it through `return_store`)
+- failed before the fix: `a NAS delete that succeeded is not reported as failed: Storage { message: "store busy: a crawl or reconcile is in progress" }` (the delete mock was hit, so the NAS delete had happened)
+- also falsified the drain: with `return_store` not applying the queue, `left: [2, 1] right: [2]`; restored, passes
+- passes after: `cargo test -p photoscore`: 71 passed, 0 failed, 0 ignored (lib)
+- design: chose queueing over refusing before the network call. Refusing would have needed a store check before the await, and a crawl can still start between that check and the removal, so it does not close the window. New private field `pending_local_deletes: Mutex<Vec<(Space, Vec<i64>)>>`; `delete_assets` queues under the store guard when the store is out; new `return_store` drains the queue under the store guard before putting it back (lock order store, then queue). A failed queued removal stays queued. Applying after the crawl also removes a row the crawl re-upserted from a page fetched before the delete. No UniFFI change (private field).
+- left open: while the crawl runs, the deleted item stays visible in the grid (the store cannot be read anyway while it is out); it disappears when the crawl returns. The JoinError arm of `run_with_store` never returns the store, so a queue there is never applied; a later reconcile drops those rows since the NAS no longer lists them.
