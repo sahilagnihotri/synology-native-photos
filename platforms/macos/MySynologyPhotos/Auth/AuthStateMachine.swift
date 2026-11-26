@@ -40,6 +40,10 @@ enum AuthPhase: Equatable {
 final class AuthStateMachine {
     private let client: PhotosCoreProtocol
     var phase: AuthPhase = .loggedOut
+    /// Host the live session was established against (set on a successful
+    /// login or restore, cleared by `reset`). Sign-out uses it to clear the
+    /// Keychain item under the host the session was actually saved with.
+    private(set) var sessionHost: String?
 
     init(client: PhotosCoreProtocol) {
         self.client = client
@@ -88,6 +92,7 @@ final class AuthStateMachine {
             } else {
                 try? KeychainSID.clear(host: host, username: username)
             }
+            sessionHost = host
             phase = .valid(session)
         } catch let error as CoreError {
             switch error {
@@ -126,6 +131,7 @@ final class AuthStateMachine {
             let state = try await client.restoreSession(connection: connection, session: session)
             switch state {
             case .valid:
+                sessionHost = host
                 phase = .valid(session)
             case .expired:
                 phase = .expired
@@ -156,6 +162,7 @@ final class AuthStateMachine {
     /// app should present. Does not touch the Keychain; callers that mean
     /// "sign out" should clear the stored session themselves first.
     func reset() {
+        sessionHost = nil
         phase = .loggedOut
     }
 }

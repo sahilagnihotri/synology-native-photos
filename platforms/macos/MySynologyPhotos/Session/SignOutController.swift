@@ -97,7 +97,9 @@ final class SignOutController {
         try? await client.signOut()
 
         // 2. Drop the stored SID so a later restore has nothing to pick up.
-        try? KeychainSID.clear(host: keychainHost, username: keychainUsername)
+        // Prefer the host the live session logged in with: the launch-time
+        // host handed to the initialiser is empty after a first login.
+        try? KeychainSID.clear(host: auth.sessionHost ?? keychainHost, username: keychainUsername)
 
         // 3. Wipe this account's on-disk cache directory contents. Missing
         // directory (nothing to clear) or a per-item removal failure both

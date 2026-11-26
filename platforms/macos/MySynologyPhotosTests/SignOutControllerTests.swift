@@ -43,6 +43,33 @@ struct SignOutControllerTests {
         #expect(tempCacheClearedCount == 1)
     }
 
+    /// R4-1: the app's launch-time host is empty after a first login, so the
+    /// controller must clear the Keychain item under the host the live
+    /// session logged in with, not the host it was constructed with.
+    @Test func signOutClearsSessionSavedUnderLoginHostWhenLaunchHostIsEmpty() async throws {
+        let fake = FakePhotosCore()
+        let host = "https://signout-login-host.local:5001"
+        fake.loginResult = .success(Session(sid: "S", synoToken: nil, username: "sotest2", deviceDid: nil))
+        let client = PhotosCoreClient(core: fake)
+        let auth = AuthStateMachine(client: fake)
+        await auth.attemptLogin(
+            host: host, username: "sotest2", password: "pw", otpCode: nil, pinnedCertDer: nil, rememberMe: true)
+        defer { try? KeychainSID.clear(host: host, username: "sotest2") }
+        #expect(try KeychainSID.load(host: host, username: "sotest2") != nil)
+
+        let cacheDir = makeCacheDir()
+        defer { try? FileManager.default.removeItem(at: cacheDir) }
+        let controller = SignOutController(
+            client: client, auth: auth,
+            keychainHost: "", keychainUsername: "sotest2",
+            accountCacheDir: cacheDir,
+            thumbnailCache: ThumbnailCache(client: client))
+
+        await controller.signOut()
+
+        #expect(try KeychainSID.load(host: host, username: "sotest2") == nil)
+    }
+
     @Test func signOutIsIdempotentWhenAlreadyLoggedOut() async {
         let fake = FakePhotosCore()
         let client = PhotosCoreClient(core: fake)
