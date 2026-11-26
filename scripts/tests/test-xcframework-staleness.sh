@@ -3,7 +3,7 @@
 # $TMPDIR. Never builds anything and never touches the real repo.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHECK="$HERE/../macos/xcodegen/xcframework-staleness.sh"
+CHECK="${CHECK_OVERRIDE:-$HERE/../macos/xcodegen/xcframework-staleness.sh}"
 BASE="$(mktemp -d "${TMPDIR:-/tmp}/xcf-stale.XXXXXX")"
 trap 'rm -rf "$BASE"' EXIT
 
@@ -13,11 +13,12 @@ n=0
 # Fresh tree: everything old (2020), lib newer (2021).
 mk() {
   local d="$BASE/t$n"
-  mkdir -p "$d/build/macos/PhotosCore.xcframework/macos-arm64" "$d/platforms/macos/Generated" "$d/core/a/src" "$d/core/photoscore/src"
+  mkdir -p "$d/build/macos/PhotosCore.xcframework/macos-arm64" "$d/platforms/macos/Generated" "$d/core/a/src" "$d/core/photoscore/src" "$d/core/target/debug"
   touch "$d/platforms/macos/Generated/PhotosCore.swift" "$d/platforms/macos/Generated/models.swift" \
         "$d/core/a/src/lib.rs" "$d/core/a/Cargo.toml" "$d/core/photoscore/src/x.udl" \
-        "$d/Cargo.toml" "$d/Cargo.lock"
-  find "$d" -type f -exec touch -t 202001010000 {} +
+        "$d/Cargo.toml" "$d/Cargo.lock" "$d/core/a/uniffi.toml" "$d/rust-toolchain.toml" "$d/Makefile"
+  mkdir -p "$d/.cargo"; touch "$d/.cargo/config.toml"
+  find "$d" \( -type f -o -type d \) -exec touch -t 202001010000 {} +
   touch -t 202101010000 "$d/build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"
   echo "$d"
 }
@@ -37,5 +38,11 @@ n=5; d="$(mk)"; touch "$d/Cargo.lock"; expect "newer Cargo.lock is stale" stale 
 n=6; d="$(mk)"; touch "$d/core/photoscore/src/x.udl"; expect "newer .udl is stale" stale "$d"
 n=7; d="$(mk)"; rm "$d/build/macos/PhotosCore.xcframework/macos-arm64/libphotoscore.a"; expect "missing lib is stale" stale "$d"
 n=8; d="$(mk)"; rm "$d/platforms/macos/Generated/models.swift"; expect "missing bindings is stale" stale "$d"
+n=9; d="$(mk)"; touch "$d/core/a/uniffi.toml"; expect "newer uniffi.toml is stale" stale "$d"
+n=10; d="$(mk)"; touch "$d/rust-toolchain.toml"; expect "newer rust-toolchain.toml is stale" stale "$d"
+n=11; d="$(mk)"; touch "$d/Makefile"; expect "newer Makefile is stale" stale "$d"
+n=12; d="$(mk)"; touch "$d/.cargo/config.toml"; expect "newer .cargo/config.toml is stale" stale "$d"
+n=13; d="$(mk)"; touch "$d/core/a/src/extra.rs"; touch -t 202001010000 "$d/core/a/src/extra.rs"; rm "$d/core/a/src/extra.rs"; expect "deleted source file is stale" stale "$d"
+n=14; d="$(mk)"; touch "$d/core/target/debug/x"; expect "newer files under a target dir are ignored" fresh "$d"
 
 [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
