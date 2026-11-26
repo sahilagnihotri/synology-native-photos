@@ -1005,3 +1005,80 @@ async fn list_recycle_photos_keeps_the_newest_deletion_past_the_file_cap() {
     );
     assert!(items[1].deleted_at >= items[2].deleted_at);
 }
+
+// --- R1-11: a timeout names the real cause --------------------------------
+
+/// Mock the recycle folder listing to fail on every poll with `body`.
+async fn failing_recycle_listing(server: &mut mockito::ServerGuard, status: usize, body: &str) {
+    server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+            Matcher::UrlEncoded("folder_path".into(), "/home/#recycle/Photos".into()),
+        ]))
+        .with_status(status)
+        .with_header("content-type", "application/json")
+        .with_body(body)
+        .create_async()
+        .await;
+}
+
+#[tokio::test]
+async fn restore_timeout_after_failed_polls_names_the_poll_error() {
+    let mut server = mockito::Server::new_async().await;
+    let _dest = mock_folder_files(&mut server, "/home/Photos", &[]).await;
+    failing_recycle_listing(&mut server, 200, "not json at all").await;
+    let _mv = server
+        .mock("POST", "/webapi/entry.cgi")
+        .match_body(Matcher::Regex("SYNO.FileStation.CopyMove".into()))
+        .with_status(200)
+        .with_body(r#"{"success":true,"data":{"taskid":"t"}}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let err = restore_recycle_item_with_polling(
+        &t,
+        "SID",
+        None,
+        "/home/#recycle/Photos/a.jpg",
+        fast_polling(),
+    )
+    .await
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        !msg.contains("still in the recycle bin"),
+        "no poll ever saw the file, so do not claim it is still there: {msg}"
+    );
+    assert!(msg.contains("could not confirm"), "{msg}");
+    assert!(
+        msg.contains("parse"),
+        "the poll error should be named: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn delete_timeout_after_failed_polls_names_the_poll_error() {
+    let mut server = mockito::Server::new_async().await;
+    failing_recycle_listing(&mut server, 503, "Service Unavailable").await;
+    let _del = server
+        .mock("POST", "/webapi/entry.cgi")
+        .match_body(Matcher::Regex("SYNO.FileStation.Delete".into()))
+        .with_status(200)
+        .with_body(r#"{"success":true,"data":{"taskid":"t"}}"#)
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let err = delete_recycle_item_with_polling(
+        &t,
+        "SID",
+        None,
+        "/home/#recycle/Photos/a.jpg",
+        fast_polling(),
+    )
+    .await
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(!msg.contains("still in the recycle bin"), "{msg}");
+    assert!(msg.contains("could not confirm"), "{msg}");
+}

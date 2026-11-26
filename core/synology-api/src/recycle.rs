@@ -581,9 +581,11 @@ async fn folder_contains(
 }
 
 /// Poll until `recycle_path` is no longer in its recycle folder. Fails with
-/// `UnexpectedResponse` naming `what` if it is still there after `polling`.
-/// Auth errors abort at once; any other listing error counts as "not
-/// confirmed yet" and is retried, so a transient blip never reads as success.
+/// `UnexpectedResponse` naming `what` once `polling` runs out: "still in the
+/// recycle bin" when the last poll saw the file, or "could not confirm" with
+/// the poll error when the last listing failed. Auth errors abort at once;
+/// any other listing error counts as "not confirmed yet" and is retried, so a
+/// transient blip never reads as success.
 async fn wait_until_gone_from_recycle(
     transport: &Transport,
     sid: &str,
@@ -593,20 +595,29 @@ async fn wait_until_gone_from_recycle(
     polling: TaskPolling,
 ) -> Result<(), CoreError> {
     let (folder, name) = split_parent(recycle_path)?;
+    // The outcome of the most recent poll: `None` when it saw the file still
+    // there, `Some(error)` when the listing itself failed. The timeout error
+    // reports this, so a failing listing is never passed off as "still there".
+    let mut last_failure: Option<CoreError> = None;
     for attempt in 0..polling.attempts.max(1) {
         if attempt > 0 {
             tokio::time::sleep(polling.interval).await;
         }
         match folder_contains(transport, sid, syno_token, folder, name).await {
             Ok(Some(false)) | Ok(None) => return Ok(()),
-            Ok(Some(true)) => {}
+            Ok(Some(true)) => last_failure = None,
             Err(e @ (CoreError::Auth { .. } | CoreError::OtpRequired)) => return Err(e),
-            Err(_) => {}
+            Err(e) => last_failure = Some(e),
         }
     }
-    Err(CoreError::UnexpectedResponse {
-        message: format!("{what} did not complete: {name} is still in the recycle bin"),
-    })
+    let message = match last_failure {
+        None => format!("{what} did not complete: {name} is still in the recycle bin"),
+        Some(e) => format!(
+            "{what} could not confirm completion for {name}: the last recycle bin check \
+             failed ({e}); it may or may not have finished"
+        ),
+    };
+    Err(CoreError::UnexpectedResponse { message })
 }
 
 /// Restore one recycled file to its original library location by MOVING it out
