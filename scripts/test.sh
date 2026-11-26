@@ -25,7 +25,7 @@ for arg in "$@"; do
     core|macos|windows|all) WHAT="$arg" ;;
     app) warn "'app' is the old name for 'macos'; use 'macos'."; WHAT="macos" ;;
     --include-integration) CORE_ARGS+=(--include-integration) ;;
-    *) warn "ignoring unknown arg: $arg" ;;
+    *) err "unknown argument: $arg (see the usage at the top of this script)"; exit 2 ;;
   esac
 done
 

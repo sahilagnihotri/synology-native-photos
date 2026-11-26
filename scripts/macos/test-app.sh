@@ -11,6 +11,8 @@
 #   ADHOC_SIGN=1 scripts/macos/test-app.sh    # sign ad hoc (no keychain access),
 #                                             # for shells such as a sandboxed agent
 #   RESULT_BUNDLE=<path> scripts/macos/test-app.sh   # keep the .xcresult there
+#   APP_DIR_OVERRIDE=<dir> scripts/macos/test-app.sh # look for the .xcodeproj there
+#                                                    # (scripts/tests uses it with a fake tree)
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,12 +20,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/../shared/common.sh"
 
 ROOT="$(repo_root)"
-APP_DIR="$ROOT/platforms/macos"
+APP_DIR="${APP_DIR_OVERRIDE:-$ROOT/platforms/macos}"
 
 step "Swift / macOS app tests"
 if ! ls "$APP_DIR"/*.xcodeproj >/dev/null 2>&1; then
-  warn "no Xcode project at platforms/macos/; skipping app tests."
-  exit 0
+  err "no Xcode project at $APP_DIR; refusing to report a green run with zero Swift tests."
+  exit 1
 fi
 
 proj="$(ls -d "$APP_DIR"/*.xcodeproj | head -n1)"
