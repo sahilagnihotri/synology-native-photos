@@ -31,6 +31,12 @@ Completed work with commit hashes. Newest at top.
 - `.gitattributes` (`2140744`): LF in the repository and for shell scripts in
   the working tree. `git add --renormalize .` changed no tracked file.
 
+- `scripts/macos/ffi-smoke.sh` (`7c399b9`): updated to the current `thumbnail`,
+  `login` and `Connection` signatures, the `|| true` on the compile is gone,
+  and the module cache and data directory live in the script's own work
+  directory (it also honours `TMPDIR`). Measured: exit 0 with SMOKE PASS, and a
+  copy with the stale `Connection(...)` call exits 1 with the compiler error.
+
 ## Session 2026-10-16: platform layout, local CI, recycle errors, albums API
 
 - Platform layout (plan `documentation/plans/done/2026-10-16-platform-layout-restructure.md`):

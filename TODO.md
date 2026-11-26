@@ -49,7 +49,6 @@ Layout is now `core/`, `platforms/macos`, `platforms/windows`, `build/`, `script
 `scripts/ci/ci.sh all` is the local gate (measured PASS: Rust 385/0/1, Swift 498/0/0).
 Windows work continues on the Windows machine from `documentation/platforms/windows-handover.md`.
 
-- [ ] `scripts/macos/ffi-smoke.sh` is broken (predates the move): its embedded Swift calls `Connection(...)` without `allowUntrustedTls`, and a `|| true` hides the compile error, so it reports success while testing nothing. Fix the call and drop the `|| true`.
 - [ ] `.github/workflows/ci.yml` (manual, `stable` only) is untested; the Xcode on `macos-latest` may be older than the macOS 26 deployment target. Creating `stable` is Sahil's call.
 - [ ] The `ci.sh` swift stage FAIL path was not falsified (fmt, clippy, test and unknown stage were, via `scripts/tests/test-ci.sh`).
 - [ ] The Recently Deleted restore loop's "restored N of M" message has no test (loop reworked to `enumerate` in `375c156`).
