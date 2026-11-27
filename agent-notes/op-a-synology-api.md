@@ -71,3 +71,15 @@
     complete: iPhone is still in the recycle bin" (localhost only; Delete is an expect(0) mock).
     Restored.
 - After: fmt, clippy clean, `cargo test -p synology-api` exit 0, 259 passed, 0 failed, 1 ignored.
+
+## AV-11 stale list_items doc
+- Doc only, no test (none needed per the AV report). The `list_items` doc said malformed elements
+  are skipped; since `ee27208` the unfiltered path runs `ensure_every_item_usable` and fails the
+  page. The doc now says it is strict, names `list_items_page` as what the crawl and reconcile
+  use, and puts the tolerant skip on `list_items_filtered` and the display paths. Also fixed
+  the two inner comments that said the crawl pages `list_items`.
+- Measured: no non-test caller of `synology_api::list_items` remains (grep of photoscore,
+  sync-engine and the crate's lib.rs: only the re-export and a compile check). Removing it is
+  a choice left open, not done.
+- After: fmt, clippy clean, `cargo test -p synology-api` exit 0, 259 passed, 0 failed, 1 ignored.
+  `cargo doc` warnings seen are the pre-existing `[ids]` links in album_write.rs.

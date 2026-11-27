@@ -446,14 +446,17 @@ async fn get_body(
 /// tolerantly, and an unrecognized `type` decodes as `MediaKind::Unknown`
 /// rather than failing the whole list.
 ///
-/// Decoding is per-element and tolerant: an element that fails to
-/// deserialize into `RawItem` at all, or one that decodes but is missing
-/// `id` or a non-empty `cache_key` (the minimum viable `Asset` — `cache_key`
-/// is required to fetch thumbnails/originals later), is skipped rather than
-/// failing the whole page. Skipped elements are logged via `tracing::warn!`
-/// with a total count so a bad batch is visible without breaking browsing.
-/// An item missing only optional fields (`filename`, `time`, `filesize`,
-/// dimensions, ...) still produces a usable `Asset` with defaults.
+/// This unfiltered list is STRICT: if any element fails to deserialize into
+/// `RawItem`, or has no non-empty `cache_key` (needed to fetch thumbnails and
+/// originals), the whole page fails with `Decode` naming the element index
+/// (`ensure_every_item_usable`). It does not skip such an element. An item
+/// missing only optional fields (`filename`, `time`, `filesize`, dimensions,
+/// ...) still produces a usable `Asset` with defaults.
+///
+/// The crawl and the reconcile do not use this: they page through
+/// `list_items_page`, which keeps an unusable item as a skipped id and
+/// reports the raw page size. The tolerant skip and `tracing::warn!` apply to
+/// `list_items_filtered` and the other display paths.
 ///
 /// `syno_token` is `Session.syno_token` from login, forwarded as the
 /// `X-SYNO-TOKEN` header (see `get_body`); pass `None` when the session has
@@ -527,10 +530,9 @@ async fn list_items_inner(
     }
     let body = get_body(transport, &query, syno_token).await?;
     if filter.is_none() {
-        // The unfiltered list is what the sync crawl pages to exhaustion. It
-        // advances by the number of items returned and treats a short page
-        // as the last, so a dropped element must fail the page rather than
-        // end the crawl early and misalign every later offset.
+        // A caller paging the unfiltered list on the number of items returned
+        // would read a short page as the last one, so a dropped element fails
+        // the page instead. The crawl itself now uses `list_items_page`.
         ensure_every_item_usable(&body, "browse item")?;
     }
     decode_item_list(&body, space, "browse item")
@@ -538,8 +540,9 @@ async fn list_items_inner(
 
 /// Fail with `Decode`, naming the element index, if any element of an item
 /// list page would be skipped by `decode_item_list` (it does not decode into
-/// `RawItem`, or it has no non-empty `cache_key`). Used only on the crawl
-/// path, where a silently shorter page is read as the end of the library.
+/// `RawItem`, or it has no non-empty `cache_key`). Used only by the strict
+/// unfiltered `list_items`, where a silently shorter page could be read as
+/// the end of the library.
 fn ensure_every_item_usable(body: &str, kind_label: &str) -> Result<(), CoreError> {
     let parsed: ItemList = decode_envelope(body)?;
     let total = parsed.list.len();
