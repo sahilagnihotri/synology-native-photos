@@ -140,15 +140,31 @@ async fn list_parent(
         .await
 }
 
+/// A bare recycle subfolder such as `iPhone` passes the string guard (a name
+/// without an extension is allowed), so it is the File Station listing that
+/// says it is a folder and refuses the delete. The parent listing is mocked:
+/// an unmocked one fails on its own and would hide whether the folder check
+/// works at all.
 #[tokio::test]
 async fn delete_refuses_a_bare_recycle_folder_without_any_write() {
     let mut server = mockito::Server::new_async().await;
+    let _parent = list_parent(
+        &mut server,
+        ROOT,
+        r#"{"isdir":true,"name":"iPhone","path":"/home/#recycle/Photos/iPhone"}"#,
+    )
+    .await;
     let trap = delete_trap(&mut server).await;
     let t = transport_for(&server);
     let result =
         delete_recycle_item_with_polling(&t, "SID", None, "/home/#recycle/Photos/iPhone", fast())
             .await;
-    assert!(result.is_err(), "got {result:?}");
+    match &result {
+        Err(CoreError::UnexpectedResponse { message }) => {
+            assert!(message.contains("it is a folder"), "{message}")
+        }
+        other => panic!("a bare folder must be refused as a folder, got {other:?}"),
+    }
     trap.assert_async().await;
 }
 

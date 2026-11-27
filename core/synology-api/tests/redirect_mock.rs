@@ -102,7 +102,7 @@ async fn permanent_delete_does_not_follow_a_308_to_another_origin() {
 }
 
 #[tokio::test]
-async fn browse_get_does_not_follow_a_302_to_another_origin() {
+async fn download_get_does_not_follow_a_302_to_another_origin() {
     let mut evil = mockito::Server::new_async().await;
     let trap = evil_trap(&mut evil).await;
     let nas = redirecting_nas(302, &evil).await;

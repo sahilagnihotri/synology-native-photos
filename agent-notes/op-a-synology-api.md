@@ -50,3 +50,24 @@
   (`photoscore/src/lib.rs:1107`) passes offset and limit through, so a paged UI that asks
   for page 2 pays the full walk again.
 - After: fmt, clippy clean, `cargo test -p synology-api` exit 0, 259 passed, 0 failed, 1 ignored.
+
+## VF-12 misleading test names
+- No detail beyond the TODO line existed, so I read each named file. Found and fixed:
+  - `redirect_mock.rs`: `browse_get_does_not_follow_a_302_to_another_origin` calls
+    `download_original`, not a browse. Renamed `download_get_does_not_follow_a_302_to_another_origin`.
+  - `browse_mock.rs`: `list_items_page_with_an_undecodable_element_fails_naming_it` calls
+    `list_items`, and `list_items_page` does the opposite (keeps the item as a skipped id).
+    Renamed `strict_list_items_with_an_undecodable_element_fails_naming_it`; its doc said the
+    crawl pages `list_items`, stale since the crawl moved to `list_items_page`. Fixed.
+    `one_malformed_item_is_skipped_others_still_decode` exercises only `list_items_filtered`;
+    renamed `filtered_list_skips_a_malformed_item_others_still_decode` and fixed its doc.
+  - `recycle_guard_mock.rs`: `delete_refuses_a_bare_recycle_folder_without_any_write` passed for
+    the wrong reason. Measured with an eprintln: the result was
+    `Err(Decode { message: "envelope parse failed: EOF while parsing a value at line 1 column 0" })`,
+    i.e. the unmocked parent listing (mockito 501, empty body), not the folder check. Now the
+    parent listing is mocked with `iPhone` as `isdir:true` and the test asserts the
+    "it is a folder" refusal. Falsified by weakening `ensure_is_recycled_file` to accept any
+    entry with `isdir` reported: FAILED at `recycle_guard_mock.rs:164`, "permanent delete did not
+    complete: iPhone is still in the recycle bin" (localhost only; Delete is an expect(0) mock).
+    Restored.
+- After: fmt, clippy clean, `cargo test -p synology-api` exit 0, 259 passed, 0 failed, 1 ignored.

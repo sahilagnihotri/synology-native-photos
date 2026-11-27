@@ -489,11 +489,11 @@ async fn list_albums_detects_smart_and_shared_markers() {
 }
 
 /// Display paths (here a collection browse) stay tolerant: a bad element is
-/// skipped and the rest of the page is shown. The unfiltered `list_items`
-/// that the crawl pages through fails instead, see
-/// `list_items_page_with_an_undecodable_element_fails_naming_it`.
+/// skipped and the rest of the page is shown. The strict unfiltered
+/// `list_items` fails instead, see
+/// `strict_list_items_with_an_undecodable_element_fails_naming_it`.
 #[tokio::test]
-async fn one_malformed_item_is_skipped_others_still_decode() {
+async fn filtered_list_skips_a_malformed_item_others_still_decode() {
     let mut server = mockito::Server::new_async().await;
     let _m = server
         .mock("GET", "/webapi/entry.cgi")
@@ -641,13 +641,13 @@ async fn list_items_omits_syno_token_header_when_absent() {
     _m.assert_async().await;
 }
 
-/// R1-3: the crawl pages `list_items` with `offset += fetched` and treats a
-/// page shorter than `limit` as the last one, then drops every local asset it
-/// did not see. A full server page of 3 that came back as 2 would therefore
-/// end the crawl early. A page holding an unusable element must fail, naming
-/// the element, rather than look like a short page.
+/// R1-3: the strict unfiltered `list_items` fails a page holding an unusable
+/// element, naming it, rather than return a short page that a caller paging on
+/// the decoded count would read as the last one. This is `list_items`, not
+/// `list_items_page`: the crawl now pages through `list_items_page`, which
+/// keeps such an item as a skipped id instead (tests below).
 #[tokio::test]
-async fn list_items_page_with_an_undecodable_element_fails_naming_it() {
+async fn strict_list_items_with_an_undecodable_element_fails_naming_it() {
     for bad in [
         r#"{"identifier":"not-an-id","additional":{"thumbnail":{"cache_key":"CKX"}}}"#,
         r#"{"id":902,"filename":"no-cache-key.jpg","type":"photo"}"#,
