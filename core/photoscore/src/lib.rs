@@ -389,14 +389,7 @@ impl PhotosCore {
     /// the live session. Same auth and lock discipline as `crawl_space`.
     pub async fn reconcile_delta(&self, space: Space) -> Result<CrawlProgress, CoreError> {
         let source = self.page_source_for(space)?;
-        let account = source.account.clone();
-        self.run_with_store(account, move |store| {
-            Box::pin(async move {
-                let reconciler = DeltaReconciler::new(store, &source, 200);
-                reconciler.reconcile(space).await
-            })
-        })
-        .await
+        self.reconcile_with_source(space, source).await
     }
 
     /// Reads back the persisted crawl progress for `space` with no network
@@ -1416,6 +1409,23 @@ impl PhotosCore {
             Box::pin(async move {
                 let crawler = Crawler::new(store, &source, 200);
                 crawler.crawl_space(space, &sink).await
+            })
+        })
+        .await
+    }
+
+    /// The reconcile body of `reconcile_delta`, split out for the same
+    /// reason as `crawl_with_source`.
+    async fn reconcile_with_source(
+        &self,
+        space: Space,
+        source: ApiPageSource,
+    ) -> Result<CrawlProgress, CoreError> {
+        let account = source.account.clone();
+        self.run_with_store(account, move |store| {
+            Box::pin(async move {
+                let reconciler = DeltaReconciler::new(store, &source, 200);
+                reconciler.reconcile(space).await
             })
         })
         .await
@@ -3950,6 +3960,60 @@ mod core_tests {
         );
         assert_eq!(core.asset_count(Space::Personal).unwrap(), 0);
         assert!(!core.crawl_progress(Space::Personal).unwrap().complete);
+        list.assert_async().await;
+    }
+
+    /// The reconcile path takes the same check: a reconcile whose source was
+    /// built from alice's session, reaching the store after bob signed in,
+    /// must read no page and must not sweep bob's rows (alice's empty
+    /// listing would otherwise read as "everything was deleted").
+    #[tokio::test]
+    async fn a_reconcile_from_the_previous_account_writes_nothing_after_a_sign_in() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let list = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded("method".into(), "list".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success":true,"data":{"list":[]}}"#)
+            .expect(0)
+            .create_async()
+            .await;
+        let conn = || Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        let core = core_at("account-race-reconcile");
+        core.login(conn(), "alice".into(), "p".into(), None, None)
+            .await
+            .expect("login alice");
+        let alices_source = core.page_source_for(Space::Personal).unwrap();
+        core.login(conn(), "bob".into(), "p".into(), None, None)
+            .await
+            .expect("login bob");
+        seed_asset(&core, Space::Personal, 5);
+
+        let result = core
+            .reconcile_with_source(Space::Personal, alices_source)
+            .await;
+        assert!(
+            matches!(result, Err(CoreError::Storage { .. })),
+            "a reconcile from the previous account must be refused, got {result:?}"
+        );
+        assert_eq!(
+            core.asset_count(Space::Personal).unwrap(),
+            1,
+            "bob's row is untouched"
+        );
         list.assert_async().await;
     }
 
