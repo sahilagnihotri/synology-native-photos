@@ -630,7 +630,9 @@ async fn folder_contains(
 /// Poll until `recycle_path` is no longer in its recycle folder. Fails with
 /// `UnexpectedResponse` naming `what` once `polling` runs out: "still in the
 /// recycle bin" when the last poll saw the file, or "could not confirm" with
-/// the poll error when the last listing failed. Auth errors abort at once;
+/// the poll error when the last listing failed. Auth errors abort at once
+/// and keep the "may or may not have finished" wording, since the task was
+/// already queued;
 /// any other listing error counts as "not confirmed yet" and is retried, so a
 /// transient blip never reads as success.
 async fn wait_until_gone_from_recycle(
@@ -653,7 +655,19 @@ async fn wait_until_gone_from_recycle(
         match folder_contains(transport, sid, syno_token, folder, name).await {
             Ok(Some(false)) | Ok(None) => return Ok(()),
             Ok(Some(true)) => last_failure = None,
-            Err(e @ (CoreError::Auth { .. } | CoreError::OtpRequired)) => return Err(e),
+            // The task was already queued, so an expired session here does
+            // not mean nothing happened. Keep `Auth` (the caller signs the
+            // user in again) but say the outcome is unknown.
+            Err(CoreError::Auth { message }) => {
+                return Err(CoreError::Auth {
+                    message: format!(
+                        "{what} could not confirm completion for {name}: the session ended \
+                         during the recycle bin check ({message}); it may or may not have finished"
+                    ),
+                })
+            }
+            // `OtpRequired` carries no message, so it cannot hold the wording.
+            Err(e @ CoreError::OtpRequired) => return Err(e),
             Err(e) => last_failure = Some(e),
         }
     }
