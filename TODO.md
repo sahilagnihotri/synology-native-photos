@@ -2,7 +2,37 @@
 
 Only pending work. Completed items live in `Fixed.md`. Live scratch progress in `.superpowers/sdd/progress.md` (gitignored).
 
-Last Updated: 2026-11-26 (review fixes and the adversarial pass landed: Rust 452/0/1, Swift 518/0/0, Windows cross check passes)
+Last Updated: 2026-11-27 (fixes verified by falsification, defects found fixed: Rust 458/0/1, Swift 520/0/0, Windows cross check passes)
+
+## 2026-11-27: verification of the 2026-11-26 fixes
+
+Report: `documentation/reviews/2026-11-26-full-repo-review/verification.md`.
+Fixed defects are in `Fixed.md`. Gaps found and left open:
+
+- [ ] VF-1 (Mac app view wiring, untested): only the models are tested for
+  `9fad604` (the LibraryView `.task` and `isShowingSpace`), `fdf4855` (the
+  sidebar cancel and the `runSearch` guard), `835e183` (the RecentlyDeletedView
+  call sites) and `465d445` (the editor `.alert`). Reverting the view hunk
+  leaves every test green. Needs UI tests or a testable seam.
+- [ ] VF-2: `2cdae7a` the in-loop trim of the recycle listing is never
+  exercised by a test, and every listing now walks the whole tree (a cost
+  regression on a large bin).
+- [ ] VF-3: `upload_was_skipped` accepts only a JSON bool; a `1` or `"true"`
+  reply would read as not skipped.
+- [ ] VF-4: `LoginData` derives `Debug` over the raw sid.
+- [ ] VF-5: a 119 during the restore or delete poll loses the "may or may not
+  have finished" wording.
+- [ ] VF-6: `1974d3f` no test drains the queued local deletes through
+  `run_with_store`.
+- [ ] VF-7: `0c3271c` a mutant of `index_has_rows` survives the tests.
+- [ ] VF-8: `07c86b4` the reconcile path of the previous-account check has no
+  test.
+- [ ] VF-9: stale comments after `641aa16` (doc comment) and `1016098`.
+- [ ] VF-10: `88a6c1a` the `--locked` flag and the `failed -eq 0` check in the
+  core gate are masked: removing either keeps every script test green.
+- [ ] VF-11: `b3b984b` nested xcframework directories are not ignored.
+- [ ] VF-12: misleading test names in `redirect_mock`, `browse_mock` and the
+  bare-folder delete test.
 
 ## 2026-11-26: full-repo review, release build break, Windows core check
 
@@ -15,8 +45,8 @@ Dispatch state and owned paths are in `tasks.md`.
   ever needs the dylib on macOS, set `strip = false` for the whole release
   profile and measure the app size change first.
 - [ ] REV-2026-11 (open remainder): the review reported 72 findings against
-  `1c2c107`. 51 are fixed, the code fixes each with a test that failed first
-  (see `Fixed.md`).
+  `1c2c107`. 51 are fixed (counting R6-4), most with a test that failed first; the
+  exceptions are in `Fixed.md` and VF-1.
   The 21 below were not fixed in this pass. Reports with evidence and suggested
   fixes: `documentation/reviews/2026-11-26-full-repo-review/` (finding IDs match).
   - [ ] R1-12 (low): Most mock tests do not assert the session or the parameters actually sent.
@@ -62,7 +92,7 @@ Dispatch state and owned paths are in `tasks.md`.
   The `platforms/macos/project.yml` comment says `DEVELOPMENT_TEAM` is left
   unset while the next line sets it. `Fixed.md` records the old bundle ids
   `se.agnihotri.synologyphotos.*` (the project uses `se.agnihotri.mysynologyphotos`).
-- [ ] REV-F7: none of the 15 Mac app fixes of 2026-11-26 has been exercised in
+- [ ] REV-F7: none of the Mac app fixes (13 commits covering 16 IDs) of 2026-11-26 has been exercised in
   the running app or against the real NAS, only through unit tests. The UI test
   target was not run. A switch of account or NAS, and the first launch after
   this update, now clear the local index and run a fresh crawl.
@@ -75,7 +105,8 @@ Dispatch state and owned paths are in `tasks.md`.
 - [ ] AV-2026-11: adversarial review of the core fixes, open items. Detail,
   locations and suggested tests are in
   `documentation/reviews/2026-11-26-full-repo-review/fixes/av-core-diff.md`.
-  AV-1 is fixed (`61dbe05`); AV-2 is REV-F2 above. All below were found by reading,
+  AV-1 is fixed (`61dbe05`, `2ad2460`) and AV-10 is fixed (`78772e6`, it was a
+  regression from `80d4210`, not pre-existing); AV-2 is REV-F2 above. All below were found by reading,
   none reproduced by execution.
   - [ ] AV-3 (medium, touches delete): a Shared space delete checks the user
     home recycle bin setting, not the photo share's own. Shared space is off on
@@ -97,10 +128,8 @@ Dispatch state and owned paths are in `tasks.md`.
     reports the delete as failed.
   - [ ] AV-9 (low): crawl and reconcile loop forever if the server ignores
     `offset`.
-  - [ ] AV-10 (low): a `taken_at` within a day of `i64::MIN` overflows the day
-    arithmetic and the whole date histogram fails.
   - [ ] AV-11 (low): the `list_items` doc comment is stale after `ee27208`.
-  - [ ] AV-12: a comma inside a JSON path array is unverified on the real NAS
+  - [ ] NAS-COMMA-1 (not from the AV report): a comma inside a JSON path array is unverified on the real NAS
     (restore and delete of a file under a folder such as "Paris, France"). A
     wrong split fails with a File Station error: a folder name ending in a
     comma is refused, so no piece after a comma can be an absolute path.

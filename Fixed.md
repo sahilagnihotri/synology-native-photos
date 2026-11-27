@@ -2,11 +2,49 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-11-27: verification of the 2026-11-26 fixes
+
+Every commit from `1c2c107` to `6e4d397` was re-checked by reverting it in a
+throwaway clone and running its tests (report:
+`documentation/reviews/2026-11-26-full-repo-review/verification.md`). The
+defects that check found, each fixed with a test seen failing first:
+
+- R3-7 regression from `80d4210`: a `taken_at` within a day of `i64::MIN` made
+  the whole date histogram fail (`Invalid column type Real`). Such rows now
+  count in the Unknown Date bucket (`78772e6`). This was listed as AV-10 and
+  called pre-existing, which was wrong: `80d4210` introduced it.
+- Recycle guard (`828f948`, `61dbe05` were incomplete): comma lookalikes
+  (U+FF0C, U+FE50, U+FE10, U+FE11, U+3001, U+FF64), the NFKC dot forms U+FE30
+  and U+FE19, U+2028, U+2029, U+061C, U+00AD and U+2060, and a comma followed
+  by spaces and an absolute path are refused. A permanent delete now needs the
+  listing to say `isdir: false`; a missing field used to read as a file. The
+  recycle thumbnail treats a non 2xx reply as an error. New tests pin that the
+  delete check lists the delete's own parent (a mutant listing the root used
+  to pass) and that the thumbnail refuses a plain comma (the old test was
+  caught by the generic guard first) (`2ad2460`). 13 failing runs: 3 before
+  the fix, 2 more by mutation.
+- Sync sweep (`05240b6`): tests for the exact 20 percent boundary and for the
+  reset of the pending fingerprint after an applied sweep; three mutants each
+  fail a test (`5d56183`).
+- Mac app: tests for the prefetch total refresh (`25fac1e`) and for
+  `dismantleNSView` cancelling a pending video load (`1e86fdd`), each seen
+  failing with its fix reverted (`515dbd4`).
+
+Gates on the final tree: `scripts/ci/ci.sh core` exit 0 (Rust 458 passed,
+0 failed, 1 ignored, 5 script tests), Xcode unit run `TEST SUCCEEDED` (514
+Swift Testing tests in 54 suites plus 6 XCTest), `scripts/macos/ffi-smoke.sh`
+exit 0, `scripts/windows/check-core.sh` exit 0. Nothing was run against the
+real NAS or in the running app.
+
 ## Session 2026-11-26: review, release build, Windows core check
 
 Review fixes (finding IDs from `documentation/reviews/2026-11-26-full-repo-review/`).
-Every code fix has a test that was seen failing before the fix; the failing
-lines are in the `fixes/` notes in that folder. Gates on the final tree, run by
+Most code fixes have a test that was seen failing before the fix; the failing
+lines are in the `fixes/` notes in that folder. Exceptions found by the
+2026-11-27 verification: `61dbe05` had no test that guarded its thumbnail
+comma check (added in `2ad2460`), `7b296d3` and `7705f48` were checked by
+reading only, and several Mac app fixes are tested at the model level only,
+not in the view wiring (VF-1 in `TODO.md`). Gates on the final tree, run by
 the orchestrator: `scripts/ci/ci.sh core` exit 0 (Rust 449 passed, 0 failed,
 1 ignored, 5 script tests), Xcode unit run exit 0 (512 Swift Testing tests in
 54 suites plus 6 XCTest, 0 failed, 0 skipped), `scripts/macos/ffi-smoke.sh`
@@ -23,7 +61,8 @@ real NAS or in the running app.
   no progress check (`baea50e`); R1-4 codes 106, 107, 119 map to `Auth`
   (`e942def`); R1-9 recycle path guard tightened (`da7ffbe`) and a permanent
   delete first lists the parent and refuses anything that is not a listed file
-  (`8d60373`); R1-8 a skipped upload is an error (`7544243`); R1-5 the recycle
+  (`8d60373`), with a comma followed by an absolute path refused (`828f948`)
+  and both checks tightened again in `2ad2460`; R1-8 a skipped upload is an error (`7544243`); R1-5 the recycle
   listing keeps the newest deletions at its cap (`2cdae7a`); R1-11 timeouts
   name the real cause (`b443f66`).
 - Index and sync (`core/persistence`, `core/sync-engine`): R3-1 and R2-1 sweep
@@ -34,19 +73,19 @@ real NAS or in the running app.
   are rewound on data bearing migrations (`09090ec`); R3-6 a database from a
   newer app version is refused (`0719051`); R3-7 histogram days are floored and
   undated rows use the key `i64::MIN`, so day 0 is the real 1970-01-01
-  (`80d4210`); R3-2 grid reads use the `taken_at` index again (`4aeff57`); R3-5
+  (`80d4210`, which broke the histogram near `i64::MIN`; fixed in `78772e6`); R3-2 grid reads use the `taken_at` index again (`4aeff57`); R3-5
   a failed COMMIT rolls back (`b0fb201`).
-- Facade (`core/photoscore`): crawl and reconcile page with `list_items_page`,
-  so an item without a thumbnail yet neither ends the crawl nor counts as
-  deleted (`ee27208`); R2-2 `delete_assets` refuses in the core when the recycle
+- Facade (`core/photoscore`): R1-3c crawl and reconcile page with
+  `list_items_page`, so an item without a thumbnail yet neither ends the crawl
+  nor counts as deleted (`ee27208`); R2-2 `delete_assets` refuses in the core when the recycle
   bin is Disabled and sends no delete request (`8ab1b83`); R2-5
   `restore_session` validates with an authenticated call (`5ec9f7e`); R2-6 a
   delete during a crawl queues the local removal (`1974d3f`); R2-8 the index is
   bound to host plus user and cleared on a mismatch (`5945810`), an index with
   no recorded owner is cleared unless empty (`0c3271c`), and a sync built under
   the previous account writes nothing (`07c86b4`); R2-10 partial restore and
-  empty keep the error kind and count (`1572682`); a failed reindex after a
-  successful edit upload no longer fails the save (`641aa16`); R2-12 unique
+  empty keep the error kind and count (`1572682`); R4-12b a failed reindex
+  after a successful edit upload no longer fails the save (`641aa16`); R2-12 unique
   temp names for concurrent thumbnail writes (`6bc245f`). Test mock updated for
   the delete file check (`6d5c7c5`). The exported UniFFI surface is unchanged;
   the bindings were regenerated for doc comments only.
@@ -68,7 +107,8 @@ real NAS or in the running app.
 - Adversarial pass on the core fixes (11 findings, notes in the `fixes/`
   folder): AV-1 the tightened recycle guard refused any path with a comma and
   any name without an extension, which blocked a whole restore or empty batch.
-  Fixed in `61dbe05` (three tests failed first). The rest are open under AV-2026-11
+  Fixed in `61dbe05`: two of its tests failed first; the third (the thumbnail
+  comma) passed without the fix and was corrected in `2ad2460`. The rest are open under AV-2026-11
   in `TODO.md`.
 - Scripts and docs: R6-7 `setup.sh` rejects unknown arguments (`d2758a0`); R6-6
   `test.sh` and `test-app.sh` fail closed (`ad4d57d`); R6-5 the core gate uses
@@ -77,8 +117,9 @@ real NAS or in the running app.
   counts `uniffi.toml`, the toolchain pin, the `Makefile` and deleted sources
   (`02b7301`); R6-1 the dmg is named from the app version plus the commit and a
   dirty tree is refused (`2073e2c`); R6-11 docs drift (`488cf68`, `ac61709`);
-  R6-9 unused dependencies dropped with the lock file (see `git log -1 --
-  Cargo.lock`).
+  R6-9 unused dependencies dropped with the lock file (`e18512b`); R6-4
+  the TODO claim that `ffi-smoke.sh` reported success on a failed compile was
+  wrong, and the `|| true` was replaced rather than dropped (`7c399b9`, below).
 
 - BUILD-1: the release build of the core failed on macOS 27.0 with Xcode 27.2
   (`can't find crate for time_macros`), so the app could not be built or
