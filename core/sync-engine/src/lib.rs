@@ -30,6 +30,32 @@ pub struct ListedPage {
     pub skipped_ids: Vec<i64>,
 }
 
+/// Detects a server that ignores `offset`. A page is a repeat when it has the
+/// same non-empty list of ids (decoded and skipped) as the page before it:
+/// two adjacent windows of one listing never share ids, so a repeat means the
+/// same items came back for a new offset and paging would never end.
+#[derive(Default)]
+pub(crate) struct PageGuard {
+    previous: Option<Vec<i64>>,
+}
+
+impl PageGuard {
+    /// Records `page` and fails if it repeats the previous page.
+    pub(crate) fn check(&mut self, offset: u32, page: &ListedPage) -> Result<(), CoreError> {
+        let mut ids: Vec<i64> = page.assets.iter().map(|a| a.id).collect();
+        ids.extend(page.skipped_ids.iter().copied());
+        if !ids.is_empty() && self.previous.as_ref() == Some(&ids) {
+            return Err(CoreError::UnexpectedResponse {
+                message: format!(
+                    "the server returned the same page again at offset {offset}; it appears to ignore offset"
+                ),
+            });
+        }
+        self.previous = Some(ids);
+        Ok(())
+    }
+}
+
 /// Abstraction over the network list call so sync logic is testable without HTTP.
 /// Group A's facade implements this over synology-api; sync-engine only knows the trait.
 #[allow(clippy::double_must_use)] // async_trait adds must_use to the boxed future; not ours

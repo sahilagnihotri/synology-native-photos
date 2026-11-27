@@ -104,8 +104,10 @@ impl<'a> DeltaReconciler<'a> {
         let mut offset: u32 = 0;
         let mut seen_ids: HashSet<i64> = HashSet::with_capacity(local.len());
 
+        let mut guard = crate::PageGuard::default();
         loop {
             let page = self.source.list_page(space, offset, limit).await?;
+            guard.check(offset, &page)?;
             // Paging uses the RAW count (see `ListedPage`), and an id the
             // server listed but that does not decode yet counts as present:
             // its local row, if any, must survive the deletion mirror.
@@ -681,5 +683,54 @@ mod tests {
             .unwrap()
             .last_reconcile_at
             .is_some());
+    }
+
+    /// AV-9: a server that ignores `offset` and returns the same full page
+    /// every time. Panics after 50 calls so a missing guard fails instead of
+    /// hanging.
+    struct IgnoresOffset {
+        calls: std::sync::atomic::AtomicU32,
+    }
+    #[async_trait::async_trait]
+    impl PageSource for IgnoresOffset {
+        async fn list_items(
+            &self,
+            _space: Space,
+            _offset: u32,
+            limit: u32,
+        ) -> Result<AssetPage, CoreError> {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert!(n < 50, "paging never stopped");
+            Ok(AssetPage {
+                assets: (1..=limit as i64).map(av9_asset).collect(),
+                total: 1000,
+            })
+        }
+    }
+
+    fn av9_asset(id: i64) -> Asset {
+        Asset {
+            id,
+            space: Space::Personal,
+            server_version: Some(1),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn reconcile_fails_when_the_server_ignores_offset() {
+        let store = Store::open_in_memory().unwrap();
+        let src = IgnoresOffset {
+            calls: std::sync::atomic::AtomicU32::new(0),
+        };
+        let err = DeltaReconciler::new(&store, &src, 3)
+            .reconcile(Space::Personal)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { ref message } if message.contains("ignore offset")),
+            "got {err:?}"
+        );
+        assert_eq!(src.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 }

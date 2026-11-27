@@ -91,8 +91,10 @@ impl<'a> Crawler<'a> {
         let mut offset = state.last_offset;
         let mut expected_total;
 
+        let mut guard = crate::PageGuard::default();
         loop {
             let page = self.source.list_page(space, offset, limit).await?;
+            guard.check(offset, &page)?;
             expected_total = page.total;
             let fetched = page.assets.len() as u32;
             // Paging and the end-of-space test use the RAW count: an item
@@ -629,5 +631,59 @@ mod tests {
             store.load_sync_state(Space::Personal).unwrap().last_offset,
             5
         );
+    }
+
+    /// AV-9: a server that ignores `offset` and returns the same full page
+    /// every time. Panics after 50 calls so a missing guard fails instead of
+    /// hanging.
+    struct IgnoresOffset {
+        calls: std::sync::atomic::AtomicU32,
+    }
+    #[async_trait::async_trait]
+    impl PageSource for IgnoresOffset {
+        async fn list_items(
+            &self,
+            _space: Space,
+            _offset: u32,
+            limit: u32,
+        ) -> Result<AssetPage, CoreError> {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert!(n < 50, "paging never stopped");
+            Ok(AssetPage {
+                assets: (1..=limit as i64).map(av9_asset).collect(),
+                total: 1000,
+            })
+        }
+    }
+
+    fn av9_asset(id: i64) -> Asset {
+        Asset {
+            id,
+            space: Space::Personal,
+            server_version: Some(1),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn crawl_fails_when_the_server_ignores_offset() {
+        let store = Store::open_in_memory().unwrap();
+        let src = IgnoresOffset {
+            calls: std::sync::atomic::AtomicU32::new(0),
+        };
+        let err = Crawler::new(&store, &src, 3)
+            .crawl_space(
+                Space::Personal,
+                &CountingSink {
+                    events: Mutex::new(vec![]),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { ref message } if message.contains("ignore offset")),
+            "got {err:?}"
+        );
+        assert_eq!(src.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 }
