@@ -18,6 +18,22 @@ struct RootRouter {
     }
 }
 
+/// What the library view does when it first appears, minus the snapshot, so
+/// the sequence is testable without a scene.
+@MainActor
+enum LibraryStartup {
+    static func prepare(env: AppEnvironment) async {
+        // A re-login re-creates the view over a data source that may still be
+        // pointed at a search or collection from the last session.
+        if !env.dataSource.isShowingSpace(env.spaceSelection.current) {
+            await env.dataSource.setSpace(env.spaceSelection.current)
+        }
+        await env.crawl.startCrawl(space: env.spaceSelection.current)
+        await env.dataSource.refreshCount()
+        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+    }
+}
+
 /// The active search keyword plus a generation token. Typing begins a run and
 /// takes a token; clearing the box or changing the sidebar cancels, which
 /// invalidates every outstanding token. A run commits its keyword only if its
@@ -49,6 +65,45 @@ final class SearchSession {
     func cancel() {
         generation += 1
         activeKeyword = nil
+    }
+
+    /// The sidebar changed. When a search is active or text is in the box, drops
+    /// the search, invalidates every run in flight and returns true so the
+    /// caller clears the box and the filters. False means nothing to drop.
+    func dropForSidebarChange(queryText: String) -> Bool {
+        guard activeKeyword != nil || !queryText.isEmpty else { return false }
+        cancel()
+        return true
+    }
+
+    /// Runs one search. A run that has been superseded (token no longer
+    /// current) does nothing before it starts, and abandons quietly after
+    /// either await. If a superseded run had already pointed the data source
+    /// at its keyword and the box is now empty with no active search, calls
+    /// `restoreRoute` so the grid does not stay on stale results.
+    func run(
+        _ keyword: String, token: Int?,
+        dataSource: WindowedDataSource, filters: SearchFilters,
+        queryText: () -> String,
+        prepare: () -> Void,
+        applySnapshot: () async -> Void,
+        restoreRoute: () async -> Void
+    ) async {
+        let token = token ?? begin()
+        guard isCurrent(token) else { return }
+        prepare()
+        await dataSource.setSearch(keyword, filters: filters)
+        guard isCurrent(token) else { await abandon(queryText(), restoreRoute); return }
+        await dataSource.loadWindow(offset: 0, limit: dataSource.pageSize)
+        guard isCurrent(token) else { await abandon(queryText(), restoreRoute); return }
+        await applySnapshot()
+        commit(keyword, token: token)
+    }
+
+    private func abandon(_ queryText: String, _ restoreRoute: () async -> Void) async {
+        guard activeKeyword == nil,
+              queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        await restoreRoute()
     }
 }
 
@@ -327,14 +382,7 @@ struct LibraryView: View {
         .focusedSceneValue(\.libraryCommands, libraryCommandActions)
         .task {
             wireGridCallbacks()
-            // A re-login re-creates this view over a data source that may
-            // still be pointed at a search or collection from the last session.
-            if !env.dataSource.isShowingSpace(env.spaceSelection.current) {
-                await env.dataSource.setSpace(env.spaceSelection.current)
-            }
-            await env.crawl.startCrawl(space: env.spaceSelection.current)
-            await env.dataSource.refreshCount()
-            await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
+            await LibraryStartup.prepare(env: env)
             await controller.applySnapshot()
         }
         .onChange(of: sidebarSelection) { _, newValue in
@@ -350,9 +398,8 @@ struct LibraryView: View {
             activeFilter = nil
             // An active search overlays every route, so leaving for another
             // sidebar row must drop it (and any run still in flight).
-            if activeSearch != nil || !searchQuery.isEmpty {
+            if searchSession.dropForSidebarChange(queryText: searchQuery) {
                 searchTask?.cancel()
-                searchSession.cancel()
                 searchQuery = ""
                 env.searchFilters.clear()
             }
@@ -1147,28 +1194,18 @@ struct LibraryView: View {
     /// date-only search), which is why the filter popover only lets Apply
     /// be pressed while a keyword is already active.
     private func runSearch(_ keyword: String, token: Int? = nil) async {
-        let token = token ?? searchSession.begin()
-        guard searchSession.isCurrent(token) else { return }
-        controller.clearSelection()
-        // Search and the Quick Filter are mutually exclusive overlays; a
-        // search takes over, so drop any active filter first.
-        activeFilter = nil
-        await env.dataSource.setSearch(keyword, filters: env.searchFilters.currentFilters)
-        guard searchSession.isCurrent(token) else { await abandonStaleSearch(); return }
-        await env.dataSource.loadWindow(offset: 0, limit: env.dataSource.pageSize)
-        // The user may have cleared or retyped while the NAS was answering.
-        guard searchSession.isCurrent(token) else { await abandonStaleSearch(); return }
-        await controller.applySnapshot()
-        searchSession.commit(keyword, token: token)
-    }
-
-    /// A search run that was superseded after it had already pointed the data
-    /// source at its keyword. If the user ended up with an empty box (no newer
-    /// run will take over), put the data source back on the current route.
-    private func abandonStaleSearch() async {
-        guard searchSession.activeKeyword == nil,
-              searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        await restoreCurrentRoute()
+        await searchSession.run(
+            keyword, token: token,
+            dataSource: env.dataSource, filters: env.searchFilters.currentFilters,
+            queryText: { searchQuery },
+            prepare: {
+                controller.clearSelection()
+                // Search and the Quick Filter are mutually exclusive overlays; a
+                // search takes over, so drop any active filter first.
+                activeFilter = nil
+            },
+            applySnapshot: { await controller.applySnapshot() },
+            restoreRoute: { await restoreCurrentRoute() })
     }
 
     /// Applies the current Quick Filter selection to the library grid: switches

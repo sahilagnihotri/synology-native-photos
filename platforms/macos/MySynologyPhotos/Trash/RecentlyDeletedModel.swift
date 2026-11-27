@@ -117,6 +117,20 @@ final class RecentlyDeletedModel {
         if !selection.contains(recyclePath) { selection = [recyclePath] }
     }
 
+    /// Context menu Restore on `recyclePath`: targets that entry (or the whole
+    /// selection if it is part of it), then restores.
+    func restoreFromContextMenu(_ recyclePath: String, onDone: () async -> Void = {}) async {
+        selectForContextMenu(recyclePath)
+        await restoreSelected(onDone: onDone)
+    }
+
+    /// Context menu Delete Permanently on `recyclePath`: same targeting, then
+    /// raises the usual confirm (never deletes directly).
+    func requestEmptyFromContextMenu(_ recyclePath: String) {
+        selectForContextMenu(recyclePath)
+        requestEmpty()
+    }
+
     // MARK: - Restore (no confirm: fully reversible, non-destructive)
 
     /// Restores the selected entries back into the library, reloads the

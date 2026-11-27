@@ -152,6 +152,13 @@ final class PhotoEditorModel {
         return nil
     }
 
+    /// Binding target for the "Could Not Save" alert: true while a failed Save
+    /// message is showing, and setting it false acknowledges the failure.
+    var isShowingSaveFailure: Bool {
+        get { saveFailureMessage != nil }
+        set { if !newValue { dismissSaveFailure() } }
+    }
+
     /// The user acknowledged a failed Save; back to the editable state.
     func dismissSaveFailure() {
         if saveFailureMessage != nil { state = .ready }

@@ -211,4 +211,38 @@ struct RecentlyDeletedModelTests {
         model.requestEmpty()
         #expect(model.isShowingEmptyConfirm)
     }
+
+    // MARK: - Context menu wiring (835e183)
+
+    /// A right click Restore on an unselected entry restores that entry alone,
+    /// not it on top of an off screen selection.
+    @Test func contextMenuRestoreOnAnUnselectedEntryRestoresOnlyThatEntry() async {
+        let (model, fake) = makeModel([item("#recycle/a"), item("#recycle/b"), item("#recycle/c")])
+        await model.load()
+        model.selection = ["#recycle/a"]
+        await model.restoreFromContextMenu("#recycle/c")
+        #expect(fake.lastRestoreRecentlyDeletedPaths == ["#recycle/c"])
+    }
+
+    @Test func contextMenuRestoreOnASelectedEntryActsOnTheWholeSelection() async {
+        let (model, fake) = makeModel([item("#recycle/a"), item("#recycle/b"), item("#recycle/c")])
+        await model.load()
+        model.selection = ["#recycle/a", "#recycle/c"]
+        await model.restoreFromContextMenu("#recycle/c")
+        #expect(fake.lastRestoreRecentlyDeletedPaths == ["#recycle/a", "#recycle/c"])
+    }
+
+    /// Delete Permanently from the menu targets the clicked entry alone, only
+    /// raises the confirm, and never reaches the core before the confirm.
+    @Test func contextMenuDeletePermanentlyTargetsTheClickedEntryAndOnlyAsksToConfirm() async {
+        let (model, fake) = makeModel([item("#recycle/a"), item("#recycle/b")])
+        await model.load()
+        model.selection = ["#recycle/a"]
+        model.requestEmptyFromContextMenu("#recycle/b")
+        #expect(model.isShowingEmptyConfirm)
+        #expect(model.pendingEmptyCount == 1)
+        #expect(fake.emptyRecentlyDeletedCallCount == 0)
+        await model.confirmEmpty()
+        #expect(fake.lastEmptyRecentlyDeletedPaths == ["#recycle/b"])
+    }
 }

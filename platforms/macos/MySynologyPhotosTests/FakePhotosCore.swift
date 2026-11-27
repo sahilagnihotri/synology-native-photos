@@ -157,6 +157,9 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     /// the keyword-routing part of the fake does not also need to script
     /// filters.
     var searchAssetsFilteredResult: Result<[Asset], CoreError>?
+    /// Runs inside every search call, before it answers; lets a test change
+    /// state (clear the search box, retype) while a search is in flight.
+    var onSearchCall: (@MainActor () -> Void)?
 
     /// Canned rows returned by `filterItemsRemote` (the server-side
     /// People/Geolocation + date filter), windowed the same way as the other
@@ -553,6 +556,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     func searchAssets(keyword: String, offset: UInt32, limit: UInt32) async throws -> [Asset] {
         searchAssetsCallCount += 1
         lastSearchKeyword = keyword
+        await onSearchCall?()
         if let searchAssetsResult {
             return try window(try searchAssetsResult.get(), offset: offset, limit: limit)
         }
@@ -562,6 +566,7 @@ final class FakePhotosCore: PhotosCoreProtocol, @unchecked Sendable {
     func searchAssetsFiltered(keyword: String, filters: SearchFilters, offset: UInt32, limit: UInt32) async throws -> [Asset] {
         searchAssetsFilteredCallCount += 1
         lastSearchKeyword = keyword
+        await onSearchCall?()
         lastSearchFilters = filters
         if let searchAssetsFilteredResult {
             return try window(try searchAssetsFilteredResult.get(), offset: offset, limit: limit)

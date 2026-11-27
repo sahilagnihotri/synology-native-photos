@@ -101,14 +101,12 @@ struct RecentlyDeletedView: View {
                         // just that entry, so the action targets what was clicked.
                         .contextMenu {
                             Button {
-                                model.selectForContextMenu(item.recyclePath)
-                                Task { await model.restoreSelected { await onLibraryShouldRefresh() } }
+                                Task { await model.restoreFromContextMenu(item.recyclePath) { await onLibraryShouldRefresh() } }
                             } label: {
                                 Label("Restore", systemImage: "arrow.uturn.backward")
                             }
                             Button(role: .destructive) {
-                                model.selectForContextMenu(item.recyclePath)
-                                model.requestEmpty()
+                                model.requestEmptyFromContextMenu(item.recyclePath)
                             } label: {
                                 Label("Delete Permanently", systemImage: "trash.slash")
                             }

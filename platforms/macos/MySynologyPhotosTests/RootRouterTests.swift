@@ -191,3 +191,172 @@ struct SearchSessionTests {
         #expect(session.activeKeyword == nil)
     }
 }
+
+/// VF-1: the view wiring behind 9fad604 and fdf4855, driven through the seams
+/// the view now calls (`LibraryStartup.prepare`, `SearchSession.run`,
+/// `SearchSession.dropForSidebarChange`).
+@MainActor
+struct LibraryWiringTests {
+    private func asset(_ id: Int64) -> Asset {
+        Asset(id: id, unitId: id + 10_000, cacheKey: "v", filename: "\(id).jpg", mediaKind: .photo,
+              takenAt: 1_700_000_000, addedAt: nil, width: 1, height: 1,
+              fileSize: nil, space: .personal, serverVersion: id)
+    }
+
+    private func makeFake() -> FakePhotosCore {
+        let fake = FakePhotosCore()
+        fake.assets[.personal] = (0..<10).map { asset(Int64($0)) }
+        fake.assetsForKeyword["dog"] = (0..<3).map { asset(Int64($0) + 9000) }
+        fake.progressBySpace[.personal] = CrawlProgress(space: .personal, done: 10, total: 10, complete: true)
+        return fake
+    }
+
+    private func makeDataSource(_ fake: FakePhotosCore) -> WindowedDataSource {
+        WindowedDataSource(client: PhotosCoreClient(core: fake), space: .personal, pageSize: 50)
+    }
+
+    /// 9fad604: a re-login builds the view over a data source still on a search.
+    @Test func startupRestoresTheLibraryWhenTheDataSourceIsStillOnASearch() async throws {
+        let fake = makeFake()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wiring-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let env = AppEnvironment(core: fake, accountCacheDir: dir, host: "https://wiring.local:5001")
+        await env.dataSource.setSearch("dog")
+        _ = await env.dataSource.loadWindow(offset: 0, limit: 50)
+        #expect(env.dataSource.totalCount == 3)
+
+        await LibraryStartup.prepare(env: env)
+
+        #expect(env.dataSource.isShowingSpace(.personal))
+        #expect(env.dataSource.totalCount == 10, "the library, not the old search, must be showing")
+    }
+
+    /// fdf4855: a sidebar change drops an active search and invalidates runs.
+    @Test func aSidebarChangeDropsAnActiveSearchAndInFlightRuns() {
+        let session = SearchSession()
+        let token = session.begin()
+        #expect(session.commit("dog", token: token))
+        let inFlight = session.begin()
+        #expect(session.dropForSidebarChange(queryText: "dog"))
+        #expect(session.activeKeyword == nil)
+        #expect(session.commit("dog", token: inFlight) == false)
+    }
+
+    @Test func aSidebarChangeWithNoSearchAndAnEmptyBoxDropsNothing() {
+        let session = SearchSession()
+        let token = session.begin()
+        #expect(session.dropForSidebarChange(queryText: "") == false)
+        #expect(session.isCurrent(token), "an idle sidebar change must not invalidate a run")
+    }
+
+    @Test func aSidebarChangeWithTextInTheBoxButNoActiveSearchStillCancels() {
+        let session = SearchSession()
+        let token = session.begin()
+        #expect(session.dropForSidebarChange(queryText: "do"))
+        #expect(session.isCurrent(token) == false)
+    }
+
+    private func runDog(
+        _ session: SearchSession, token: Int?, ds: WindowedDataSource, box: String,
+        events: Events
+    ) async {
+        await session.run(
+            "dog", token: token, dataSource: ds,
+            filters: SearchFilters(startTime: nil, endTime: nil),
+            queryText: { box },
+            prepare: { events.prepared += 1 },
+            applySnapshot: { events.snapshots += 1 },
+            restoreRoute: { events.restores += 1 })
+    }
+
+    @MainActor final class Events { var prepared = 0; var snapshots = 0; var restores = 0 }
+
+    @Test func aCurrentRunShowsTheResultsAndCommits() async {
+        let fake = makeFake()
+        let ds = makeDataSource(fake)
+        let session = SearchSession()
+        let events = Events()
+        await runDog(session, token: nil, ds: ds, box: "dog", events: events)
+        #expect(session.activeKeyword == "dog")
+        #expect(ds.totalCount == 3)
+        #expect(events.prepared == 1 && events.snapshots == 1 && events.restores == 0)
+    }
+
+    /// A run already superseded before it starts must not touch the data source.
+    @Test func aSupersededRunDoesNothingAtAll() async {
+        let fake = makeFake()
+        let ds = makeDataSource(fake)
+        let session = SearchSession()
+        let events = Events()
+        let token = session.begin()
+        session.cancel()
+        await runDog(session, token: token, ds: ds, box: "", events: events)
+        #expect(session.activeKeyword == nil)
+        #expect(events.prepared == 0 && events.snapshots == 0 && events.restores == 0)
+        #expect(fake.searchAssetsFilteredCallCount + fake.searchAssetsCallCount == 0)
+    }
+
+    /// R5-7: the box is cleared while the NAS is answering. The run must not
+    /// commit or show results, and must put the route back.
+    @Test func aRunClearedWhileTheNasAnswersAbandonsAndRestoresTheRoute() async {
+        let fake = makeFake()
+        let ds = makeDataSource(fake)
+        let session = SearchSession()
+        let events = Events()
+        fake.onSearchCall = { session.cancel() }
+        await runDog(session, token: nil, ds: ds, box: "  ", events: events)
+        #expect(session.activeKeyword == nil, "a cleared run must not commit")
+        #expect(events.snapshots == 0)
+        #expect(events.restores == 1)
+    }
+
+    /// Superseded by a newer keystroke (box not empty): abandon, but leave the
+    /// route alone because the newer run will take over.
+    @Test func aRunSupersededByANewerKeystrokeAbandonsWithoutRestoring() async {
+        let fake = makeFake()
+        let ds = makeDataSource(fake)
+        let session = SearchSession()
+        let events = Events()
+        fake.onSearchCall = { _ = session.begin() }
+        await runDog(session, token: nil, ds: ds, box: "dogs", events: events)
+        #expect(session.activeKeyword == nil)
+        #expect(events.snapshots == 0)
+        #expect(events.restores == 0)
+    }
+}
+
+/// VF-1 wiring guard. The four view hunks (LibraryView `.task`, the sidebar
+/// drop and `runSearch`, the RecentlyDeletedView context menu and the editor
+/// `.alert`) cannot be driven without a scene, so the behaviour lives in the
+/// seams tested above and this pins that each view still calls its seam.
+/// Reverting a view hunk to its old inline code fails here.
+struct ViewWiringGuardTests {
+    private func source(_ relative: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("MySynologyPhotos")
+        return try String(contentsOf: root.appendingPathComponent(relative), encoding: .utf8)
+    }
+
+    @Test func libraryViewCallsTheStartupAndSearchSeams() throws {
+        let s = try source("RootView.swift")
+        #expect(s.contains("await LibraryStartup.prepare(env: env)"))
+        #expect(s.contains("searchSession.dropForSidebarChange(queryText: searchQuery)"))
+        #expect(s.contains("await searchSession.run("))
+    }
+
+    @Test func recentlyDeletedContextMenuCallsTheEntryTargetingSeams() throws {
+        let s = try source("Trash/RecentlyDeletedView.swift")
+        #expect(s.contains("model.restoreFromContextMenu(item.recyclePath)"))
+        #expect(s.contains("model.requestEmptyFromContextMenu(item.recyclePath)"))
+        #expect(!s.contains("model.toggle(item.recyclePath) }\n                                Task"))
+    }
+
+    @Test func editorShowsTheSaveFailureAlertFromTheModelBinding() throws {
+        let s = try source("Detail/PhotoEditorView.swift")
+        #expect(s.contains(".alert("))
+        #expect(s.contains("\"Could Not Save\""))
+        #expect(s.contains("model.isShowingSaveFailure"))
+    }
+}

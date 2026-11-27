@@ -121,6 +121,23 @@ struct PhotoEditorModelTests {
         #expect(model.state == .ready, "the user can retry after dismissing")
     }
 
+    /// 465d445: the alert binding is true exactly while a failed Save is
+    /// showing, and writing false acknowledges it.
+    @Test func theSaveFailureAlertBindingTracksTheFailureAndDismisses() async {
+        let (model, fake) = makeModel()
+        fake.saveEditedPhotoResult = .failure(.Network(message: "dropped"))
+        model.setSourceImage(makeImage())
+        model.rotateRight()
+        #expect(model.isShowingSaveFailure == false)
+        await model.save { }
+        #expect(model.isShowingSaveFailure == true)
+        model.isShowingSaveFailure = true
+        #expect(model.isShowingSaveFailure == true, "writing true must not dismiss")
+        model.isShowingSaveFailure = false
+        #expect(model.isShowingSaveFailure == false)
+        #expect(model.state == .ready)
+    }
+
     /// R4-12: the edited name carries the date as well as the time, so two
     /// edits of the same photo on different days cannot collide.
     @Test func editedFilenameIncludesTheDate() {

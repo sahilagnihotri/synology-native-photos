@@ -79,8 +79,8 @@ struct PhotoEditorView: View {
         .alert(
             "Could Not Save",
             isPresented: Binding(
-                get: { model.saveFailureMessage != nil },
-                set: { if !$0 { model.dismissSaveFailure() } })
+                get: { model.isShowingSaveFailure },
+                set: { model.isShowingSaveFailure = $0 })
         ) {
             Button("OK") { model.dismissSaveFailure() }
         } message: {
