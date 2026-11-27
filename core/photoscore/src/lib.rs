@@ -1049,7 +1049,9 @@ impl PhotosCore {
     /// transactional but not jointly atomic; the only failure window
     /// ("deleted on the NAS, local row still present") is the safe direction
     /// (the item lingers in the grid until the next reconcile/crawl drops it)
-    /// and self-heals, never resurrecting a deleted asset.
+    /// and self-heals, never resurrecting a deleted asset. Once the server
+    /// delete succeeded the call returns `Ok` even if the local removal
+    /// fails or the store is busy: the removal is queued instead.
     pub async fn delete_assets(&self, space: Space, asset_ids: Vec<i64>) -> Result<(), CoreError> {
         if asset_ids.is_empty() {
             return Ok(());
@@ -1081,20 +1083,33 @@ impl PhotosCore {
             syno_token.as_deref(),
         )
         .await?;
-        // Confirmed gone from the NAS; drop the local rows entirely. If a
-        // crawl or reconcile holds the store, the NAS delete already
-        // happened, so do not report failure: queue the removal and let
-        // `return_store` apply it when the store comes back.
+        // Confirmed gone from the NAS; drop the local rows entirely. The NAS
+        // delete already happened, so a local problem must not report the
+        // delete as failed (a retry would fail on the server for ids that
+        // are gone). If a crawl or reconcile holds the store, or the local
+        // removal itself fails, queue the removal and let `return_store`
+        // apply it when a sync next hands the store back; the next reconcile
+        // drops the rows either way.
         let guard = self.store.lock().expect("store mutex poisoned");
-        match guard.as_ref() {
-            Some(store) => {
-                store.delete_assets(space, &ids)?;
-            }
-            None => self
-                .pending_local_deletes
+        let removed = match guard.as_ref() {
+            Some(store) => match store.delete_assets(space, &ids) {
+                Ok(_) => true,
+                Err(e) => {
+                    tracing::warn!(
+                        "deleted {} item(s) on the NAS, but removing the local rows failed, \
+                         queued for the next sync: {e}",
+                        ids.len()
+                    );
+                    false
+                }
+            },
+            None => false,
+        };
+        if !removed {
+            self.pending_local_deletes
                 .lock()
                 .expect("pending deletes mutex poisoned")
-                .push((space, ids)),
+                .push((space, ids));
         }
         Ok(())
     }
@@ -3935,6 +3950,82 @@ mod core_tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::Auth { .. }), "got {err:?}");
+    }
+
+    /// The NAS delete succeeded but the local row removal fails (here a
+    /// trigger makes every delete on `assets` abort, standing in for a full
+    /// disk or a locked file). The originals are already in the recycle bin,
+    /// so the call must not report a failed delete: a retry would fail on
+    /// the server for ids that are gone. The removal is queued and applied
+    /// on the next hand back.
+    #[tokio::test]
+    async fn delete_assets_reports_success_when_only_the_local_removal_fails() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let delete = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=delete".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let label = "delete-local-fails";
+        let core = logged_in_core(label, &server).await;
+        seed_asset(&core, Space::Personal, 1);
+        seed_asset(&core, Space::Personal, 2);
+
+        // Only this test's own database file under the temp dir is touched.
+        let db = std::env::temp_dir()
+            .join(format!("photoscore-{}-{}", label, std::process::id()))
+            .join("db")
+            .join("photos.sqlite");
+        let reopen_with = |sql: &str| {
+            drop(core.store.lock().unwrap().take());
+            let cli = if std::path::Path::new("/usr/bin/sqlite3").exists() {
+                "/usr/bin/sqlite3"
+            } else {
+                "sqlite3"
+            };
+            let out = std::process::Command::new(cli)
+                .arg(&db)
+                .arg(sql)
+                .output()
+                .expect("the sqlite3 command line tool runs");
+            assert!(out.status.success(), "{out:?}");
+            Store::open_at(&db).expect("reopens")
+        };
+        let failing = reopen_with(
+            "CREATE TRIGGER no_delete BEFORE DELETE ON assets \
+             BEGIN SELECT RAISE(ABORT, 'simulated storage failure'); END;",
+        );
+        assert!(failing.delete_assets(Space::Personal, &[1]).is_err());
+        *core.store.lock().unwrap() = Some(failing);
+
+        let result = core.delete_assets(Space::Personal, vec![1]).await;
+        delete.assert_async().await;
+        let queued = core.pending_local_deletes.lock().unwrap().clone();
+        let healthy = reopen_with("DROP TRIGGER no_delete;");
+        core.return_store(healthy);
+
+        result.expect("a NAS delete that succeeded is not reported as failed");
+        assert_eq!(queued, vec![(Space::Personal, vec![1])]);
+        assert_eq!(
+            core.fetch_assets(Space::Personal, 0, 10)
+                .unwrap()
+                .iter()
+                .map(|a| a.id)
+                .collect::<Vec<_>>(),
+            vec![2],
+            "the queued removal is applied on the next hand back"
+        );
     }
 
     /// A delete while a crawl holds the store: the NAS delete has already
