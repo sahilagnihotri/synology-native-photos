@@ -24,6 +24,9 @@ uniffi::setup_scaffolding!("photoscore");
 /// asset sitting next to the untouched originals, never a mutation of one.
 const EDITED_PHOTOS_FOLDER: &str = "/home/Photos/Edited";
 
+/// Subdirectory of `cache_dir` that holds downloaded originals.
+const ORIGINALS_DIR: &str = "originals";
+
 /// Trivial cross-boundary smoke function. Returns the core crate version.
 /// Proves Swift can call into Rust over UniFFI before the full PhotosCore lands.
 #[uniffi::export]
@@ -311,7 +314,9 @@ impl PhotosCore {
     }
 
     /// Sign out: best-effort server-side logout, then unconditionally drop
-    /// `Live` and clear the per-account thumbnail cache dir contents.
+    /// `Live`, clear the per-account thumbnail and original caches, and drop
+    /// any queued local row removals (asset ids are per NAS, so a queued id
+    /// must never reach the next account's index).
     ///
     /// Idempotent by construction: if no session is held, `taken` is `None`,
     /// the server logout call is skipped, and clearing an already-empty (or
@@ -325,11 +330,12 @@ impl PhotosCore {
         if let Some(live) = taken {
             let _ = synology_api::logout(&live.transport, &live.session.sid).await;
         }
-        // Clear the per-account thumbnail cache dir contents (read-only teardown).
-        let thumbs = std::path::Path::new(&self.cache_dir).join("thumbs");
-        if thumbs.exists() {
-            let _ = std::fs::remove_dir_all(&thumbs);
-        }
+        self.pending_local_deletes
+            .lock()
+            .expect("pending deletes mutex poisoned")
+            .clear();
+        // Clear the per-account caches (local teardown only, nothing on the NAS).
+        self.clear_account_caches();
         Ok(())
     }
 
@@ -870,8 +876,9 @@ impl PhotosCore {
         })
     }
 
-    /// Downloads the original full-resolution bytes for `unit_id` to a
-    /// temp file and returns its absolute path. Read-only: never writes
+    /// Downloads the original full-resolution bytes for `unit_id` into the
+    /// `originals` cache dir (emptied on sign out and on an account switch)
+    /// and returns its absolute path. Read-only: never writes
     /// anything back to the NAS.
     ///
     /// `unit_id` MUST be `Asset.unit_id`, not `Asset.id`, for the same
@@ -919,7 +926,7 @@ impl PhotosCore {
             syno_token.as_deref(),
         )
         .await?;
-        let dir = std::env::temp_dir();
+        let dir = std::path::Path::new(&self.cache_dir).join(ORIGINALS_DIR);
         let tmp = dir.join(format!(
             "syno-orig-{}",
             cache_digest(&[&unit_id.to_string(), &cache_key])
@@ -1520,8 +1527,9 @@ impl PhotosCore {
     /// normalized base URL plus the username, both lowercased (DSM user
     /// names ignore case). When the index belonged to another account, the
     /// store clears every mirrored row and the crawl barrier (so the next
-    /// crawl starts fresh) and the thumbnail cache is emptied too, because
-    /// `cache_key` values from another NAS can collide. Fails closed with
+    /// crawl starts fresh), the thumbnail and original caches are emptied
+    /// too, because `cache_key` values from another NAS can collide, and the
+    /// queued local row removals are dropped, because asset ids are per NAS. Fails closed with
     /// store busy if a crawl holds the store, before any `Live` is set.
     fn bind_index_to_account(
         &self,
@@ -1532,15 +1540,33 @@ impl PhotosCore {
         let reset = {
             let guard = self.store.lock().expect("store mutex poisoned");
             let store = guard.as_ref().ok_or_else(store_busy_err)?;
-            store.bind_account(&identity)?
+            let reset = store.bind_account(&identity)?;
+            if reset {
+                // Still under the store guard, so no hand back can apply the
+                // old account's queue to the cleared index in between.
+                self.pending_local_deletes
+                    .lock()
+                    .expect("pending deletes mutex poisoned")
+                    .clear();
+            }
+            reset
         };
         if reset {
-            let thumbs = std::path::Path::new(&self.cache_dir).join("thumbs");
-            if thumbs.exists() {
-                let _ = std::fs::remove_dir_all(&thumbs);
-            }
+            self.clear_account_caches();
         }
         Ok(identity)
+    }
+
+    /// Empties the per-account file caches under `cache_dir`: thumbnails and
+    /// downloaded originals. Local files only; best effort, a missing dir is
+    /// fine.
+    fn clear_account_caches(&self) {
+        for name in ["thumbs", ORIGINALS_DIR] {
+            let dir = std::path::Path::new(&self.cache_dir).join(name);
+            if dir.exists() {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+        }
     }
 
     /// Puts the `Store` back after `run_with_store`, first applying every
@@ -2568,6 +2594,122 @@ mod core_tests {
         assert!(
             core.live.lock().unwrap().is_none(),
             "sign_out must clear Live"
+        );
+    }
+
+    /// Asset ids are per NAS, so a local removal queued for one account must
+    /// never be applied to the next account's index. The queued entry here
+    /// stands for a removal that failed on hand back and stayed queued.
+    #[tokio::test]
+    async fn sign_out_drops_queued_local_deletes_so_the_next_account_keeps_its_rows() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let conn = || Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        let core = core_at("signout-queue");
+        core.login(conn(), "alice".into(), "p".into(), None, None)
+            .await
+            .expect("login alice");
+        core.pending_local_deletes
+            .lock()
+            .unwrap()
+            .push((Space::Personal, vec![1]));
+
+        core.sign_out().await.expect("sign_out ok");
+        assert!(core.pending_local_deletes.lock().unwrap().is_empty());
+
+        core.login(conn(), "bob".into(), "p".into(), None, None)
+            .await
+            .expect("login bob");
+        seed_asset(&core, Space::Personal, 1);
+        let store = core.store.lock().unwrap().take().expect("store present");
+        core.return_store(store);
+        assert_eq!(
+            core.asset_count(Space::Personal).unwrap(),
+            1,
+            "alice's queued id must not drop bob's row with the same id"
+        );
+    }
+
+    /// The same rule when the next sign in rebinds the index without a sign
+    /// out in between: the reset drops the queue with the rows.
+    #[tokio::test]
+    async fn an_account_switch_drops_queued_local_deletes() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let conn = || Connection {
+            host: server.url(),
+            verify_tls: true,
+            pinned_cert_der: None,
+            allow_untrusted_tls: false,
+        };
+        let core = core_at("switch-queue");
+        core.login(conn(), "alice".into(), "p".into(), None, None)
+            .await
+            .expect("login alice");
+        core.pending_local_deletes
+            .lock()
+            .unwrap()
+            .push((Space::Personal, vec![1]));
+        core.login(conn(), "bob".into(), "p".into(), None, None)
+            .await
+            .expect("login bob");
+        assert!(
+            core.pending_local_deletes.lock().unwrap().is_empty(),
+            "a reset index takes the old account's queue with it"
+        );
+    }
+
+    /// A downloaded original belongs to the signed in account and must not
+    /// stay on disk after sign out.
+    #[tokio::test]
+    async fn sign_out_removes_downloaded_originals() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let _dl = server
+            .mock("GET", "/webapi/entry.cgi")
+            .match_query(mockito::Matcher::UrlEncoded(
+                "method".into(),
+                "download".into(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/octet-stream")
+            .with_body(b"ORIGINAL-BYTES")
+            .create_async()
+            .await;
+        let core = logged_in_core("signout-originals", &server).await;
+        let path = core
+            .download_original(Space::Personal, 4242, "CK-SIGNOUT".into())
+            .await
+            .expect("download ok");
+        assert!(std::path::Path::new(&path).exists());
+
+        core.sign_out().await.expect("sign_out ok");
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "the original must be gone after sign out: {path}"
         );
     }
 
