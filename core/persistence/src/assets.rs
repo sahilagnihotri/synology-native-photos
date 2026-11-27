@@ -144,6 +144,13 @@ fn row_to_asset(r: &rusqlite::Row) -> rusqlite::Result<Asset> {
 /// the `day_start` of a real day, including day 0 (1970-01-01 UTC).
 pub(crate) const UNKNOWN_DATE_DAY_START: i64 = i64::MIN;
 
+/// The smallest multiple of 86400 at or above `i64::MIN`. A `taken_at` below
+/// it would floor to a day start under `i64::MIN`, which overflows in SQLite
+/// and turns the column into a REAL. `date_histogram` counts those rows in
+/// the Unknown Date bucket instead.
+pub(crate) const LOWEST_FLOORABLE_TAKEN_AT: i64 =
+    i64::MIN + (86_400 - i64::MIN.rem_euclid(86_400)) % 86_400;
+
 /// The grid's windowed read for `fetch_assets`. Kept as a function so the
 /// query plan test checks the exact SQL the grid runs.
 ///
@@ -480,7 +487,9 @@ impl Store {
     ///
     /// Assets with a NULL `taken_at` are collected into a single trailing
     /// bucket with `day_start = UNKNOWN_DATE_DAY_START` (`i64::MIN`), a key no
-    /// real day can have, matching `fetch_assets` sorting NULL rows last. The bucket is omitted entirely when the space has no such rows.
+    /// real day can have, matching `fetch_assets` sorting NULL rows last. Rows
+    /// below `LOWEST_FLOORABLE_TAKEN_AT` join it too, since their day start
+    /// would overflow. The bucket is omitted entirely when the space has no such rows.
     /// The returned counts sum to `asset_count(space)` (same filters).
     pub fn date_histogram(&self, space: Space) -> Result<Vec<DayCount>, CoreError> {
         let mut stmt = self
@@ -489,30 +498,37 @@ impl Store {
                 "SELECT taken_at - (((taken_at % 86400) + 86400) % 86400) AS day_start,
                         COUNT(*) AS n
                      FROM assets
-                     WHERE space = ?1 AND in_trash = 0 AND taken_at IS NOT NULL
+                     WHERE space = ?1 AND in_trash = 0 AND taken_at >= ?2
                      GROUP BY day_start
                      ORDER BY day_start DESC",
             )
             .map_err(map_sql)?;
         let rows = stmt
-            .query_map(params![space_to_int(space)], |r| {
-                Ok(DayCount {
-                    day_start: r.get::<_, i64>(0)?,
-                    count: r.get::<_, i64>(1)? as u32,
-                })
-            })
+            .query_map(
+                params![space_to_int(space), LOWEST_FLOORABLE_TAKEN_AT],
+                |r| {
+                    Ok(DayCount {
+                        day_start: r.get::<_, i64>(0)?,
+                        count: r.get::<_, i64>(1)? as u32,
+                    })
+                },
+            )
             .map_err(map_sql)?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row.map_err(map_sql)?);
         }
         // Trailing "Unknown Date" bucket for NULL taken_at rows (which
-        // fetch_assets orders last), appended only when there are any.
+        // fetch_assets orders last), appended only when there are any. Rows
+        // too old to floor without overflow are the oldest dated rows, so
+        // fetch_assets orders them directly before the NULL rows and the
+        // bucket stays one contiguous run.
         let null_count: i64 = self
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM assets WHERE space = ?1 AND in_trash = 0 AND taken_at IS NULL",
-                params![space_to_int(space)],
+                "SELECT COUNT(*) FROM assets WHERE space = ?1 AND in_trash = 0
+                     AND (taken_at IS NULL OR taken_at < ?2)",
+                params![space_to_int(space), LOWEST_FLOORABLE_TAKEN_AT],
                 |r| r.get(0),
             )
             .map_err(map_sql)?;
@@ -575,7 +591,7 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use super::UNKNOWN_DATE_DAY_START;
+    use super::{LOWEST_FLOORABLE_TAKEN_AT, UNKNOWN_DATE_DAY_START};
     use crate::Store;
     use models::{Asset, DayCount, MediaKind, Space};
 
@@ -1918,6 +1934,42 @@ mod tests {
                 },
             ]
         );
+        let total: u32 = hist.iter().map(|b| b.count).sum();
+        assert_eq!(
+            u64::from(total),
+            store.asset_count(Space::Personal).unwrap()
+        );
+    }
+
+    /// A `taken_at` whose day start would fall below `i64::MIN` cannot be
+    /// floored without overflow. Such rows are the oldest dated rows, so
+    /// `fetch_assets` orders them directly before the NULL rows, and they join
+    /// the trailing Unknown Date bucket. The histogram must not fail.
+    #[test]
+    fn date_histogram_puts_unfloorable_timestamps_in_the_unknown_bucket() {
+        let store = Store::open_in_memory().unwrap();
+        for (id, taken) in [
+            (1, Some(1_479_513_610)),
+            (2, Some(i64::MIN + 1)),
+            (3, Some(i64::MIN)),
+            (4, Some(LOWEST_FLOORABLE_TAKEN_AT)),
+            (5, Some(LOWEST_FLOORABLE_TAKEN_AT - 1)),
+            (6, None),
+            (7, Some(i64::MAX)),
+        ] {
+            store
+                .upsert_asset(&asset(Space::Personal, id, taken, Some(1)))
+                .unwrap();
+        }
+
+        let hist = store.date_histogram(Space::Personal).unwrap();
+
+        let last = hist.last().unwrap();
+        assert_eq!(last.day_start, UNKNOWN_DATE_DAY_START);
+        assert_eq!(last.count, 4, "ids 2, 3, 5 and the NULL row");
+        assert!(hist
+            .iter()
+            .any(|b| b.day_start == LOWEST_FLOORABLE_TAKEN_AT && b.count == 1));
         let total: u32 = hist.iter().map(|b| b.count).sum();
         assert_eq!(
             u64::from(total),
