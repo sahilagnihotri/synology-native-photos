@@ -597,6 +597,61 @@ mod tests {
         assert_eq!(store.asset_count(Space::Personal).unwrap(), 500);
     }
 
+    /// The threshold is "more than 20 percent": removing exactly 20 percent
+    /// applies at once, one row more is refused.
+    #[tokio::test]
+    async fn the_threshold_boundary_is_strictly_more_than_twenty_percent() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store, 1..=500);
+        let at_limit = listing(101..=500);
+        DeltaReconciler::new(&store, &at_limit, 200)
+            .reconcile(Space::Personal)
+            .await
+            .unwrap();
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 400);
+
+        let store = Store::open_in_memory().unwrap();
+        seed(&store, 1..=500);
+        let over = listing(102..=500);
+        let result = DeltaReconciler::new(&store, &over, 200)
+            .reconcile(Space::Personal)
+            .await;
+        assert!(
+            result.is_err(),
+            "101 of 500 must be refused, got {result:?}"
+        );
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 500);
+    }
+
+    /// A sweep that goes through clears the pending fingerprint, so an old
+    /// refused listing seen again later is refused afresh rather than
+    /// confirmed by a stale record.
+    #[tokio::test]
+    async fn an_applied_sweep_clears_the_pending_confirmation() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store, 1..=500);
+        let short = listing(301..=500);
+        let plausible = listing(11..=500);
+        assert!(DeltaReconciler::new(&store, &short, 200)
+            .reconcile(Space::Personal)
+            .await
+            .is_err());
+        DeltaReconciler::new(&store, &plausible, 200)
+            .reconcile(Space::Personal)
+            .await
+            .unwrap();
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 490);
+
+        let result = DeltaReconciler::new(&store, &short, 200)
+            .reconcile(Space::Personal)
+            .await;
+        assert!(
+            result.is_err(),
+            "a stale pending fingerprint must not confirm, got {result:?}"
+        );
+        assert_eq!(store.asset_count(Space::Personal).unwrap(), 490);
+    }
+
     #[tokio::test]
     async fn watermark_advances_and_persists_across_pages() {
         let store = Store::open_in_memory().unwrap();
