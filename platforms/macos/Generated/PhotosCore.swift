@@ -613,13 +613,16 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * transactional but not jointly atomic; the only failure window
      * ("deleted on the NAS, local row still present") is the safe direction
      * (the item lingers in the grid until the next reconcile/crawl drops it)
-     * and self-heals, never resurrecting a deleted asset.
+     * and self-heals, never resurrecting a deleted asset. Once the server
+     * delete succeeded the call returns `Ok` even if the local removal
+     * fails or the store is busy: the removal is queued instead.
      */
     func deleteAssets(space: Space, assetIds: [Int64]) async throws 
     
     /**
-     * Downloads the original full-resolution bytes for `unit_id` to a
-     * temp file and returns its absolute path. Read-only: never writes
+     * Downloads the original full-resolution bytes for `unit_id` into the
+     * `originals` cache dir (emptied on sign out and on an account switch)
+     * and returns its absolute path. Read-only: never writes
      * anything back to the NAS.
      *
      * `unit_id` MUST be `Asset.unit_id`, not `Asset.id`, for the same
@@ -928,12 +931,14 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
      * in any request here. Landing the copy in an obviously-named `Edited`
      * folder makes it plainly an ADDED asset, not a changed one.
      *
-     * FAIL CLOSED on either step: if the upload fails, the re-index is never
-     * sent (there is nothing new to index) and the error propagates. If only
-     * the re-index fails, the file is already safely uploaded, so the save
-     * still succeeds (a retry could only collide with or duplicate the
-     * upload) and the failure is logged; a later re-index picks it up. There is no local index row to write here: the new photo only
-     * enters the local mirror when a subsequent crawl re-reads the library.
+     * FAIL CLOSED on the upload only: if the upload fails, the re-index is
+     * never sent (there is nothing new to index) and the error propagates.
+     * The re-index is best effort: if only it fails, the file is already
+     * safely uploaded, so the save still succeeds (a retry could only
+     * collide with or duplicate the upload) and the failure is logged; a
+     * later re-index picks the file up. There is no local index row to
+     * write here: the new photo only enters the local mirror when a
+     * subsequent crawl re-reads the library.
      *
      * Reuses `recycle_call_context` for the session basics (transport + sid +
      * syno_token); like the File Station recycle calls, both the upload and
@@ -973,7 +978,9 @@ public protocol PhotosCoreProtocol: AnyObject, Sendable {
     
     /**
      * Sign out: best-effort server-side logout, then unconditionally drop
-     * `Live` and clear the per-account thumbnail cache dir contents.
+     * `Live`, clear the per-account thumbnail and original caches, and drop
+     * any queued local row removals (asset ids are per NAS, so a queued id
+     * must never reach the next account's index).
      *
      * Idempotent by construction: if no session is held, `taken` is `None`,
      * the server logout call is skipped, and clearing an already-empty (or
@@ -1225,7 +1232,9 @@ open func dateHistogram(space: Space)throws  -> [DayCount]  {
      * transactional but not jointly atomic; the only failure window
      * ("deleted on the NAS, local row still present") is the safe direction
      * (the item lingers in the grid until the next reconcile/crawl drops it)
-     * and self-heals, never resurrecting a deleted asset.
+     * and self-heals, never resurrecting a deleted asset. Once the server
+     * delete succeeded the call returns `Ok` even if the local removal
+     * fails or the store is busy: the removal is queued instead.
      */
 open func deleteAssets(space: Space, assetIds: [Int64])async throws   {
     return
@@ -1245,8 +1254,9 @@ open func deleteAssets(space: Space, assetIds: [Int64])async throws   {
 }
     
     /**
-     * Downloads the original full-resolution bytes for `unit_id` to a
-     * temp file and returns its absolute path. Read-only: never writes
+     * Downloads the original full-resolution bytes for `unit_id` into the
+     * `originals` cache dir (emptied on sign out and on an account switch)
+     * and returns its absolute path. Read-only: never writes
      * anything back to the NAS.
      *
      * `unit_id` MUST be `Asset.unit_id`, not `Asset.id`, for the same
@@ -1882,12 +1892,14 @@ open func restoreSession(connection: Connection, session: Session)async throws  
      * in any request here. Landing the copy in an obviously-named `Edited`
      * folder makes it plainly an ADDED asset, not a changed one.
      *
-     * FAIL CLOSED on either step: if the upload fails, the re-index is never
-     * sent (there is nothing new to index) and the error propagates. If only
-     * the re-index fails, the file is already safely uploaded, so the save
-     * still succeeds (a retry could only collide with or duplicate the
-     * upload) and the failure is logged; a later re-index picks it up. There is no local index row to write here: the new photo only
-     * enters the local mirror when a subsequent crawl re-reads the library.
+     * FAIL CLOSED on the upload only: if the upload fails, the re-index is
+     * never sent (there is nothing new to index) and the error propagates.
+     * The re-index is best effort: if only it fails, the file is already
+     * safely uploaded, so the save still succeeds (a retry could only
+     * collide with or duplicate the upload) and the failure is logged; a
+     * later re-index picks the file up. There is no local index row to
+     * write here: the new photo only enters the local mirror when a
+     * subsequent crawl re-reads the library.
      *
      * Reuses `recycle_call_context` for the session basics (transport + sid +
      * syno_token); like the File Station recycle calls, both the upload and
@@ -1972,7 +1984,9 @@ open func searchAssetsFiltered(keyword: String, filters: SearchFilters, offset: 
     
     /**
      * Sign out: best-effort server-side logout, then unconditionally drop
-     * `Live` and clear the per-account thumbnail cache dir contents.
+     * `Live`, clear the per-account thumbnail and original caches, and drop
+     * any queued local row removals (asset ids are per NAS, so a queued id
+     * must never reach the next account's index).
      *
      * Idempotent by construction: if no session is held, `taken` is `None`,
      * the server logout call is skipped, and clearing an already-empty (or
@@ -2720,10 +2734,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_date_histogram() != 45142) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_delete_assets() != 9665) {
+    if (uniffi_photoscore_checksum_method_photoscore_delete_assets() != 44860) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_download_original() != 35832) {
+    if (uniffi_photoscore_checksum_method_photoscore_download_original() != 60568) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_empty_recently_deleted() != 38051) {
@@ -2795,7 +2809,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_restore_session() != 40502) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_save_edited_photo() != 20393) {
+    if (uniffi_photoscore_checksum_method_photoscore_save_edited_photo() != 13787) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_search_assets() != 47405) {
@@ -2804,7 +2818,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_photoscore_checksum_method_photoscore_search_assets_filtered() != 16234) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_photoscore_checksum_method_photoscore_sign_out() != 54821) {
+    if (uniffi_photoscore_checksum_method_photoscore_sign_out() != 35240) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_photoscore_checksum_method_photoscore_thumbnail() != 41967) {
