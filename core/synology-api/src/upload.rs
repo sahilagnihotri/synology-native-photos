@@ -113,11 +113,23 @@ pub async fn upload_file(
 
 /// Whether a success envelope says DSM skipped the file (`data.blSkip`),
 /// which `overwrite=false` does for a name that already exists.
+///
+/// The real skip reply on this NAS is unverified, so the flag is read
+/// leniently: a JSON `true`, the number `1`, or the strings `"1"`, `"true"`
+/// and `"yes"` (any case) all count as a skip. Anything else is not a skip.
 fn upload_was_skipped(body: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(body)
-        .ok()
-        .and_then(|v| v.get("data")?.get("blSkip")?.as_bool())
-        .unwrap_or(false)
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    match value.get("data").and_then(|d| d.get("blSkip")) {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::Number(n)) => n.as_i64() == Some(1) || n.as_u64() == Some(1),
+        Some(serde_json::Value::String(s)) => {
+            let s = s.trim();
+            s == "1" || s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("yes")
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -206,6 +218,38 @@ mod tests {
             }
             other => panic!("a skipped upload stored nothing, got {other:?}"),
         }
+    }
+
+    /// VF-3: DSM replies are loose about booleans, so `blSkip` may come back
+    /// as a number or a string. Every obvious true encoding is a skip, and
+    /// every false one (or an unknown value) is not.
+    #[test]
+    fn upload_skip_flag_accepts_number_and_string_encodings() {
+        for flag in ["true", "1", r#""1""#, r#""true""#, r#""TRUE""#, r#""yes""#] {
+            let body = format!(r#"{{"success":true,"data":{{"blSkip":{flag}}}}}"#);
+            assert!(
+                upload_was_skipped(&body),
+                "blSkip {flag} must read as skipped"
+            );
+        }
+        for flag in [
+            "false",
+            "0",
+            r#""0""#,
+            r#""false""#,
+            r#""""#,
+            "null",
+            "2",
+            r#""x""#,
+        ] {
+            let body = format!(r#"{{"success":true,"data":{{"blSkip":{flag}}}}}"#);
+            assert!(
+                !upload_was_skipped(&body),
+                "blSkip {flag} must not read as skipped"
+            );
+        }
+        assert!(!upload_was_skipped(r#"{"success":true}"#));
+        assert!(!upload_was_skipped("not json"));
     }
 
     /// `blSkip:false` is an ordinary success.
