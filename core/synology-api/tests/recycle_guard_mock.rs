@@ -51,6 +51,22 @@ fn guard_refuses_ambiguous_paths() {
         "/home/#recycle/Photos/x\u{2215}a.jpg",
         "/home/#recycle/Photos/x\u{2044}a.jpg",
         "/home/#recycle/Photos/a\u{3002}jpg",
+        // a comma, any spaces, then an absolute path
+        "/home/#recycle/Photos/a.jpg, /home/Photos/b.jpg",
+        "/home/#recycle/Photos/a.jpg,\t/home/Photos/b.jpg",
+        // comma lookalikes, which a server normalising text could read as ','
+        "/home/#recycle/Photos/a.jpg\u{ff0c}/home/Photos/b.jpg",
+        "/home/#recycle/Photos/a.jpg\u{fe50}/home/Photos/b.jpg",
+        "/home/#recycle/Photos/a.jpg\u{fe10}/home/Photos/b.jpg",
+        // NFKC turns these into dots
+        "/home/#recycle/Photos/\u{fe30}/\u{fe30}/Photos/a.jpg",
+        "/home/#recycle/Photos/\u{fe19}/a.jpg",
+        // line separators and invisible characters
+        "/home/#recycle/Photos/a\u{2028}.jpg",
+        "/home/#recycle/Photos/a\u{2029}.jpg",
+        "/home/#recycle/Photos/a\u{061c}.jpg",
+        "/home/#recycle/Photos/a\u{00ad}.jpg",
+        "/home/#recycle/Photos/a\u{2060}.jpg",
     ] {
         assert!(ensure_recycle_photos_path(bad).is_err(), "{bad:?}");
     }
@@ -226,7 +242,7 @@ async fn recycle_thumbnail_refuses_a_comma_because_its_path_is_not_json() {
         &t,
         "SID",
         None,
-        "/home/#recycle/Photos/a.jpg,/home/Photos/b.jpg",
+        "/home/#recycle/Photos/Paris, France/a.jpg",
         "small",
     )
     .await;
@@ -253,4 +269,76 @@ async fn recycle_thumbnail_refuses_a_path_outside_the_bin() {
         "got {result:?}"
     );
     get.assert_async().await;
+}
+
+/// The is-a-file check must list the delete's own parent folder. Here the
+/// root lists a FILE named a.jpg while the real parent lists a FOLDER of that
+/// name, so a check that read the wrong folder would let the delete through.
+#[tokio::test]
+async fn delete_checks_the_entry_in_its_own_parent_folder() {
+    let mut server = mockito::Server::new_async().await;
+    let _root = list_parent(
+        &mut server,
+        ROOT,
+        r#"{"isdir":false,"name":"a.jpg","path":"/home/#recycle/Photos/a.jpg"}"#,
+    )
+    .await;
+    let _sub = list_parent(
+        &mut server,
+        "/home/#recycle/Photos/sub",
+        r#"{"isdir":true,"name":"a.jpg","path":"/home/#recycle/Photos/sub/a.jpg"}"#,
+    )
+    .await;
+    let trap = delete_trap(&mut server).await;
+    let t = transport_for(&server);
+    let result = delete_recycle_item_with_polling(
+        &t,
+        "SID",
+        None,
+        "/home/#recycle/Photos/sub/a.jpg",
+        fast(),
+    )
+    .await;
+    assert!(
+        matches!(&result, Err(CoreError::UnexpectedResponse { message }) if message.contains("folder")),
+        "got {result:?}"
+    );
+    trap.assert_async().await;
+}
+
+/// A listing entry that does not say whether it is a folder is not proof of
+/// a file. Refuse the delete rather than assume.
+#[tokio::test]
+async fn delete_refuses_an_entry_whose_listing_omits_isdir() {
+    let mut server = mockito::Server::new_async().await;
+    let _parent = list_parent(
+        &mut server,
+        ROOT,
+        r#"{"name":"a.jpg","path":"/home/#recycle/Photos/a.jpg"}"#,
+    )
+    .await;
+    let trap = delete_trap(&mut server).await;
+    let t = transport_for(&server);
+    let result =
+        delete_recycle_item_with_polling(&t, "SID", None, "/home/#recycle/Photos/a.jpg", fast())
+            .await;
+    assert!(result.is_err(), "got {result:?}");
+    trap.assert_async().await;
+}
+
+/// A non-2xx reply is an error, not thumbnail bytes.
+#[tokio::test]
+async fn recycle_thumbnail_treats_a_non_2xx_reply_as_an_error() {
+    let mut server = mockito::Server::new_async().await;
+    let _get = server
+        .mock("GET", "/webapi/entry.cgi")
+        .match_query(Matcher::Any)
+        .with_status(503)
+        .with_header("content-type", "text/plain")
+        .with_body("Service Unavailable")
+        .create_async()
+        .await;
+    let t = transport_for(&server);
+    let result = recycle_thumbnail(&t, "SID", None, "/home/#recycle/Photos/a.jpg", "small").await;
+    assert!(result.is_err(), "got {result:?}");
 }

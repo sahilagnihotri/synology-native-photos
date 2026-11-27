@@ -109,6 +109,9 @@ impl PageGuard {
 /// tolerant per-element decode.
 struct FsEntry {
     is_dir: bool,
+    /// Whether the listing said `isdir` at all. A delete needs an explicit
+    /// `isdir: false`; the walk treats a missing field as a file.
+    isdir_reported: bool,
     name: String,
     path: String,
     size: u64,
@@ -124,7 +127,7 @@ struct FsListData {
 #[derive(Debug, Deserialize)]
 struct RawFsFile {
     #[serde(default)]
-    isdir: bool,
+    isdir: Option<bool>,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -165,7 +168,8 @@ fn decode_fs_entry(value: &serde_json::Value) -> Option<FsEntry> {
         .and_then(|t| t.mtime)
         .unwrap_or(0);
     Some(FsEntry {
-        is_dir: raw.isdir,
+        is_dir: raw.isdir.unwrap_or(false),
+        isdir_reported: raw.isdir.is_some(),
         name,
         path,
         size,
@@ -419,9 +423,13 @@ pub fn ensure_recycle_photos_path(path: &str) -> Result<(), CoreError> {
         return Err(refuse());
     }
     // Defence in depth for the comma: if a server ever split the path on
-    // commas, no piece after the first may be an absolute path. A segment
-    // ending in a comma is the only way to get ",/", so refuse it.
-    if rest.contains(",/") {
+    // commas and trimmed the pieces, no piece after the first may be an
+    // absolute path. Comma lookalikes are refused outright above.
+    if rest
+        .split(',')
+        .skip(1)
+        .any(|piece| piece.trim_start().starts_with('/'))
+    {
         return Err(CoreError::UnexpectedResponse {
             message: format!(
                 "refusing a recycle path with a folder name ending in a comma: {path:?}"
@@ -441,7 +449,10 @@ fn is_refused_path_char(c: char) -> bool {
         // invisible formatting and direction overrides
         '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}',
         '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
-        '\u{FEFF}',
+        '\u{FEFF}', '\u{2060}', '\u{00AD}', '\u{061C}', '\u{2028}', '\u{2029}',
+        // forms that NFKC normalises to dots
+        '\u{FE30}', '\u{FE19}', // comma lookalikes
+        '\u{FF0C}', '\u{FE50}', '\u{FE10}', '\u{FE11}', '\u{3001}', '\u{FF64}',
     ];
     c.is_control() || c == '\\' || LOOKALIKES.contains(&c)
 }
@@ -462,9 +473,12 @@ async fn ensure_is_recycled_file(
         Err(ListError::Core(err)) => return Err(err),
     };
     match entries.iter().find(|e| e.name == name) {
-        Some(entry) if !entry.is_dir => Ok(()),
-        Some(_) => Err(CoreError::UnexpectedResponse {
+        Some(entry) if entry.isdir_reported && !entry.is_dir => Ok(()),
+        Some(entry) if entry.is_dir => Err(CoreError::UnexpectedResponse {
             message: format!("refusing to delete {name}: it is a folder, not a file"),
+        }),
+        Some(_) => Err(CoreError::UnexpectedResponse {
+            message: format!("refusing to delete {name}: the listing does not say it is a file"),
         }),
         None => Err(CoreError::UnexpectedResponse {
             message: format!("refusing to delete {name}: it is not listed in {folder}"),
@@ -814,6 +828,14 @@ pub async fn recycle_thumbnail(
         .send()
         .await
         .map_err(|e| crate::transport::network_error("recycle thumbnail request failed", e))?;
+    if !response.status().is_success() {
+        return Err(CoreError::UnexpectedResponse {
+            message: format!(
+                "recycle thumbnail returned HTTP {}",
+                response.status().as_u16()
+            ),
+        });
+    }
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
