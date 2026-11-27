@@ -65,8 +65,10 @@ bindgen_case() {
     fails=$((fails + 1))
   fi
 }
-bindgen_case "verify with the bindgen source missing reports it" 0 --verify "bindgen source missing" 0
-bindgen_case "verify with the source present never runs cargo run" 1 --verify "source present" 0
-bindgen_case "full setup still runs the bindgen bin" 1 "" "project uniffi-bindgen runs" 1
+# The wanted text is anchored to the status marker (x for a failed check, ok
+# for a passed one), so a missing source reported as a pass is caught.
+bindgen_case "verify with the bindgen source missing reports it as a failure" 0 --verify "^  x  uniffi-bindgen source missing" 0
+bindgen_case "verify with the source present never runs cargo run" 1 --verify "^  ok uniffi-bindgen source present" 0
+bindgen_case "full setup still runs the bindgen bin" 1 "" "^  ok project uniffi-bindgen runs" 1
 
 [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
