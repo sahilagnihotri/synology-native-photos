@@ -70,6 +70,8 @@ expect "tree with zero tests fails the test stage" 1 "FAIL test .*no tests ran" 
     a + b
 }')"
 expect "tree without a lockfile fails the gate (--locked)" 1 "^FAIL clippy" "$(NO_LOCK=1 mk nolock "$GOOD")"
+# Each stage must carry --locked itself: one flag removed leaves the other stage failing.
+expect "tree without a lockfile fails the test stage (--locked)" 1 "^FAIL test" "$BASE/nolock"
 expect "good tree reports the passed count" 0 "PASS test (1 passed)" "$BASE/good"
 expect "unknown stage is a usage error" 2 "usage" ""
 
@@ -102,6 +104,7 @@ X
   }
   swift_case "passing run prints PASS" 0 0 0 5 0 "^PASS swift"
   swift_case "failing tests print FAIL" 1 2 0 5 1 "^FAIL swift"
+  swift_case "failed count alone fails with a clean exit" 0 2 0 5 1 "^FAIL swift"
   swift_case "nonzero xcodebuild exit with clean counts fails" 65 0 0 5 1 "^FAIL swift"
   swift_case "skipped test fails" 0 0 1 5 1 "^FAIL swift"
   swift_case "zero tests fails" 0 0 0 0 1 "^FAIL swift"
