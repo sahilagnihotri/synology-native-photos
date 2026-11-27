@@ -2,6 +2,56 @@
 
 Completed work with commit hashes. Newest at top.
 
+## Session 2026-11-27 (later): open VF and AV items closed
+
+Five workers each owned one area; each was then checked by a separate agent
+that broke the fix in a throwaway clone and watched its test fail. The
+orchestrator re-ran every gate on `5027e0c`: `scripts/ci/ci.sh core` exit 0
+(Rust 477 passed, 0 failed, 1 ignored, script tests pass), Xcode unit run 529
+tests in 56 suites passed, `ffi-smoke.sh` exit 0, Windows cross check exit 0.
+
+- VF-3 (`06c7581`): the upload skip flag reads true, 1 and the strings "1",
+  "true", "yes" as skipped. Test failed first: `blSkip 1 must read as skipped`.
+- VF-4 (`48a9e1a`): `LoginData` has a hand written `Debug` that hides the sid,
+  SynoToken and device ids. Test failed first with the sid printed.
+- VF-5 (`b0602e9`): a session that ends during the restore or delete poll keeps
+  the "may or may not have finished" wording. Two tests failed first. See
+  REV-F2 for the File Station side of this.
+- VF-2 test part (`4058f3a`): the in loop trim moved into `push_bounded`, unit
+  tested (15000 pushed, a disabled trim fails it) plus an 11000 file mock
+  folder. Only the unit test guards the memory bound; the walk cost is still
+  open as VF-2.
+- VF-12 (`7030891`): three misleading test names fixed. The bare folder delete
+  test used to pass on a Decode error from an unmocked listing; it now asserts
+  the folder refusal.
+- AV-11 (`88b308a`): `list_items` doc now says the unfiltered list is strict.
+- VF-6 (`917e381`): a delete during a sync is applied when `run_with_store`
+  hands the store back.
+- VF-7 (`a45923c`): one case per branch of `index_has_rows`; ten mutants each
+  fail it.
+- VF-8 (`6b73f6e`): the reconcile path of the previous account check is tested.
+- VF-9 (`204c770`, `b98b27d`, bindings `5027e0c`): stale doc comments fixed.
+- AV-7 (`3478f2b`): sign out and an account switch drop queued local deletes,
+  and originals live in `<cache_dir>/originals`, emptied with the thumbnails.
+- AV-8 (`d328c44`): a failed local removal after a successful NAS delete is
+  queued and the delete reports success.
+- AV-9 (`7c53676`, `5a2f88f`): crawl and reconcile fail when a page brings no
+  id not already seen in the pass, stop at 10,000 pages, and refuse an offset
+  overflow. The first version compared only with the previous page, so a
+  server alternating two pages still looped; the cycle test fails on it. A
+  repeated page of zero ids is caught by the page ceiling.
+- VF-10 (`b0212be`): dropping `--locked` or the failed count check in the core
+  gate now fails a script test.
+- VF-11 (`80aae2e`): `*.xcframework/` ignored at any depth; nothing tracked is
+  hidden.
+- REV-F6 script part (`fb9ae99`, `6cbf018`): `setup.sh --verify` builds
+  nothing and fails when the bindgen source is missing. The checker found the
+  test only matched the message, so a pass with the same wording got through;
+  `6cbf018` anchors it to the status marker and that mutant now fails.
+- VF-1 seams (`c4494b0`): the library, search, recycle bin and editor fixes go
+  through tested seams; five mutation runs each failed. The views themselves
+  remain untested (VF-1 remainder).
+
 ## Session 2026-11-27: verification of the 2026-11-26 fixes
 
 Every commit from `1c2c107` to `6e4d397` was re-checked by reverting it in a

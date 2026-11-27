@@ -56,3 +56,13 @@ the AV report (now NAS-COMMA-1).
 - `scripts/windows/check-core.sh`: exit 0.
 
 Not done: nothing was run in the live app or against the real NAS.
+
+## Follow up, same day: the open items
+
+VF-3 to VF-12, AV-7, AV-8, AV-9, AV-11 and the REV-F6 script part were fixed
+by five workers and each fix was broken on purpose by a separate checker. Two
+fixes were incomplete and corrected: AV-9 only compared with the previous page
+(`5a2f88f`), and the REV-F6 test passed when the failure was reported as a pass
+(`6cbf018`). Gates on `5027e0c`: Rust 477 passed, 0 failed, 1 ignored; 529
+Swift tests; FFI smoke and Windows cross check pass. New items found by the
+checkers are VC-1 to VC-6 in `TODO.md`.

@@ -2,37 +2,50 @@
 
 Only pending work. Completed items live in `Fixed.md`. Live scratch progress in `.superpowers/sdd/progress.md` (gitignored).
 
-Last Updated: 2026-11-27 (fixes verified by falsification, defects found fixed: Rust 458/0/1, Swift 520/0/0, Windows cross check passes)
+Last Updated: 2026-11-27 (VF and AV items closed and checked by falsification; Rust 477/0/1, Swift 529/0/0, FFI smoke and Windows cross check pass)
 
-## 2026-11-27: verification of the 2026-11-26 fixes
+## 2026-11-27: open items after closing VF and AV
 
-Report: `documentation/reviews/2026-11-26-full-repo-review/verification.md`.
-Fixed defects are in `Fixed.md`. Gaps found and left open:
+VF-3 to VF-12 (except the VF-2 cost), AV-7, AV-8, AV-9, AV-11 and the script
+part of REV-F6 are closed (`Fixed.md`), each checked by an independent
+falsification run. Left open, or found by those checks (found by reading
+unless stated):
 
-- [ ] VF-1 (Mac app view wiring, untested): only the models are tested for
-  `9fad604` (the LibraryView `.task` and `isShowingSpace`), `fdf4855` (the
-  sidebar cancel and the `runSearch` guard), `835e183` (the RecentlyDeletedView
-  call sites) and `465d445` (the editor `.alert`). Reverting the view hunk
-  leaves every test green. Needs UI tests or a testable seam.
-- [ ] VF-2: `2cdae7a` the in-loop trim of the recycle listing is never
-  exercised by a test, and every listing now walks the whole tree (a cost
-  regression on a large bin).
-- [ ] VF-3: `upload_was_skipped` accepts only a JSON bool; a `1` or `"true"`
-  reply would read as not skipped.
-- [ ] VF-4: `LoginData` derives `Debug` over the raw sid.
-- [ ] VF-5: a 119 during the restore or delete poll loses the "may or may not
-  have finished" wording.
-- [ ] VF-6: `1974d3f` no test drains the queued local deletes through
-  `run_with_store`.
-- [ ] VF-7: `0c3271c` a mutant of `index_has_rows` survives the tests.
-- [ ] VF-8: `07c86b4` the reconcile path of the previous-account check has no
-  test.
-- [ ] VF-9: stale comments after `641aa16` (doc comment) and `1016098`.
-- [ ] VF-10: `88a6c1a` the `--locked` flag and the `failed -eq 0` check in the
-  core gate are masked: removing either keeps every script test green.
-- [ ] VF-11: `b3b984b` nested xcframework directories are not ignored.
-- [ ] VF-12: misleading test names in `redirect_mock`, `browse_mock` and the
-  bare-folder delete test.
+- [ ] VF-1 (remainder): the view hookups of `9fad604`, `fdf4855`, `835e183`
+  and `465d445` go through tested seams now (`c4494b0`), but the views
+  themselves are still not driven. `ViewWiringGuardTests` checks the view
+  source text for the seam call, so a comment holding that text would pass
+  it. The stale guard right after `setSearch` cannot be tested: `setSearch`
+  has no suspension point. Needs a UI test.
+- [ ] VF-2 (cost): every `list_recycle_photos` call walks the whole recycle
+  tree whatever its offset and limit (one GET per folder plus one per further
+  1000 entries; 11000 files in one folder took 2.9 s in a debug build on a
+  loaded machine), and `photoscore/src/lib.rs` about line 1107 walks it again
+  for every page the UI asks for. Fix: cache one walk per listing session or
+  page lazily.
+- [ ] VC-1 (medium, delete path): `delete_assets` reads the session, awaits
+  the NAS delete, then removes the ids from whatever index is bound at that
+  moment. A sign out and a sign in as another account during the call would
+  drop the first account's ids from the second account's index (local rows
+  only, a crawl brings them back). Fix: capture the account identity before
+  the call and skip or discard the removal when it changed, as the sync
+  ACCOUNT CHECK does.
+- [ ] VC-2 (low): `delete_assets_reports_success_when_only_the_local_removal_fails`
+  shells out to the `sqlite3` command and panics where it is missing (a
+  Windows or minimal CI host). Inject the failure through rusqlite instead,
+  or skip with a visible message.
+- [ ] VC-3 (low): a local removal queued after a successful NAS delete
+  (`d328c44`) is applied only when a sync hands the store back or by the next
+  reconcile. Until then the photo stays in the grid, and deleting it again
+  calls the NAS for an id that is already gone.
+- [ ] VC-4 (low): clearing cached originals on an account switch (not sign
+  out) has no test of its own; it is covered only because
+  `clear_account_caches` is shared with `sign_out`.
+- [ ] VC-5 (low): originals that builds before `3478f2b` wrote to the system
+  temp folder (`syno-orig-*`) are never removed. One startup sweep would do.
+- [ ] VC-6 (decision): `synology_api::list_items` (strict) has no caller
+  outside tests since the crawl moved to `list_items_page`. Remove it or keep
+  it as public API. Running assumption: keep.
 
 ## 2026-11-26: full-repo review, release build break, Windows core check
 
@@ -56,7 +69,7 @@ Dispatch state and owned paths are in `tasks.md`.
   - [ ] R2-11 (low): Windows: atomic cache write fails when the target is open. Cannot be tested from the Mac. Do it with the Windows work.
   - [ ] R3-8 (low): reconcile loads the entire library into memory.
   - [ ] R3-9 (low): tests that cannot fail or pin the hazard.
-  - [ ] R4-7 (medium): Downloaded originals stay in the system temp folder after sign-out and across launches.
+  - [ ] R4-7 (medium): Downloaded originals stay in the system temp folder after sign-out and across launches. Partly done: originals now go to `<cache_dir>/originals`, emptied on sign out and on an account switch (`3478f2b`). Open: old temp files (VC-5), and the cache still grows across launches while signed in.
   - [ ] R4-8 (medium): Session expiry during use never routes back to login (`markExpired` has no callers).
   - [ ] R4-9 (medium): Edited copy loses colour profile and metadata, and the decode path may upscale small originals.
   - [ ] R4-10 (medium): Sign-out leaves the local asset index of the previous account on disk and in the running core. Partly done: signing in as another account or NAS now clears the index (`5945810`, `0c3271c`). Open: Sign Out itself leaves the index on disk.
@@ -75,7 +88,17 @@ Dispatch state and owned paths are in `tasks.md`.
   the app never routes back to login (same root as R4-8).
 - [ ] REV-F2: `map_error_code` also maps File Station codes 400 to 404 to
   `Auth` and `OtpRequired`. For File Station calls those numbers are file
-  operation errors. Not changed.
+  operation errors. Not changed: a File Station table (400 to 599 become
+  `UnexpectedResponse`, only 105, 106, 107 and 119 stay auth) changes results
+  pinned by `restore_recently_deleted_does_not_reindex_when_a_move_fails` and
+  `save_edited_photo_does_not_reindex_when_upload_fails` in photoscore, and
+  `restore_recycle_item_fails_closed_on_a_server_error` and
+  `upload_maps_error_envelope_to_core_error` in synology-api, so it needs one
+  owner across both crates. The Foto API 400 tests must keep `Auth`. Since
+  `b0602e9` (VF-5) it also bites the restore and delete poll: a File Station
+  400 or 401 there reads as "the session ended", and a 403 or 404 becomes
+  `OtpRequired`, losing the "may or may not have finished" wording and asking
+  for an OTP. Fix both together.
 - [ ] REV-F3: after `25fac1e` a live grid (search, collection, server filter)
   holds one spare trailing cell while more pages may follow. When the result
   count is an exact multiple of the page size the blank cell shows briefly and
@@ -87,9 +110,7 @@ Dispatch state and owned paths are in `tasks.md`.
 - [ ] REV-F5: a sync refused because its session belongs to the previous
   account (`07c86b4`) returns a storage error, and the app shows its generic
   storage message for it.
-- [ ] REV-F6: `scripts/macos/setup.sh --verify` still runs `cargo run` for the
-  bindgen bin, and `check_uniffi` passes when the bindgen source is missing.
-  The `platforms/macos/project.yml` comment says `DEVELOPMENT_TEAM` is left
+- [ ] REV-F6 (remainder, the setup script part is fixed): the `platforms/macos/project.yml` comment says `DEVELOPMENT_TEAM` is left
   unset while the next line sets it. `Fixed.md` records the old bundle ids
   `se.agnihotri.synologyphotos.*` (the project uses `se.agnihotri.mysynologyphotos`).
 - [ ] REV-F7: none of the Mac app fixes (13 commits covering 16 IDs) of 2026-11-26 has been exercised in
@@ -105,8 +126,8 @@ Dispatch state and owned paths are in `tasks.md`.
 - [ ] AV-2026-11: adversarial review of the core fixes, open items. Detail,
   locations and suggested tests are in
   `documentation/reviews/2026-11-26-full-repo-review/fixes/av-core-diff.md`.
-  AV-1 is fixed (`61dbe05`, `2ad2460`) and AV-10 is fixed (`78772e6`, it was a
-  regression from `80d4210`, not pre-existing); AV-2 is REV-F2 above. All below were found by reading,
+  AV-1, AV-7, AV-8, AV-9, AV-11 and AV-10 are fixed (`Fixed.md`; AV-10 (`78772e6`, it was a
+  was a regression from `80d4210`, not pre-existing); AV-2 is REV-F2 above. All below were found by reading,
   none reproduced by execution.
   - [ ] AV-3 (medium, touches delete): a Shared space delete checks the user
     home recycle bin setting, not the photo share's own. Shared space is off on
@@ -121,14 +142,6 @@ Dispatch state and owned paths are in `tasks.md`.
   - [ ] AV-6 (medium to low, part of SYNC-1): the sweep confirmation needs two
     identical listings, so it never confirms while a phone keeps uploading, and
     a stable truncated listing is confirmed on the second Refresh.
-  - [ ] AV-7 (low): `sign_out` does not clear queued local deletes or cached
-    originals. A queued id can drop an unrelated row in the next account's
-    index (local only, healed by a reconcile).
-  - [ ] AV-8 (low): a local row removal that fails after a successful NAS delete
-    reports the delete as failed.
-  - [ ] AV-9 (low): crawl and reconcile loop forever if the server ignores
-    `offset`.
-  - [ ] AV-11 (low): the `list_items` doc comment is stale after `ee27208`.
   - [ ] NAS-COMMA-1 (not from the AV report): a comma inside a JSON path array is unverified on the real NAS
     (restore and delete of a file under a folder such as "Paris, France"). A
     wrong split fails with a File Station error: a folder name ending in a
