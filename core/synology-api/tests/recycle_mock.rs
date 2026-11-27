@@ -1107,3 +1107,57 @@ async fn delete_timeout_after_failed_polls_names_the_poll_error() {
     assert!(!msg.contains("still in the recycle bin"), "{msg}");
     assert!(msg.contains("could not confirm"), "{msg}");
 }
+
+// --- VF-2: the in-loop trim keeps the newest ------------------------------
+
+/// One folder of 11 000 files, oldest first, so the newest are walked LAST.
+/// That is more than twice the 5000 file cap, so the walk trims in the loop
+/// (at 10 000) before it has seen the newest 1000. The listing must still be
+/// exactly the newest 5000, newest first.
+#[tokio::test]
+async fn list_recycle_photos_in_loop_trim_keeps_the_newest_of_a_huge_folder() {
+    let mut server = mockito::Server::new_async().await;
+    let root = "/home/#recycle/Photos";
+    let mut pages = Vec::new();
+    for page in 0..12usize {
+        let body = if page < 11 {
+            full_page_body(root, page * 1000)
+        } else {
+            r#"{"success":true,"data":{"files":[]}}"#.to_string()
+        };
+        pages.push(
+            server
+                .mock("GET", "/webapi/entry.cgi")
+                .match_query(Matcher::AllOf(vec![
+                    Matcher::UrlEncoded("api".into(), "SYNO.FileStation.List".into()),
+                    Matcher::UrlEncoded("folder_path".into(), root.into()),
+                    Matcher::UrlEncoded("offset".into(), (page * 1000).to_string()),
+                ]))
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body(body)
+                .expect(1)
+                .create_async()
+                .await,
+        );
+    }
+    let t = transport_for(&server);
+    let started = std::time::Instant::now();
+    let items = list_recycle_photos(&t, "SID", None, 0, 10_000)
+        .await
+        .expect("listing ok");
+    eprintln!(
+        "VF-2 walk of 11000 files in 12 pages took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(items.len(), 5000, "the cap keeps exactly 5000");
+    assert_eq!(items[0].filename, "F10999.JPG", "newest first");
+    assert_eq!(
+        items[4999].filename, "F6000.JPG",
+        "the 5000 kept must be the newest 5000 (F6000 to F10999)"
+    );
+    assert!(items.windows(2).all(|w| w[0].deleted_at > w[1].deleted_at));
+    for p in &pages {
+        p.assert_async().await;
+    }
+}

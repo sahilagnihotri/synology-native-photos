@@ -321,20 +321,16 @@ pub async fn list_recycle_photos(
                     stack.push((entry.path, depth + 1));
                 }
             } else {
-                items.push(RecycleItem {
-                    media_kind: media_kind_from_filename(&entry.name),
-                    recycle_path: entry.path,
-                    filename: entry.name,
-                    deleted_at: entry.mtime,
-                    file_size: entry.size,
-                });
-                // Keep the NEWEST MAX_FILES seen so far, not the first ones
-                // walked: the cap must never hide a fresh deletion behind a
-                // folder of old ones. Trimming at twice the cap keeps memory
-                // bounded without sorting on every push.
-                if items.len() >= 2 * MAX_FILES {
-                    keep_newest(&mut items);
-                }
+                push_bounded(
+                    &mut items,
+                    RecycleItem {
+                        media_kind: media_kind_from_filename(&entry.name),
+                        recycle_path: entry.path,
+                        filename: entry.name,
+                        deleted_at: entry.mtime,
+                        file_size: entry.size,
+                    },
+                );
             }
         }
     }
@@ -344,6 +340,17 @@ pub async fn list_recycle_photos(
     let start = (offset as usize).min(items.len());
     let end = start.saturating_add(limit as usize).min(items.len());
     Ok(items[start..end].to_vec())
+}
+
+/// Push one walked file, keeping the NEWEST `MAX_FILES` seen so far rather
+/// than the first ones walked: the cap must never hide a fresh deletion behind
+/// a folder of old ones. Trimming at twice the cap keeps memory bounded
+/// without sorting on every push.
+fn push_bounded(items: &mut Vec<RecycleItem>, item: RecycleItem) {
+    items.push(item);
+    if items.len() >= 2 * MAX_FILES {
+        keep_newest(items);
+    }
 }
 
 /// Sort newest deletion first (mtime DESC, stable so equal mtimes keep walk
@@ -883,6 +890,40 @@ pub async fn trigger_reindex(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn item(deleted_at: i64) -> RecycleItem {
+        RecycleItem {
+            media_kind: media_kind_from_filename("a.jpg"),
+            recycle_path: format!("/home/#recycle/Photos/F{deleted_at}.jpg"),
+            filename: format!("F{deleted_at}.jpg"),
+            deleted_at,
+            file_size: 1,
+        }
+    }
+
+    /// VF-2: the walk's memory stays bounded. Pushing oldest first, the
+    /// buffer never holds 2 * MAX_FILES items, and each trim keeps the newest.
+    #[test]
+    fn push_bounded_trims_at_twice_the_cap_and_keeps_the_newest() {
+        let mut items = Vec::new();
+        let mut peak = 0;
+        for t in 0..(3 * MAX_FILES as i64) {
+            push_bounded(&mut items, item(t));
+            peak = peak.max(items.len());
+        }
+        assert!(peak < 2 * MAX_FILES, "the buffer reached {peak} items");
+        let oldest_kept = items.iter().map(|i| i.deleted_at).min().unwrap();
+        // Every trim keeps the newest MAX_FILES seen up to then, so nothing
+        // from the first MAX_FILES pushes survives.
+        assert!(
+            oldest_kept >= MAX_FILES as i64,
+            "a trim kept an old item: {oldest_kept}"
+        );
+        keep_newest(&mut items);
+        assert_eq!(items.len(), MAX_FILES);
+        assert_eq!(items[0].deleted_at, 3 * MAX_FILES as i64 - 1);
+        assert_eq!(items[MAX_FILES - 1].deleted_at, 2 * MAX_FILES as i64);
+    }
 
     #[test]
     fn original_parent_strips_recycle_and_filename() {

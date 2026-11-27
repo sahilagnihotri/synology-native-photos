@@ -27,3 +27,26 @@
   "it may or may not have finished". `OtpRequired` has no message field, so it is passed through
   unchanged (a 403 or 404 there is really a File Station code, see REV-F2).
 - After: `cargo test -p synology-api` exit 0, 257 passed, 0 failed, 1 ignored.
+
+## VF-2 the in-loop trim of the recycle listing
+- Integration test `list_recycle_photos_in_loop_trim_keeps_the_newest_of_a_huge_folder`
+  (`tests/recycle_mock.rs`, localhost mockito): one folder of 11000 files in 12 pages, oldest
+  first, so the trim at 10000 fires before the newest 1000 are seen. Asserts exactly 5000 kept,
+  F10999 first, F6000 last, strictly newest first, every page fetched once. Passed on the
+  current code. Falsified: replaced the in-loop `keep_newest` with `items.truncate(MAX_FILES)`
+  (keeps the first walked): FAILED at `recycle_mock.rs:1155`, left `"F1000.JPG"`. Restored.
+- That test cannot see a mutant that deletes the trim (the final `keep_newest` gives the same
+  output; only memory differs). So the trim moved into `push_bounded` and unit test
+  `recycle::tests::push_bounded_trims_at_twice_the_cap_and_keeps_the_newest` pushes 15000 items.
+  Falsified with `if false && ...` on the trim: FAILED at `recycle.rs:914`,
+  "the buffer reached 15000 items". Restored.
+- Walk cost (recorded, not redesigned): every `list_recycle_photos` call, whatever its
+  offset and limit, walks the WHOLE tree to MAX_DEPTH 6. Requests per call = one GET per
+  folder plus one per further 1000 entries in it (11000 files in one folder = 12 GETs).
+  Sorting: one O(n log n) sort of up to 10000 items per 5000 files walked, plus a final one.
+  Measured: the 11000 file mock walk took 2.9 s in a debug build on localhost with load
+  average about 70 (machine shared with other workers), so the number is an upper bound for
+  the local overhead only; real NAS latency per GET adds to it. The caller
+  (`photoscore/src/lib.rs:1107`) passes offset and limit through, so a paged UI that asks
+  for page 2 pays the full walk again.
+- After: fmt, clippy clean, `cargo test -p synology-api` exit 0, 259 passed, 0 failed, 1 ignored.
