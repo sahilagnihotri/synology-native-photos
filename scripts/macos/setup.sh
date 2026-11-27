@@ -123,19 +123,25 @@ check_uniffi() {
     check_fail "cargo missing; cannot use project-driven uniffi-bindgen"
     return
   fi
-  local root
-  root="$(repo_root)"
+  local root src
+  root="${SETUP_REPO_ROOT:-$(repo_root)}"
+  src="$root/core/photoscore/src/bin/uniffi-bindgen.rs"
   # The bindgen bin lives inside the photoscore crate as a [[bin]] target,
-  # invoked as `cargo run -p photoscore --bin uniffi-bindgen`.
-  if [ -f "$root/core/photoscore/src/bin/uniffi-bindgen.rs" ]; then
-    if ( cd "$root/core" && cargo run --quiet -p photoscore --bin uniffi-bindgen -- --help >/dev/null 2>&1 ); then
-      check_pass "project uniffi-bindgen runs (cargo run -p photoscore --bin uniffi-bindgen)"
-    else
-      check_fail "photoscore uniffi-bindgen bin present but failed to run"
-    fi
+  # invoked as `cargo run -p photoscore --bin uniffi-bindgen`. The core is
+  # scaffolded, so a missing source is a broken checkout, not a pending task.
+  if [ ! -f "$src" ]; then
+    check_fail "uniffi-bindgen source missing: core/photoscore/src/bin/uniffi-bindgen.rs"
+    return
+  fi
+  # Doctor mode installs and builds nothing, so it only checks the source.
+  if [ "$VERIFY_ONLY" -eq 1 ]; then
+    check_pass "uniffi-bindgen source present (not built in --verify mode)"
+    return
+  fi
+  if ( cd "$root/core" && cargo run --quiet -p photoscore --bin uniffi-bindgen -- --help >/dev/null 2>&1 ); then
+    check_pass "project uniffi-bindgen runs (cargo run -p photoscore --bin uniffi-bindgen)"
   else
-    # Core not scaffolded yet: this is expected before the first plan task.
-    check_pass "no photoscore bindgen yet (created by the plan's scaffold task; nothing to install globally)"
+    check_fail "photoscore uniffi-bindgen bin present but failed to run"
   fi
 }
 

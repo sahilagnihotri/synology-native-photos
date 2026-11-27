@@ -39,4 +39,34 @@ expect "--verify in second position exits 2" 2 --check --verify
 expect "extra argument after --verify exits 2" 2 --verify extra
 expect "--help exits 0 and installs nothing" 0 --help
 
+# --- --verify and the bindgen check, against a fake repo root ----------------
+# bindgen_case <name> <create source 0|1> <args> <want text> <want cargo calls 0|1>
+# Tolerant stubs (exit 0) so the script gets as far as the bindgen check.
+mkdir -p "$BASE/bin2"
+for t in brew rustup rustup-init curl cargo rustc xcodebuild swift; do
+  printf '#!/bin/sh\necho "%s $*" >> "%s"\nexit 0\n' "$t" "$LOG" > "$BASE/bin2/$t"
+  chmod +x "$BASE/bin2/$t"
+done
+bindgen_case() {
+  local d="$BASE/root-$1"
+  mkdir -p "$d/core/photoscore/src/bin"
+  [ "$2" = "1" ] && : > "$d/core/photoscore/src/bin/uniffi-bindgen.rs"
+  : > "$LOG"
+  SETUP_REPO_ROOT="$d" HOME="$BASE/home" PATH="$BASE/bin2:/usr/bin:/bin" bash "$SETUP" $3 >"$BASE/out" 2>&1
+  local cargo_calls; cargo_calls="$(grep -c '^cargo run' "$LOG")"
+  local calls_ok=0
+  if [ "$5" = "1" ] && [ "$cargo_calls" -gt 0 ]; then calls_ok=1; fi
+  if [ "$5" = "0" ] && [ "$cargo_calls" -eq 0 ]; then calls_ok=1; fi
+  if grep -q "$4" "$BASE/out" && [ "$calls_ok" -eq 1 ]; then
+    echo "ok   $1"
+  else
+    echo "FAIL $1: wanted '$4' and cargo run calls=$5, got $cargo_calls calls"
+    tail -5 "$BASE/out"
+    fails=$((fails + 1))
+  fi
+}
+bindgen_case "verify with the bindgen source missing reports it" 0 --verify "bindgen source missing" 0
+bindgen_case "verify with the source present never runs cargo run" 1 --verify "source present" 0
+bindgen_case "full setup still runs the bindgen bin" 1 "" "project uniffi-bindgen runs" 1
+
 [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
