@@ -36,3 +36,6 @@ syno_session*
 /PhotosCore.xcframework/
 /dist/
 *.dmg
+
+# xcframework outputs at any depth (the build puts them under build/, older layouts elsewhere)
+*.xcframework/
