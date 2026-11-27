@@ -31,7 +31,7 @@ enum GridSectionID: Hashable {
 struct GridDateSections: Equatable {
     struct Section: Equatable {
         /// The histogram bucket's day start (unix seconds at UTC midnight), or
-        /// 0 for the trailing Unknown Date bucket.
+        /// `Int64.min` for the trailing Unknown Date bucket.
         let dayStart: Int64
         /// Number of items in this section.
         let count: Int
@@ -51,9 +51,10 @@ struct GridDateSections: Equatable {
         var running = 0
         for bucket in histogram {
             let count = Int(bucket.count)
-            // Section identifiers are the dayStart, so two buckets with the
-            // same one (an epoch adjacent photo and the undated bucket both
-            // report 0) must be one section whatever the core returns.
+            // Section identifiers are the dayStart, so two adjacent buckets
+            // with the same one must be one section whatever the core returns.
+            // (The undated bucket is Int64.min, so a photo taken exactly at
+            // the epoch, dayStart 0, does not collide with it.)
             if let last = built.last, last.dayStart == bucket.dayStart {
                 built[built.count - 1] = Section(dayStart: last.dayStart, count: last.count + count, base: last.base)
             } else {
@@ -131,7 +132,7 @@ enum DateSectionFormatter {
     }
 
     /// The compact scrubber label, year then month, e.g. "2016 / 11". A
-    /// `dayStart` of 0 is the Unknown Date bucket.
+    /// `dayStart` of `Int64.min` is the Unknown Date bucket.
     static func scrubberLabel(dayStart: Int64) -> String {
         guard dayStart != unknownDayStart else { return unknownDateTitle }
         return scrubberFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(dayStart)))
