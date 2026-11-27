@@ -184,6 +184,75 @@ mod tests {
         );
     }
 
+    /// Each kind of mirrored data on its own is enough to make an unowned
+    /// index count as someone's, so the first bind clears it. One case per
+    /// branch of `index_has_rows`, so dropping any single branch fails here.
+    #[test]
+    fn first_bind_clears_an_index_holding_any_single_kind_of_row() {
+        type Case = (&'static str, fn(&Store));
+        let cases: [Case; 9] = [
+            ("an asset", |s| s.upsert_assets(&[asset(1)]).unwrap()),
+            ("an album", |s| {
+                s.upsert_album(&Album {
+                    id: 7,
+                    name: "Trip".into(),
+                    item_count: 0,
+                    cover_cache_key: None,
+                    cover_unit_id: None,
+                    is_shared: false,
+                    is_smart: false,
+                    space: Space::Personal,
+                })
+                .unwrap()
+            }),
+            ("app state", |s| {
+                s.set_app_state(Space::Personal, "owned_album_id", "7")
+                    .unwrap()
+            }),
+            ("the crawl barrier", |s| {
+                set_sync_column(s, "initial_crawl_complete = 1")
+            }),
+            ("an expected total", |s| {
+                set_sync_column(s, "expected_total = 5")
+            }),
+            ("a crawl offset", |s| {
+                set_sync_column(s, "last_offset = 200")
+            }),
+            ("a version watermark", |s| {
+                set_sync_column(s, "highest_seen_version = 3")
+            }),
+            ("a crawl time", |s| set_sync_column(s, "last_crawl_at = 9")),
+            ("a reconcile time", |s| {
+                set_sync_column(s, "last_reconcile_at = 9")
+            }),
+        ];
+        for (what, fill) in cases {
+            let store = Store::open_in_memory().unwrap();
+            fill(&store);
+            assert!(
+                store.bind_account("https://nas-a:5001|alice").unwrap(),
+                "an unowned index holding only {what} must be cleared"
+            );
+        }
+    }
+
+    /// Writes one column of a default `sync_state` row directly, so each
+    /// progress column can be set without the others.
+    fn set_sync_column(store: &Store, assignment: &str) {
+        store
+            .conn
+            .execute("INSERT OR IGNORE INTO sync_state (space) VALUES (0)", [])
+            .unwrap();
+        let changed = store
+            .conn
+            .execute(
+                &format!("UPDATE sync_state SET {assignment} WHERE space = 0"),
+                [],
+            )
+            .unwrap();
+        assert_eq!(changed, 1);
+    }
+
     #[test]
     fn same_account_keeps_the_index() {
         let store = owned_by("https://nas-a:5001|alice");
