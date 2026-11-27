@@ -3829,6 +3829,75 @@ mod core_tests {
         );
     }
 
+    /// The same queue, drained by the real hand back: a delete lands while
+    /// `run_with_store` holds the store for a sync, and the local row must be
+    /// gone once that sync returns. The work parks on a channel so the
+    /// delete is certain to run while the store is out.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_delete_during_a_sync_is_applied_when_run_with_store_returns() {
+        let mut server = mockito::Server::new_async().await;
+        let _login = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=login".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"data":{"sid":"S"}}"#)
+            .create_async()
+            .await;
+        let delete = server
+            .mock("POST", "/webapi/entry.cgi")
+            .match_body(mockito::Matcher::Regex("method=delete".into()))
+            .with_status(200)
+            .with_body(r#"{"success":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let core = logged_in_core("delete-during-sync", &server).await;
+        seed_asset(&core, Space::Personal, 1);
+        seed_asset(&core, Space::Personal, 2);
+        let account = core.page_source_for(Space::Personal).unwrap().account;
+
+        let (release, parked) = tokio::sync::oneshot::channel::<()>();
+        let (started, store_out) = tokio::sync::oneshot::channel::<()>();
+        let syncing = Arc::clone(&core);
+        let sync = tokio::spawn(async move {
+            syncing
+                .run_with_store(account, move |_store| {
+                    Box::pin(async move {
+                        let _ = started.send(());
+                        let _ = parked.await;
+                        Ok(CrawlProgress {
+                            space: Space::Personal,
+                            done: 0,
+                            total: 0,
+                            complete: false,
+                        })
+                    })
+                })
+                .await
+        });
+        store_out.await.expect("the sync took the store");
+        assert!(core.store.lock().unwrap().is_none(), "the store is out");
+
+        core.delete_assets(Space::Personal, vec![1])
+            .await
+            .expect("a NAS delete that succeeded is not reported as failed");
+        delete.assert_async().await;
+
+        release.send(()).unwrap();
+        sync.await.unwrap().expect("the sync itself succeeds");
+        assert_eq!(
+            core.fetch_assets(Space::Personal, 0, 10)
+                .unwrap()
+                .iter()
+                .map(|a| a.id)
+                .collect::<Vec<_>>(),
+            vec![2],
+            "run_with_store applies the queued removal when it hands the store back"
+        );
+        assert!(core.pending_local_deletes.lock().unwrap().is_empty());
+    }
+
     /// A crawl whose source was built from alice's session, but which only
     /// reaches the store after bob signed in, must write nothing into the
     /// index now bound to bob and must not read a single page.
