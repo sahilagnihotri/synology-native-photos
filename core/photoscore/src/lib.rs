@@ -975,12 +975,14 @@ impl PhotosCore {
     /// in any request here. Landing the copy in an obviously-named `Edited`
     /// folder makes it plainly an ADDED asset, not a changed one.
     ///
-    /// FAIL CLOSED on either step: if the upload fails, the re-index is never
-    /// sent (there is nothing new to index) and the error propagates. If only
-    /// the re-index fails, the file is already safely uploaded, so the save
-    /// still succeeds (a retry could only collide with or duplicate the
-    /// upload) and the failure is logged; a later re-index picks it up. There is no local index row to write here: the new photo only
-    /// enters the local mirror when a subsequent crawl re-reads the library.
+    /// FAIL CLOSED on the upload only: if the upload fails, the re-index is
+    /// never sent (there is nothing new to index) and the error propagates.
+    /// The re-index is best effort: if only it fails, the file is already
+    /// safely uploaded, so the save still succeeds (a retry could only
+    /// collide with or duplicate the upload) and the failure is logged; a
+    /// later re-index picks the file up. There is no local index row to
+    /// write here: the new photo only enters the local mirror when a
+    /// subsequent crawl re-reads the library.
     ///
     /// Reuses `recycle_call_context` for the session basics (transport + sid +
     /// syno_token); like the File Station recycle calls, both the upload and
