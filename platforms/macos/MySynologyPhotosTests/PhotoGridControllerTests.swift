@@ -508,6 +508,34 @@ struct PhotoGridControllerTests {
         return (controller, ds)
     }
 
+    /// R5-2/R5-6: the prefetch delegate must re-apply the snapshot when an EMPTY
+    /// page still changed a live source's total (the spare trailing cell goes
+    /// away once the next page comes back empty). Goes through the real
+    /// `collectionView(_:prefetchItemsAt:)`, not `applySnapshot()` directly.
+    @Test func prefetchOfAnEmptyPageStillAppliesAChangedTotal() async throws {
+        let fake = FakePhotosCore()
+        fake.assetsForKeyword["dog"] = (0..<5).map { asset(Int64($0) + 7000) }
+        let client = PhotosCoreClient(core: fake)
+        let ds = WindowedDataSource(client: client, space: .personal, pageSize: 5)
+        let cache = ThumbnailCache(client: client)
+        let controller = PhotoGridController(dataSource: ds, cache: cache, client: client)
+        _ = controller.view
+        await ds.setSearch("dog")
+        await ds.loadWindow(offset: 0, limit: 5)
+        await controller.applySnapshot()
+        // A full first page keeps one spare trailing cell.
+        #expect(ds.totalCount == 6)
+        #expect(controller.snapshotItemCount() == 6)
+
+        // The next page is empty, which fixes the total at 5 with no rows.
+        controller.collectionView(controller.collectionView, prefetchItemsAt: [IndexPath(item: 5, section: 0)])
+        for _ in 0..<200 where controller.snapshotItemCount() != 5 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(ds.totalCount == 5)
+        #expect(controller.snapshotItemCount() == 5, "an empty page that changed the total must still refresh the snapshot")
+    }
+
     /// Any arrow key on a grid with no prior selection starts at index 0,
     /// matching Finder/Photos (an arrow press with nothing selected selects
     /// the first item regardless of direction).

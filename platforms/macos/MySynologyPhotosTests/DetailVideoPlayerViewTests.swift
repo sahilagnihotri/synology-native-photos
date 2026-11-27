@@ -349,4 +349,18 @@ struct DetailVideoCoordinatorTests {
         #expect(!coordinator.isShowing(5), "a late download for asset 5 must no longer pass the guard")
         #expect(coordinator.loadTask == nil)
     }
+
+    @Test func dismantlingTheViewCancelsThePendingLoadAndStopsShowing() {
+        let coordinator = DetailVideoPlayerView.Coordinator()
+        coordinator.lastAssetId = 5
+        let pending = Task<Void, Never> { try? await Task.sleep(nanoseconds: 60_000_000_000) }
+        coordinator.loadTask = pending
+        let container = VideoPlayerContainerView(frame: .zero)
+
+        DetailVideoPlayerView.dismantleNSView(container, coordinator: coordinator)
+
+        #expect(coordinator.loadTask == nil)
+        #expect(pending.isCancelled, "dismantle must cancel the in-flight download")
+        #expect(!coordinator.isShowing(5))
+    }
 }
