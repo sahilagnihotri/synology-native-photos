@@ -73,7 +73,7 @@ const AUTH_VERSION: &str = "3";
 /// stable and recognizable rather than a random string.
 const DEVICE_NAME: &str = "synology-native-photos-mac";
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct LoginData {
     sid: String,
     #[serde(default)]
@@ -82,6 +82,20 @@ struct LoginData {
     did: Option<String>,
     #[serde(default)]
     device_id: Option<String>,
+}
+
+/// Hand written so a `{:?}` never prints the sid, the SynoToken or the device
+/// token. It only says which fields were present.
+impl std::fmt::Debug for LoginData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let present = |v: &Option<String>| v.as_ref().map(|_| "<redacted>");
+        f.debug_struct("LoginData")
+            .field("sid", &"<redacted>")
+            .field("synotoken", &present(&self.synotoken))
+            .field("did", &present(&self.did))
+            .field("device_id", &present(&self.device_id))
+            .finish()
+    }
 }
 
 impl LoginData {
@@ -189,5 +203,29 @@ pub async fn logout(transport: &Transport, sid: &str) -> Result<(), CoreError> {
         Err(CoreError::Auth { .. }) => Ok(()),
         Err(CoreError::UnexpectedResponse { .. }) => Ok(()),
         Err(other) => Err(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// VF-4: the decoded login reply holds the raw sid, SynoToken and device
+    /// token. A `{:?}` of it (a log line, a panic message) must not print any
+    /// of them.
+    #[test]
+    fn login_data_debug_redacts_every_secret() {
+        let data: LoginData = serde_json::from_str(
+            r#"{"sid":"SECRETSID","synotoken":"SECRETTOKEN","did":"SECRETDID","device_id":"SECRETDEVID"}"#,
+        )
+        .expect("decodes");
+        let shown = format!("{data:?}");
+        for secret in ["SECRETSID", "SECRETTOKEN", "SECRETDID", "SECRETDEVID"] {
+            assert!(
+                !shown.contains(secret),
+                "LoginData Debug leaks {secret}: {shown}"
+            );
+        }
+        assert!(shown.contains("LoginData"), "{shown}");
     }
 }

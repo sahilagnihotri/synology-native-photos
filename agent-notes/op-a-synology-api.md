@@ -8,3 +8,10 @@
   Everything else (false, 0, "0", "", null, 2, "x", missing data) is not a skip. The real
   skip reply shape on this NAS is still unverified (R2-3 note); no shape was invented.
 - After: fmt, clippy -D warnings clean, `cargo test -p synology-api` all green.
+
+## VF-4 LoginData Debug redaction
+- Test `auth::tests::login_data_debug_redacts_every_secret` written first. FAILED before the fix:
+  `auth.rs:210: LoginData Debug leaks SECRETSID: LoginData { sid: "SECRETSID", synotoken: Some("SECRETTOKEN"), ...}`.
+- Fix: removed the derived Debug, wrote one that prints `<redacted>` for sid, and
+  `Some("<redacted>")`/`None` for synotoken, did and device_id (only presence is shown).
+- After: fmt, clippy clean, `cargo test -p synology-api` exit 0.
