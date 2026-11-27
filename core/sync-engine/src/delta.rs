@@ -143,7 +143,7 @@ impl<'a> DeltaReconciler<'a> {
                 self.store.set_highest_version(space, v)?;
             }
 
-            offset += listed;
+            offset = crate::next_offset(offset, listed)?;
             if listed < limit {
                 break;
             }

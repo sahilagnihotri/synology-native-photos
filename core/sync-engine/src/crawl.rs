@@ -111,7 +111,7 @@ impl<'a> Crawler<'a> {
                 self.store.set_highest_version(space, max_version)?;
             }
 
-            offset += listed;
+            offset = crate::next_offset(offset, listed)?;
             self.store
                 .save_cursor(space, offset, limit, expected_total)?;
 
@@ -663,6 +663,51 @@ mod tests {
             server_version: Some(1),
             ..Default::default()
         }
+    }
+
+    /// AV-9: a server that ignores `offset` but alternates between two full
+    /// pages. Comparing with the previous page alone never sees a repeat.
+    struct AlternatesTwoPages {
+        calls: std::sync::atomic::AtomicU32,
+    }
+    #[async_trait::async_trait]
+    impl PageSource for AlternatesTwoPages {
+        async fn list_items(
+            &self,
+            _space: Space,
+            _offset: u32,
+            limit: u32,
+        ) -> Result<AssetPage, CoreError> {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert!(n < 50, "paging never stopped");
+            let base = if n.is_multiple_of(2) { 0 } else { limit as i64 };
+            Ok(AssetPage {
+                assets: (1..=limit as i64).map(|i| av9_asset(base + i)).collect(),
+                total: 1000,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn crawl_fails_when_the_server_cycles_between_pages() {
+        let store = Store::open_in_memory().unwrap();
+        let src = AlternatesTwoPages {
+            calls: std::sync::atomic::AtomicU32::new(0),
+        };
+        let err = Crawler::new(&store, &src, 3)
+            .crawl_space(
+                Space::Personal,
+                &CountingSink {
+                    events: Mutex::new(vec![]),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::UnexpectedResponse { ref message } if message.contains("ignore offset")),
+            "got {err:?}"
+        );
+        assert_eq!(src.calls.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
     #[tokio::test]

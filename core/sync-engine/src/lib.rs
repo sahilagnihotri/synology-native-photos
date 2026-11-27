@@ -1,6 +1,7 @@
 //! Resumable progress-tracked crawl and delta reconciliation by server id/version.
 
 use models::{Asset, CoreError, Space};
+use std::collections::HashSet;
 
 pub mod crawl;
 pub mod delta;
@@ -34,26 +35,69 @@ pub struct ListedPage {
 /// same non-empty list of ids (decoded and skipped) as the page before it:
 /// two adjacent windows of one listing never share ids, so a repeat means the
 /// same items came back for a new offset and paging would never end.
-#[derive(Default)]
 pub(crate) struct PageGuard {
-    previous: Option<Vec<i64>>,
+    seen: HashSet<i64>,
+    pages: u32,
+    max_pages: u32,
+}
+
+/// Hard ceiling on the pages one crawl or reconcile pass may read. At the
+/// usual 200 per page that is 2 million items, far past any real library.
+const MAX_PAGES_PER_PASS: u32 = 10_000;
+
+impl Default for PageGuard {
+    fn default() -> Self {
+        Self::with_max_pages(MAX_PAGES_PER_PASS)
+    }
 }
 
 impl PageGuard {
-    /// Records `page` and fails if it repeats the previous page.
+    pub(crate) fn with_max_pages(max_pages: u32) -> Self {
+        Self {
+            seen: HashSet::new(),
+            pages: 0,
+            max_pages,
+        }
+    }
+
+    /// Records `page` and fails if every id on it was already seen in this
+    /// pass (a server ignoring `offset`, whether it repeats one page or
+    /// cycles through several), or if the pass has read too many pages.
     pub(crate) fn check(&mut self, offset: u32, page: &ListedPage) -> Result<(), CoreError> {
-        let mut ids: Vec<i64> = page.assets.iter().map(|a| a.id).collect();
-        ids.extend(page.skipped_ids.iter().copied());
-        if !ids.is_empty() && self.previous.as_ref() == Some(&ids) {
+        self.pages += 1;
+        if self.pages > self.max_pages {
             return Err(CoreError::UnexpectedResponse {
                 message: format!(
-                    "the server returned the same page again at offset {offset}; it appears to ignore offset"
+                    "the server kept returning pages past {} pages; stopping",
+                    self.max_pages
                 ),
             });
         }
-        self.previous = Some(ids);
+        let ids: Vec<i64> = page
+            .assets
+            .iter()
+            .map(|a| a.id)
+            .chain(page.skipped_ids.iter().copied())
+            .collect();
+        if !ids.is_empty() && ids.iter().all(|id| self.seen.contains(id)) {
+            return Err(CoreError::UnexpectedResponse {
+                message: format!(
+                    "the server returned only items it already listed at offset {offset}; it appears to ignore offset"
+                ),
+            });
+        }
+        self.seen.extend(ids);
         Ok(())
     }
+}
+
+/// The next page offset, or an error when it would overflow `u32`.
+pub(crate) fn next_offset(offset: u32, listed: u32) -> Result<u32, CoreError> {
+    offset
+        .checked_add(listed)
+        .ok_or_else(|| CoreError::UnexpectedResponse {
+            message: format!("the page offset overflowed past {offset}"),
+        })
 }
 
 /// Abstraction over the network list call so sync logic is testable without HTTP.
@@ -171,6 +215,37 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn listed(ids: &[i64]) -> ListedPage {
+        ListedPage {
+            assets: ids.iter().map(|&id| asset(id, 1)).collect(),
+            total: 0,
+            raw_count: ids.len() as u32,
+            skipped_ids: vec![],
+        }
+    }
+
+    #[test]
+    fn page_guard_stops_at_its_page_ceiling() {
+        let mut guard = PageGuard::with_max_pages(2);
+        guard.check(0, &listed(&[1])).unwrap();
+        guard.check(1, &listed(&[2])).unwrap();
+        assert!(guard.check(2, &listed(&[3])).is_err());
+    }
+
+    #[test]
+    fn page_guard_allows_a_page_that_brings_some_new_ids() {
+        let mut guard = PageGuard::default();
+        guard.check(0, &listed(&[1, 2])).unwrap();
+        guard.check(2, &listed(&[2, 3])).unwrap();
+        assert!(guard.check(4, &listed(&[1, 3])).is_err());
+    }
+
+    #[test]
+    fn next_offset_refuses_to_overflow() {
+        assert_eq!(next_offset(10, 5).unwrap(), 15);
+        assert!(next_offset(u32::MAX - 1, 5).is_err());
+    }
     use models::{Asset, MediaKind, Space};
     use std::sync::Mutex;
 
