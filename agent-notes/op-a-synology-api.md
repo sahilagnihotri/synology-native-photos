@@ -83,3 +83,20 @@
   a choice left open, not done.
 - After: fmt, clippy clean, `cargo test -p synology-api` exit 0, 259 passed, 0 failed, 1 ignored.
   `cargo doc` warnings seen are the pre-existing `[ids]` links in album_write.rs.
+
+## REV-F2 File Station codes 400 to 404 read as auth errors (blocked)
+- Confirmed by reading: every File Station decode in recycle.rs (List, CopyMove, Delete, Thumb)
+  and upload.rs (SYNO.FileStation.Upload) goes through `map_error_code`, so a File Station 400
+  (invalid parameter) or 401 (unknown error) becomes `Auth` and sends the user to sign in, and a
+  403 or 404 becomes `OtpRequired`.
+- Not fixed. A caller selected File Station table (400 to 599 become `UnexpectedResponse`, only
+  105, 106, 107 and 119 stay auth) changes results that photoscore tests pin outside this
+  worker's paths: `restore_recently_deleted_does_not_reindex_when_a_move_fails`
+  (core/photoscore/src/lib.rs about line 4566, CopyMove 400 asserts `Auth`) and
+  `save_edited_photo_does_not_reindex_when_upload_fails` (about line 5014, Upload 400 asserts
+  `Auth`). Inside this crate `restore_recycle_item_fails_closed_on_a_server_error`
+  (recycle_mock.rs:443) and `upload_maps_error_envelope_to_core_error` (upload.rs about 291)
+  pin it too. `with_partial_progress` itself is kind agnostic, so it would not break.
+- Also core/photoscore/src/lib.rs has uncommitted edits from a sibling in the working tree, so
+  it is not safe to touch here. Needs one owner across both crates; the Foto API 400 tests
+  (album_write, delete_item, download, thumbnail) must keep `Auth` and are not File Station.
